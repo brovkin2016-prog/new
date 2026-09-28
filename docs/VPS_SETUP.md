@@ -536,6 +536,81 @@ status and reconnects a server after the tunnel comes back.
 
 ---
 
+## 7. Minimal profile: small VPS shared with other services
+
+Written for a 1 vCPU / 2 GB / 10 GB VPS that already runs other workloads. Goals: add no more than
+about 0.5 GB of disk, cap the agent's RAM and CPU so it can't starve the existing services, and not
+break their access.
+
+### 7.1 Inventory first
+
+```bash
+sudo ss -tulpn                                   # public listeners: each one needs a UFW allow rule
+sudo ufw status; sudo nft list ruleset | head -40
+getent passwd | awk -F: '$7 ~ /sh$/ {print $1}'  # accounts with a login shell
+sudo sh -c 'awk "{print FILENAME\": \"\$NF}" /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys 2>/dev/null'   # who can log in
+df -h /; sudo du -xh --max-depth=1 / 2>/dev/null | sort -h | tail -8
+journalctl --disk-usage; snap list 2>/dev/null
+```
+
+Adjust the hardening steps to what you find:
+
+- **UFW (step 3).** Before `ufw enable`, add `allow` rules for every public service in use, for example `sudo ufw allow 80,443/tcp` and any panel port. Otherwise `default deny incoming` takes those services offline.
+- **SSH (step 1.3).** `AllowUsers dev`, `PermitRootLogin no` and moving SSH behind WireGuard block every other login: deploy scripts, rsync/SFTP backups, panel users. Add those accounts to `AllowUsers`. For automation that connects from outside, keep a scoped rule such as `sudo ufw allow from <backup-ip> to any port 22 proto tcp`. Where root must log in, use `PermitRootLogin prohibit-password`.
+
+### 7.2 Free disk space
+
+Keep at least 1 GB free at all times. At 100 % disk, the other services' databases and logs start failing.
+
+```bash
+sudo apt clean && sudo apt autoremove --purge -y       # package cache + old kernels
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nSystemMaxUse=100M\n' | sudo tee /etc/systemd/journald.conf.d/size.conf
+sudo systemctl restart systemd-journald && sudo journalctl --vacuum-size=100M
+sudo snap set system refresh.retain=2 2>/dev/null     # snapd keeps fewer old revisions
+docker system df 2>/dev/null                           # if Docker is used: check, prune only what you recognize
+```
+
+### 7.3 What to install
+
+| Component | Disk | RAM | Decision |
+|---|---|---|---|
+| WireGuard, tmux, zram-tools | < 10 MB | ~0 | install |
+| Claude Code, apt package (§4.3) | ~0.25 GB | 0.3–0.5 GB while running | install. apt keeps one version; the native installer keeps several |
+| Node.js via nvm (§4.2) | ~0.2 GB | only while running | **skip** unless you need JS projects or `npx` MCP servers. Claude Code does not need Node |
+| Swapfile (§4.6) | 1 GB | — | **skip**, use zram only (below) |
+| This repo's docker-compose stack | 5+ GB | 2+ GB | **not on this VPS** |
+
+```bash
+sudo apt install -y wireguard tmux zram-tools
+printf 'ALGO=zstd\nPERCENT=50\n' | sudo tee /etc/default/zramswap && sudo systemctl restart zramswap
+# then Claude Code per §4.3, followed by:
+sudo apt clean
+mkdir -p ~/.claude && echo '{ "cleanupPeriodDays": 7 }' > ~/.claude/settings.json   # prune old session transcripts
+```
+
+If `~/.claude/settings.json` already exists, add the key to it instead of overwriting the file.
+
+### 7.4 Cap the agent
+
+Run Claude Code in its own cgroup. The limits also cover everything the agent starts (`npm install`, builds, tests):
+
+```bash
+sudo loginctl enable-linger dev     # keep the user systemd instance up, so this also works from tmux after reconnects
+```
+
+```bash
+# ~/.bashrc
+alias cc='systemd-run --user --scope --quiet -p MemoryHigh=600M -p MemoryMax=900M -p CPUQuota=50% claude'
+```
+
+- **`MemoryHigh`.** Above this level the kernel throttles the scope and reclaims its memory.
+- **`MemoryMax`.** A hard ceiling. When it is hit, the OOM killer acts **inside this scope only**, so it never kills the other services.
+- **`CPUQuota=50%`.** Leaves at least half of the single vCPU to the existing workloads.
+- **Monitoring.** Watch live usage with `systemd-cgtop`, and check headroom with `free -h; df -h /`.
+
+---
+
 ## `~/.bashrc` additions
 
 Append these lines. The nvm installer has already added its own lines, so don't duplicate them.
