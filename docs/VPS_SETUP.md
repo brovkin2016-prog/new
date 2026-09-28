@@ -15,6 +15,10 @@ Placeholders — replace before running:
 | `dev` | your non-root user |
 | `10.8.0.0/24` | WireGuard subnet (`10.8.0.1` = VPS, `10.8.0.2` = laptop) |
 
+> **Ubuntu 24.04:** every step works unchanged, with two differences.
+> - sshd is socket-activated. `systemctl restart ssh` still applies the settings from step 1.3. Only a change of `Port` or `ListenAddress` needs `sudo systemctl daemon-reload && sudo systemctl restart ssh.socket`.
+> - The apt `nodejs` package is 18 (EOL), so still use nvm.
+
 > **Work in this order.** Keep one SSH session open until the next step is verified from a **new**
 > terminal. Check that the provider's web/VNC/serial console works before you start. It is your
 > only way back in if you lock yourself out.
@@ -377,12 +381,17 @@ source ~/.bashrc && claude    # first launch asks once to approve the key; check
 
 ### 4.6 Swap (VPS with ≤ 2 GB RAM)
 
-`npm install`, TypeScript builds and Docker can run out of memory on a small VPS. Add swap:
+`npm install`, TypeScript builds and Docker can run out of memory on a small VPS. Add compressed
+RAM swap (zram, uses no disk) plus a small swapfile as a fallback:
 
 ```bash
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo apt install -y zram-tools
+printf 'ALGO=zstd\nPERCENT=50\n' | sudo tee /etc/default/zramswap && sudo systemctl restart zramswap
+
+sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile      # 2G if the disk is ≥ 40 GB
 sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+swapon --show                                                   # zram (prio 100) is used first
 ```
 
 ---
