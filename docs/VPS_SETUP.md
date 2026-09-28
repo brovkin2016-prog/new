@@ -117,7 +117,7 @@ What each setting protects against:
 | `PasswordAuthentication no`, `KbdInteractiveAuthentication no` | Ends credential stuffing and brute force. The only way in is a private key. |
 | `AllowUsers dev` | Service or system accounts that someone later gives a shell can't log in over SSH. |
 | `AllowAgentForwarding no` | Root on the VPS, or a compromised process running as `dev` (including an AI agent), can't use your laptop's keys through the forwarded agent socket. Give the VPS its own scoped deploy key or token for GitHub instead. |
-| `AllowTcpForwarding local` | `ssh -L 5173:localhost:5173 devbox` still works for viewing dev servers. Remote and reverse forwarding, which could expose laptop services to the VPS, is blocked. |
+| `AllowTcpForwarding local` | `ssh -L 5173:localhost:5173 devbox` still works for viewing dev servers. Remote and reverse forwarding, which could expose laptop services to the VPS, is blocked. Section 6.2 allows it for specific MCP ports only. |
 
 ---
 
@@ -327,27 +327,45 @@ Upgrading to a new LTS later: `nvm install --lts --reinstall-packages-from=curre
 `postinstall` scripts **as root**, which is a supply-chain risk. The downside is that apt
 doesn't update Node, so you run the upgrade above yourself.
 
-### 4.3 Install the assistant
+### 4.3 Install Claude Code (Anthropic CLI)
+
+Install from Anthropic's signed apt repository. The package is installed by root, so the agent,
+which runs as `dev`, can't modify its own binary. Updates come through `apt` (the `upd` alias).
 
 ```bash
-npm install -g @anthropic-ai/claude-code    # or @openai/codex, @google/gemini-cli
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo curl -fsSL https://downloads.claude.ai/keys/claude-code.asc -o /etc/apt/keyrings/claude-code.asc
+gpg --show-keys /etc/apt/keyrings/claude-code.asc
+# fingerprint MUST be 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE, otherwise stop here
+echo "deb [signed-by=/etc/apt/keyrings/claude-code.asc] https://downloads.claude.ai/claude-code/apt/stable stable main" \
+  | sudo tee /etc/apt/sources.list.d/claude-code.list
+sudo apt update && sudo apt install -y claude-code
+claude --version && claude doctor
 ```
 
-Claude Code also has a native installer that doesn't need Node; see the vendor docs.
+Alternatives:
 
-### 4.4 API key handling
+- `curl -fsSL https://claude.ai/install.sh | bash`: installs to `~/.local`, auto-updates.
+- `npm install -g @anthropic-ai/claude-code`: needs Node ≥ 22; never run it with `sudo`.
 
-The key goes into a mode-600 file. It isn't typed on the command line and isn't exported to every shell:
+Both put the binary somewhere `dev` can write to.
+
+### 4.4 API key via environment variable
+
+The key lives in a mode-600 file, and `~/.bashrc` exports it as `ANTHROPIC_API_KEY` (see the
+`.bashrc` section). The key never appears in `.bashrc` itself, so your dotfiles are safe to share,
+and it doesn't go through the command line or shell history:
 
 ```bash
 mkdir -p ~/.config/secrets && chmod 700 ~/.config/secrets
-read -rsp 'API key: ' KEY; echo
+read -rsp 'Anthropic API key: ' KEY; echo
 printf 'ANTHROPIC_API_KEY=%q\n' "$KEY" > ~/.config/secrets/ai.env; unset KEY
 chmod 600 ~/.config/secrets/ai.env
+source ~/.bashrc && claude    # first launch asks once to approve the key; check it with /status
 ```
 
-The `ai` function in the `.bashrc` section below loads the key only into the assistant's own
-process tree. Alternatively, use the tool's own login flow (OAuth), which also stores the token in `~/`.
+- `ANTHROPIC_API_KEY` takes precedence over a claude.ai subscription login, so usage is billed to the Console/API account. To use a Pro/Max plan, unset the variable and run `/login`. On a headless VPS, open the URL on your laptop and paste the code back.
+- **Trade-off:** an exported variable reaches every process started from your shell. That includes the commands the agent runs and `postinstall` scripts. To keep the key out of the environment, don't export it. Put the bare key in a 600 file and set `"apiKeyHelper": "cat ~/.config/secrets/anthropic.key"` in `~/.claude/settings.json`. This hides the key from environment dumps, but not from a process that runs as `dev` and reads files.
 
 ### 4.5 Security implications of running an AI agent
 
@@ -422,6 +440,93 @@ Security notes:
 
 ---
 
+## 6. MCP servers over SSH tunnels
+
+Only MCP servers with the **HTTP/SSE transport** need a port. A **stdio** server runs as a child
+process of `claude` on the same host, so it needs no tunnel:
+
+```bash
+claude mcp add --transport stdio --scope user <name> -- npx -y <package>
+claude mcp list
+```
+
+Keep both ends of every tunnel on `127.0.0.1`. UFW always allows `lo`, so no new firewall rules are needed.
+
+### 6.1 MCP server on the VPS, client on the laptop: `ssh -L`
+
+Example: an HTTP MCP server on the VPS at `127.0.0.1:8931`, used from the laptop (Claude Desktop or a local `claude`).
+The server must bind to `127.0.0.1`, **not** `0.0.0.0`. In Docker, publish it as `127.0.0.1:8931:8931`
+(see "Docker bypasses UFW").
+
+```bash
+# laptop
+ssh -N -L 127.0.0.1:8931:127.0.0.1:8931 devbox
+claude mcp add --transport http vps-tools http://127.0.0.1:8931/mcp
+```
+
+`AllowTcpForwarding local` from step 1.3 already allows this.
+
+### 6.2 MCP server on the laptop, Claude Code on the VPS: `ssh -R`
+
+Example: an MCP server that must run next to your local apps or intranet, listening on the laptop at `127.0.0.1:3845`.
+Enable remote forwarding on the VPS, restricted to the listed ports:
+
+```bash
+# VPS
+sudo sed -i 's/^AllowTcpForwarding local$/AllowTcpForwarding yes/' /etc/ssh/sshd_config.d/00-hardening.conf
+sudo tee /etc/ssh/sshd_config.d/10-mcp-forwarding.conf >/dev/null <<'EOF'
+# ssh -R may listen only on these ports (always loopback: GatewayPorts stays "no")
+PermitListen 3845
+# ssh -L may reach only services on the VPS itself; the VPS can't be used as a jump host
+PermitOpen localhost:* 127.0.0.1:*
+EOF
+sudo sshd -t && sudo systemctl reload ssh
+sudo sshd -T | grep -Ei '^(allowtcpforwarding|permitlisten|permitopen|gatewayports) '
+```
+
+```bash
+# laptop
+ssh -N -R 3845:127.0.0.1:3845 devbox
+# VPS
+claude mcp add --transport http --scope user laptop-tools http://127.0.0.1:3845/mcp
+```
+
+**Security:** any local process on the VPS can reach the forwarded `127.0.0.1:3845`. That
+includes the agent, other users and containers on the host network, so the tunnel is a path
+from the VPS into your laptop. To limit that:
+
+- Forward only the ports you need. Add each new one to `PermitListen`.
+- Require a token on the MCP server if it supports one (`--header "Authorization: Bearer …"`, typed with a leading space so it stays out of history).
+- Keep the tunnel up only while you use it.
+
+### 6.3 Tunnel profile (laptop `~/.ssh/config`)
+
+Use a separate alias for the tunnel. If the forwards lived on `devbox`, every normal `ssh devbox` would try
+to bind the same ports, and the second session would fail:
+
+```sshconfig
+Host devbox-mcp
+    HostName 10.8.0.1
+    User dev
+    IdentityFile ~/.ssh/id_ed25519_devbox
+    IdentitiesOnly yes
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    LocalForward  127.0.0.1:8931 127.0.0.1:8931
+    RemoteForward 3845 127.0.0.1:3845
+```
+
+```bash
+ssh -fN devbox-mcp              # background, no shell, so tmux doesn't auto-attach
+pkill -f 'ssh -fN devbox-mcp'   # stop
+```
+
+For automatic reconnects, use `autossh -M 0 -fN devbox-mcp`. Inside `claude`, `/mcp` shows server
+status and reconnects a server after the tunnel comes back.
+
+---
+
 ## `~/.bashrc` additions
 
 Append these lines. The nvm installer has already added its own lines, so don't duplicate them.
@@ -433,8 +538,10 @@ export HISTCONTROL=ignoreboth          # a command starting with a space is not 
 export HISTSIZE=10000 HISTFILESIZE=20000
 shopt -s histappend
 
-# AI assistant: API key only in this process tree, not in every shell
-ai() { ( set -a; . "$HOME/.config/secrets/ai.env"; set +a; exec claude "$@" ); }
+# Anthropic API key -> ANTHROPIC_API_KEY for all shells (the value lives in a 600 file, not here)
+if [ -r "$HOME/.config/secrets/ai.env" ]; then
+  set -a; . "$HOME/.config/secrets/ai.env"; set +a
+fi
 
 # tmux
 alias ta='tmux new-session -A -s main'
@@ -473,6 +580,8 @@ fi
 | `sysctl net.ipv4.ip_forward` | `0` (unless Docker is installed, which sets it to 1; then bind its ports as in step 3) |
 | `sudo -k; sudo -n true` | "a password is required" |
 | `node -v` | `v24.x` |
+| `claude doctor` | no errors |
+| `ss -tln \| grep -E '3845\|8931'` (tunnel up) | `127.0.0.1` only, never `0.0.0.0` |
 
 ## Lockout recovery
 
