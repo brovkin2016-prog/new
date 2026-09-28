@@ -66,7 +66,7 @@
 │           └── reports/      агрегация + экспорт CSV/XLSX
 ├── frontend/           React SPA (дашборд, задачи, отчёты)
 ├── embeddings/         Python FastAPI + sentence-transformers
-├── docs/               ARCHITECTURE / COMPLIANCE / API
+├── docs/               ARCHITECTURE / COMPLIANCE / API / VPS_SETUP
 └── docker-compose.yml  postgres + redis + backend + frontend + embeddings
 ```
 
