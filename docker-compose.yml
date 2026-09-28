@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pf}
+      POSTGRES_DB: ${POSTGRES_DB:-pf_audit}
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pf}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  embeddings:
+    build: ./embeddings
+    environment:
+      MODEL_NAME: ${EMBEDDINGS_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
+    ports: ["8000:8000"]
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pf}:${POSTGRES_PASSWORD:-pf}@postgres:5432/${POSTGRES_DB:-pf_audit}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EMBEDDINGS_URL: http://embeddings:8000
+      YANDEX_SEARCH_API_KEY: ${YANDEX_SEARCH_API_KEY:-}
+      YANDEX_SEARCH_FOLDER_ID: ${YANDEX_SEARCH_FOLDER_ID:-}
+      PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
+      WORDSTAT_OAUTH_TOKEN: ${WORDSTAT_OAUTH_TOKEN:-}
+      SERPSTAT_API_KEY: ${SERPSTAT_API_KEY:-}
+      KEYSSO_API_KEY: ${KEYSSO_API_KEY:-}
+      AHREFS_API_TOKEN: ${AHREFS_API_TOKEN:-}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+    ports: ["3000:3000"]
+    command: sh -c "npx prisma migrate deploy && (npx prisma db seed || true) && node dist/main.js"
+
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api}
+    ports: ["5173:5173"]
+
+volumes:
+  pgdata:
+  redisdata:

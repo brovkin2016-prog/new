@@ -1,0 +1,239 @@
+// Модель данных pf.sites-s.ru. Отчёты — в JSONB, оперативные данные — нормализованы.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskType {
+  positions
+  audit
+  semantics
+  competitors
+}
+
+enum TaskStatus {
+  active
+  paused
+  archived
+}
+
+enum RunStatus {
+  queued
+  running
+  success
+  failed
+  stopped
+}
+
+enum Intent {
+  commercial
+  informational
+  mixed
+  unknown
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String
+  name      String?
+  // лимиты аккаунта
+  maxProjects   Int    @default(10)
+  maxPagesPerRun Int   @default(15)
+  createdAt DateTime  @default(now())
+  projects  Project[]
+}
+
+model Project {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  domain     String   // example.ru
+  targetUrl  String?  // https://example.ru/
+  settings   Json     @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  keywords     Keyword[]
+  tasks        Task[]
+  regions      ProjectRegion[]
+  semanticCore SemanticCore?
+
+  @@index([userId])
+}
+
+// Справочник регионов Яндекса (lr)
+model Region {
+  code     Int     @id // Yandex lr id: Москва=213, СПб=2
+  name     String
+  parent   Int?
+  projects ProjectRegion[]
+  keywords Keyword[]
+}
+
+model ProjectRegion {
+  projectId  String
+  regionCode Int
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  region     Region  @relation(fields: [regionCode], references: [code])
+  @@id([projectId, regionCode])
+}
+
+model Keyword {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phrase     String
+  regionCode Int?
+  region     Region?  @relation(fields: [regionCode], references: [code])
+  tags       String[] @default([])
+  frequency  Int?     // Wordstat (base)
+  createdAt  DateTime @default(now())
+
+  positions  PositionResult[]
+  clusterKeys ClusterKeyword[]
+
+  @@unique([projectId, phrase, regionCode])
+  @@index([projectId])
+}
+
+model Task {
+  id         String     @id @default(cuid())
+  projectId  String
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type       TaskType
+  name       String
+  params     Json       @default("{}")
+  cron       String?    // расписание; null = только вручную
+  status     TaskStatus @default(active)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  runs       TaskRun[]
+
+  @@index([projectId])
+}
+
+model TaskRun {
+  id         String    @id @default(cuid())
+  taskId     String
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  status     RunStatus @default(queued)
+  params     Json      @default("{}") // снимок параметров для повтора
+  stats      Json      @default("{}") // агрегаты: обработано, ошибок, среднее время
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  positions   PositionResult[]
+  auditPages  AuditPage[]
+  brokenLinks BrokenLink[]
+  report      Report?
+  logs        RunLog[]
+
+  @@index([taskId])
+}
+
+model RunLog {
+  id        String   @id @default(cuid())
+  runId     String
+  run       TaskRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  step      String
+  level     String   @default("info")
+  message   String
+  createdAt DateTime @default(now())
+  @@index([runId])
+}
+
+model PositionResult {
+  id         String   @id @default(cuid())
+  runId      String
+  run        TaskRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  keywordId  String
+  keyword    Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  regionCode Int
+  position   Int?     // null = не найден в проверенной глубине
+  url        String?  // ранжируемый URL
+  inTop30    Boolean  @default(false)
+  checkedAt  DateTime @default(now())
+
+  @@index([keywordId, regionCode, checkedAt])
+  @@index([runId])
+}
+
+model AuditPage {
+  id          String   @id @default(cuid())
+  runId       String
+  run         TaskRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  url         String
+  statusCode  Int
+  responseMs  Int?     // TTFB / время ответа сервера
+  lcpMs       Int?
+  fcpMs       Int?
+  ttiMs       Int?
+  title       String?
+  description String?
+  headings    Json     @default("{}") // {h1:[],h2:[]...}
+  issues      Json     @default("[]") // ["title_too_long","dup_h1",...]
+  depth       Int      @default(0)
+  createdAt   DateTime @default(now())
+  @@index([runId])
+}
+
+model BrokenLink {
+  id         String  @id @default(cuid())
+  runId      String
+  run        TaskRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  fromUrl    String
+  toUrl      String
+  statusCode Int
+  @@index([runId])
+}
+
+model SemanticCore {
+  id        String    @id @default(cuid())
+  projectId String    @unique
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  updatedAt DateTime  @updatedAt
+  clusters  Cluster[]
+}
+
+model Cluster {
+  id            String   @id @default(cuid())
+  coreId        String
+  core          SemanticCore @relation(fields: [coreId], references: [id], onDelete: Cascade)
+  name          String
+  intent        Intent   @default(unknown)
+  volume        Int      @default(0) // суммарная частотность
+  difficulty    Float    @default(0) // 0..1
+  commercialValue Float  @default(0) // 0..1
+  potentialTraffic Int   @default(0)
+  priority      Float    @default(0)
+  competitorUrls Json    @default("[]")
+  isGap         Boolean  @default(false) // есть у конкурентов, нет у нас
+  keywords      ClusterKeyword[]
+  @@index([coreId])
+}
+
+model ClusterKeyword {
+  clusterId String
+  keywordId String
+  cluster   Cluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  keyword   Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  @@id([clusterId, keywordId])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  runId     String   @unique
+  run       TaskRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  type      TaskType
+  data      Json     @default("{}") // агрегированный отчёт
+  createdAt DateTime @default(now())
+}
