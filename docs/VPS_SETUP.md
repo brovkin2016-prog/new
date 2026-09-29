@@ -333,6 +333,13 @@ doesn't update Node, so you run the upgrade above yourself.
 
 ### 4.3 Install Claude Code (Anthropic CLI)
 
+> **Check the CPU first.** The Claude Code binary requires AVX. Budget KVM plans often expose the
+> generic `QEMU Virtual CPU` model without AVX/AVX2/AES-NI; there `claude` crashes with
+> `Illegal instruction` or spins at 100 % CPU without drawing anything.
+> Run `grep -m1 flags /proc/cpuinfo | grep -owE 'aes|avx|avx2' | sort -u`. If `avx` is missing, ask the
+> provider to switch the VM CPU type to host-passthrough (this also enables AES-NI and speeds up
+> VPN/TLS crypto), or run Claude Code on your laptop and let it work on the server over SSH.
+
 Install from Anthropic's signed apt repository. The package is installed by root, so the agent,
 which runs as `dev`, can't modify its own binary. Updates come through `apt` (the `upd` alias).
 
