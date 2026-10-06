@@ -31,7 +31,7 @@ a { color: var(--accent); }
   color: #fff; background: linear-gradient(135deg, #7b6cff, #4a3cd8); box-shadow: 0 10px 30px rgba(91, 79, 233, .35); }
 
 /* layout */
-.shell { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.shell { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; }
 .top { height: calc(var(--top-h) + var(--safe-t)); padding: var(--safe-t) 8px 0 16px; display: flex; align-items: center; gap: 8px;
   background: var(--bg); border-bottom: 1px solid var(--line); flex: none; }
 .top h1 { font-size: 19px; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -39,7 +39,7 @@ a { color: var(--accent); }
 .icon-btn { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-size: 21px; flex: none; }
 .icon-btn:active { background: var(--accent-soft); }
 .views { flex: 1; position: relative; overflow: hidden; }
-.view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.view { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; }
 .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 12px 12px 16px; }
 .tabs { height: calc(var(--tab-h) + var(--safe-b)); padding-bottom: var(--safe-b); display: flex; background: var(--card);
   border-top: 1px solid var(--line); flex: none; }
@@ -50,7 +50,8 @@ a { color: var(--accent); }
 .tab.on .ic { filter: none; opacity: 1; }
 
 /* messages */
-.msgs { display: flex; flex-direction: column; gap: 10px; }
+.msgs { display: flex; flex-direction: column; }
+.msgs > * + * { margin-top: 10px; }  /* not gap: older WebViews lack flex gap */
 .msg { max-width: 88%; display: flex; flex-direction: column; gap: 4px; }
 .msg.me { align-self: flex-end; align-items: flex-end; }
 .msg.ai { align-self: flex-start; }
@@ -164,7 +165,7 @@ select, .input { border: 1px solid var(--line); background: var(--card); border-
   color: #fff; font-size: 18px; }
 
 /* sheet, toast, viewer */
-.sheet-bg { position: fixed; inset: 0; background: rgba(10, 8, 30, .45); z-index: 20; display: flex; align-items: flex-end;
+.sheet-bg { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(10, 8, 30, .45); z-index: 20; display: flex; align-items: flex-end;
   animation: fade .15s; }
 .sheet { width: 100%; max-height: 88vh; overflow-y: auto; background: var(--bg); border-radius: 22px 22px 0 0;
   padding: 10px 14px calc(18px + var(--safe-b)); animation: up .2s ease-out; }
@@ -178,7 +179,7 @@ select, .input { border: 1px solid var(--line); background: var(--card); border-
 .toast { position: fixed; left: 50%; bottom: calc(var(--tab-h) + 24px + var(--safe-b)); transform: translateX(-50%); z-index: 40;
   background: #26233a; color: #fff; padding: 10px 16px; border-radius: 14px; font-size: 15px; max-width: 90vw; box-shadow: var(--shadow);
   animation: fade .2s; }
-.viewer { position: fixed; inset: 0; background: #000; z-index: 30; display: flex; flex-direction: column; }
+.viewer { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: #000; z-index: 30; display: flex; flex-direction: column; }
 .viewer .img { flex: 1; display: grid; place-items: center; overflow: auto; }
 .viewer img { max-height: 100%; object-fit: contain; }
 .viewer .bar2 { display: flex; gap: 8px; padding: 10px 10px calc(10px + var(--safe-b)); justify-content: center; flex-wrap: wrap; }
