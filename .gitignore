@@ -55,3 +55,9 @@ tmp/
 
 # reports export
 exports/
+
+# ai-app (Android): generated in CI
+ai-app/android/.gradle/
+ai-app/android/local.properties
+ai-app/android/app/src/main/assets/
+ai-app/android/app/src/debug/res/raw/

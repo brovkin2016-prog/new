@@ -1,0 +1,43 @@
+plugins {
+    id "com.android.application"
+}
+
+// CI passes the version, the native ABIs and (for the emulator test only) the test hooks
+def vCode = (project.findProperty("versionCode") ?: "1") as Integer
+def vName = project.findProperty("versionName") ?: "1.0.${vCode}"
+def abiList = (project.findProperty("abis") ?: "arm64-v8a,armeabi-v7a").split(",")
+def quote = { String s -> "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" }
+
+android {
+    namespace "app.aihelper.family"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "app.aihelper.family"
+        minSdk 24
+        targetSdk 34
+        versionCode vCode
+        versionName vName
+        ndk { abiFilters(*abiList) }
+        buildConfigField "String", "TEST_HOST_RULES", quote(project.findProperty("testHostRules") ?: "")
+        buildConfigField "String", "TEST_LOGIN", quote(project.findProperty("testLogin") ?: "")
+    }
+    buildFeatures { buildConfig true }
+    buildTypes {
+        release { minifyEnabled false }
+        debug { applicationIdSuffix ".debug" }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packaging {
+        jniLibs { useLegacyPackaging true }  // compressed native code: a smaller download
+    }
+    lint { abortOnError false }
+}
+
+dependencies {
+    implementation "org.chromium.net:cronet-embedded:${project.findProperty("cronetVersion") ?: "119.6045.31"}"
+    implementation "androidx.core:core:1.13.1"
+}

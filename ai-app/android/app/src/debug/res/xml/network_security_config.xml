@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the emulator test talks to a local server with its own test CA (debug builds only) -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/test_ca" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

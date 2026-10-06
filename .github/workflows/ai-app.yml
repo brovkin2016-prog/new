@@ -1,0 +1,129 @@
+# Builds the ИИ-помощник Android app, tests it on an emulator against a local hysteria server (HTTP/3 over UDP,
+# then TLS on TCP 8443 with UDP blocked) and publishes the unsigned APK as a release: the server signs it with
+# its own key and offers it to the phones as an update.
+name: ai-app
+
+on:
+  push:
+    paths: ["ai-app/**", ".github/workflows/ai-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Versions
+        id: v
+        run: |
+          echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          CRONET=$(curl -fsSL https://dl.google.com/android/maven2/org/chromium/net/cronet-embedded/maven-metadata.xml \
+                   | sed -n 's:.*<release>\(.*\)</release>.*:\1:p' | head -1)
+          echo "cronet=${CRONET:-119.6045.31}" >> "$GITHUB_OUTPUT"
+          echo "Cronet ${CRONET:-119.6045.31}"
+
+      - name: Screens into the APK
+        run: |
+          mkdir -p ai-app/android/app/src/main/assets
+          rm -rf ai-app/android/app/src/main/assets/www
+          cp -r ai-app/www ai-app/android/app/src/main/assets/www
+          python3 ai-app/ci/version.py ai-app/android/app/src/main/assets/www
+
+      - name: Release APK (unsigned)
+        working-directory: ai-app/android
+        run: gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
+
+      - name: Test server (stand-in assistant behind a real hysteria)
+        run: |
+          set -e
+          mkdir -p /tmp/t && cd /tmp/t
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj '/CN=AI Test CA' -keyout ca.key -out ca.pem
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj '/CN=vpn.test.local' -keyout key.pem -out req.csr
+          printf 'subjectAltName=DNS:vpn.test.local\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n' > ext
+          openssl x509 -req -in req.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 2 -extfile ext -out cert.pem
+          cat cert.pem ca.pem > chain.pem
+          mkdir -p "$GITHUB_WORKSPACE/ai-app/android/app/src/debug/res/raw"
+          cp ca.pem "$GITHUB_WORKSPACE/ai-app/android/app/src/debug/res/raw/test_ca.pem"
+          TAG=$(curl -fsSL https://api.github.com/repos/apernet/hysteria/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          curl -fsSL -o hysteria "https://github.com/apernet/hysteria/releases/download/$TAG/hysteria-linux-amd64" && chmod +x hysteria
+          cat > hy.yaml <<'EOT'
+          listen: :443
+          tls:
+            cert: /tmp/t/chain.pem
+            key: /tmp/t/key.pem
+          auth:
+            type: password
+            password: not-the-app
+          masquerade:
+            type: proxy
+            proxy:
+              url: http://127.0.0.1:18790/
+              rewriteHost: false
+            listenHTTPS: :8443
+          EOT
+          nohup python3 "$GITHUB_WORKSPACE/ai-app/ci/stub_server.py" 18790 "$GITHUB_WORKSPACE/ai-app/android/app/src/main/assets/www" > stub.log 2>&1 &
+          sudo nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
+          sleep 3
+          curl -sk --resolve vpn.test.local:8443:127.0.0.1 https://vpn.test.local:8443/app/version.json && echo
+
+      - name: Debug APK for the emulator
+        working-directory: ai-app/android
+        run: >
+          gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
+          -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Emulator test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK: ${{ github.workspace }}/ai-app/android/app/build/outputs/apk/debug/app-debug.apk
+          OUT: /tmp/out
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash ai-app/ci/emulator_test.sh
+
+      - name: Publish
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CODE=${{ steps.v.outputs.code }}
+          APK=ai-app/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          [ -f "$APK" ] || exit 1
+          mkdir -p /tmp/rel && cp "$APK" /tmp/rel/ai-app-$CODE-unsigned.apk
+          SHA=$(sha256sum /tmp/rel/ai-app-$CODE-unsigned.apk | cut -d' ' -f1)
+          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "cronet": "%s", "commit": "%s"}\n' \
+            "$CODE" "$CODE" "$SHA" "${{ steps.v.outputs.cronet }}" "$GITHUB_SHA" > /tmp/rel/ai-app-$CODE.json
+          cp /tmp/out/*.png /tmp/out/*.log /tmp/rel/ 2>/dev/null || true
+          cp /tmp/t/hy.log /tmp/rel/hysteria.log 2>/dev/null || true
+          cp /tmp/t/stub.log /tmp/rel/stub.log 2>/dev/null || true
+          STATE="${{ job.status }}"
+          gh release create "ai-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+            --title "ИИ-помощник 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key."
