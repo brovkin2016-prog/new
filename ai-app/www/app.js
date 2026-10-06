@@ -547,7 +547,7 @@
     for (const m of S.msgs[thread]) {
       if (m.err || m.role === "note") continue;
       if (m.role === "me" && (m.ctx || m.text)) out.push({ role: "user", text: m.ctx || m.text });
-      else if (m.role === "ai" && m.text && !m.result) out.push({ role: "model", text: m.text });
+      else if (m.role === "ai" && m.text && !m.result && !m.video) out.push({ role: "model", text: m.text });
     }
     return out.slice(-20);
   }
@@ -560,12 +560,18 @@
     if (m.result) {
       b.append(el("img", { class: "result", src: urlOf(m.result), onclick: () => viewer(m.result, m.name || "picture.jpg") }));
     }
+    if (m.video) b.append(el("video", { class: "result", controls: true, playsinline: true, src: urlOf(m.video) }));
     if (m.role === "me") { if (m.text) b.append(el("div", { text: m.text })); }
     else if (m.text) b.append(el("div", { html: md(m.text) }));
     if (m.audio) b.append(el("audio", { controls: true, src: urlOf(m.audio) }));
     wrap.append(b);
     if (m.label) wrap.append(el("div", { class: "label", text: m.label }));
-    if (m.role === "ai" && m.text && !m.err && !m.result) {
+    const file = m.result || m.video;
+    if (file) {  // a photo tool asked for in the chat: what came out can be kept
+      wrap.append(el("div", { class: "acts" },
+        el("button", { class: "act", text: "⬇️ Сохранить", onclick: () => { saveBlob(file, m.name || "result"); toast("Сохранено"); } }),
+        el("button", { class: "act", text: "📤 Поделиться", onclick: () => shareBlob(file, m.name || "result") })));
+    } else if (m.role === "ai" && m.text && !m.err) {
       const acts = el("div", { class: "acts" });
       acts.append(el("button", { class: "act", text: "📋 Копировать", onclick: () => copyText(plain(m.text)) }));
       if (S.me.can.speak) acts.append(el("button", { class: "act", text: "🔊", title: "Озвучить", onclick: () => speakMsg(m, thread) }));
@@ -655,8 +661,9 @@
         let out;
         if (end.t === "done") {
           if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
-          out = await api2.add({ role: "ai", text: end.text, label: end.label, note: !!end.note,
-            audio: end.audio ? blobOf(end.audio, "audio/ogg") : null });
+          out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
+            audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name,
+            result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null });
           if (out.audio) playAudio(out.audio);
         } else {
           out = await api2.add({ role: "ai", text: "⚠️ " + end.text, err: true });
