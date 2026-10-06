@@ -52,6 +52,8 @@ jobs:
         run: gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
 
       - name: Test server (stand-in assistant behind a real hysteria)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           mkdir -p /tmp/t && cd /tmp/t
@@ -62,8 +64,8 @@ jobs:
           cat cert.pem ca.pem > chain.pem
           mkdir -p "$GITHUB_WORKSPACE/ai-app/android/app/src/debug/res/raw"
           cp ca.pem "$GITHUB_WORKSPACE/ai-app/android/app/src/debug/res/raw/test_ca.pem"
-          TAG=$(curl -fsSL https://api.github.com/repos/apernet/hysteria/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
-          curl -fsSL -o hysteria "https://github.com/apernet/hysteria/releases/download/$TAG/hysteria-linux-amd64" && chmod +x hysteria
+          gh release download --repo apernet/hysteria --pattern hysteria-linux-amd64 --output hysteria && chmod +x hysteria
+          ./hysteria version | grep -i '^version' 
           cat > hy.yaml <<'EOT'
           listen: :443
           tls:
