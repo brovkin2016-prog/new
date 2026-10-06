@@ -616,25 +616,34 @@
         if (mine) { await api2.add(mine); api2.redraw(); }
         const live = el("div", { class: "msg ai" });
         const b = el("div", { class: "bubble" });
+        const content = el("div");
         const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Думаю…" }));
-        b.append(status);
+        b.append(content, status);
         live.append(b);
         if (box.firstChild && box.firstChild.classList.contains("empty")) box.firstChild.remove();
         box.append(live);
         api2.down();
-        let text = "", timer = null, said = "Думаю…";
-        const t0 = Date.now();
+        let text = "", timer = null, said = "Думаю…", t0 = Date.now();
         const clock = setInterval(() => {
           const sec = Math.round((Date.now() - t0) / 1000);
-          if (sec >= 5 && status.isConnected) status.lastChild.textContent = said + " " + sec + " с";
+          if (sec >= 5 && !status.classList.contains("hidden")) status.lastChild.textContent = said + " " + sec + " с";
         }, 1000);
-        const paint = () => { timer = null; b.innerHTML = md(text); b.lastElementChild && b.lastElementChild.classList.add("typing"); api2.down(); };
+        const paint = () => { timer = null; content.innerHTML = md(text); content.lastElementChild && content.lastElementChild.classList.add("typing"); api2.down(); };
         let end;
         try {
           end = await stream(path, body, (ev) => {
-            if (ev.t === "status") { said = ev.text; status.lastChild.textContent = ev.text; }
-            else if (ev.t === "reset") { text = ""; b.innerHTML = ""; b.append(status); }
-            else if (ev.t === "delta") { text += ev.text; if (!timer) timer = setTimeout(paint, 90); }
+            if (ev.t === "status") {
+              said = ev.text;
+              t0 = Date.now();
+              status.lastChild.textContent = ev.text;
+              status.classList.remove("hidden");
+              if (text) status.style.marginTop = "8px";
+            } else if (ev.t === "reset") { text = ""; content.innerHTML = ""; status.style.marginTop = ""; }
+            else if (ev.t === "delta") {
+              text += ev.text;
+              status.classList.add("hidden");
+              if (!timer) timer = setTimeout(paint, 90);
+            }
           });
         } catch (e) {
           end = { t: "error", text: problem(e) };
@@ -844,7 +853,7 @@
     async function solve(im, text) {
       const shown = STUDY_MODES[mode][0] + (text ? ": " + text : "");
       const body = { mode, grade, text: text || "", context: [] };
-      body.image = await b64(await shrink(im, 2560, 0.9));
+      body.image = await b64(await shrink(im, 1800, 0.9));
       await th.run("/api/study", body, { role: "me", text: shown, image: im });
       drawHead();
     }
