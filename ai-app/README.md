@@ -1,7 +1,8 @@
 # ИИ-помощник — Android app
 
 A light app for the family AI assistant: chat, homework from a photo ("Учёба"), photo tools, drawing, voice and a
-translator. The screens are a web page (`www/`) shipped inside the APK and refreshed from the server, so most changes
+translator. The owner can also be given a "🛡 VPN" tab (from the VPN bot in Telegram) to hand out VPN access: people,
+their links and QR codes, behind the phone's own lock. The screens are a web page (`www/`) shipped inside the APK and refreshed from the server, so most changes
 need no new APK.
 
 - `www/` — the screens (plain HTML/CSS/JS, no build step). The same page also works in a browser.

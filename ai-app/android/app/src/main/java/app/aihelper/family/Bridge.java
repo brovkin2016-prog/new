@@ -124,6 +124,11 @@ final class Bridge {
     }
 
     @JavascriptInterface
+    public void unlock(String title) {
+        act.runOnUiThread(() -> act.unlock(title == null ? "" : title));
+    }
+
+    @JavascriptInterface
     public void toast(String text) {
         act.runOnUiThread(() -> Toast.makeText(act, text, Toast.LENGTH_SHORT).show());
     }

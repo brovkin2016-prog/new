@@ -497,7 +497,8 @@
 
   // ---------- the main screen ----------
   const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼", "Фото"], ["more", "☰", "Ещё"]];
-  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", more: "Ещё" };
+  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", vpn: "Выдача VPN", more: "Ещё" };
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 3).concat([["vpn", "🛡", "VPN"]], TABS.slice(3)) : TABS);
   async function start() {
     applyTheme();
     try {
@@ -518,14 +519,15 @@
     S.top = el("div", { class: "top" });
     S.viewsEl = el("div", { class: "views" });
     const tabs = el("div", { class: "tabs" });
-    for (const [key, ic, name] of TABS) {
+    for (const [key, ic, name] of tabsFor(S.me)) {
       tabs.append(el("button", { class: "tab", "data-tab": key, onclick: () => show(key) }, el("span", { class: "ic", text: ic }), el("span", { text: name })));
     }
     shell.append(S.top, S.viewsEl, tabs);
     app.append(shell);
     S.views = { chat: chatView(), study: studyView(), photo: photoView(), more: moreView() };
+    if (S.me.panel) S.views.vpn = vpnView();
     for (const v of Object.values(S.views)) S.viewsEl.append(v.root);
-    show(TABS.some((t) => t[0] === S.tab) ? S.tab : "chat");
+    show(tabsFor(S.me).some((t) => t[0] === S.tab) && S.tab !== "vpn" ? S.tab : "chat");
   }
   function show(tab) {
     S.tab = tab;
@@ -1103,6 +1105,152 @@
     }
     draw();
     return { root, redraw: draw, onShow: () => api("/api/me", {}).then((m) => { S.me = m; draw(); }).catch(() => {}) };
+  }
+
+  // ---------- the owner's VPN tab: giving people VPN access (bridges and the server stay in Telegram) ----------
+  const UNLOCK_MS = 3 * 60 * 1000;
+  let unlockedAt = 0, unlocking = null;
+  function unlockPhone() {  // the phone's fingerprint or PIN; true, false, or "old" for an app without it
+    if (Date.now() - unlockedAt < UNLOCK_MS || !Native) return Promise.resolve(true);
+    if (!Native.unlock) return Promise.resolve("old");
+    if (!unlocking) {  // one prompt at a time, however many times the tab is shown meanwhile
+      unlocking = new Promise((resolve) => {
+        window.__aiUnlock = (how) => {
+          window.__aiUnlock = null;
+          unlocking = null;
+          if (how !== "no") unlockedAt = Date.now();
+          resolve(how !== "no");
+        };
+        Native.unlock("Выдача VPN");
+      });
+    }
+    return unlocking;
+  }
+  function bytes(n) {
+    n = +n || 0;
+    for (const u of ["Б", "КБ", "МБ", "ГБ"]) { if (n < 1024) return (u === "Б" ? n : n.toFixed(1)) + " " + u; n /= 1024; }
+    return n.toFixed(1) + " ТБ";
+  }
+  document.addEventListener("visibilitychange", () => {  // back from the background with the lock expired: ask again
+    if (!document.hidden && !unlocking && S.tab === "vpn" && S.views.vpn && Date.now() - unlockedAt >= UNLOCK_MS) S.views.vpn.onShow();
+  });
+  function vpnView() {
+    const root = el("div", { class: "view" });
+    const scroll = el("div", { class: "scroll" });
+    root.append(scroll);
+    let data = null, open = false;
+    const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
+    function locked(text, button, action) {
+      scroll.innerHTML = "";
+      scroll.append(el("div", { class: "empty" }, el("div", { class: "big", text: "🔒" }), el("h2", { text: "Выдача VPN" }),
+        el("p", { text }), button ? el("button", { class: "btn", text: button, onclick: action }) : null));
+    }
+    async function enter() {
+      locked("Подтвердите, что это вы: отпечатком или PIN телефона.", "Открыть", enter);
+      const ok = await unlockPhone();
+      if (ok === "old") {
+        locked("Для этого раздела нужна новая версия приложения: вход в него — по отпечатку или PIN телефона.", "Обновить приложение",
+          () => Native.checkUpdate(true));
+        return;
+      }
+      if (!ok) { locked("Подтвердите, что это вы: отпечатком или PIN телефона.", "Открыть", enter); return; }
+      open = true;
+      load();
+    }
+    async function load() {
+      if (!open) return;
+      if (!data) { scroll.innerHTML = ""; scroll.append(el("div", { class: "status", style: "padding:20px" }, el("span", { class: "spin" }), "Загружаю…")); }
+      try {
+        const end = await panel({ op: "users" });
+        if (end.t !== "done") throw new HttpError(500, end.text);
+        data = end;
+        draw();
+      } catch (e) { if (!data) locked(problem(e), "Повторить", load); else toast(problem(e)); }
+    }
+    function draw() {
+      scroll.innerHTML = "";
+      const on = data.users.filter((u) => u.online).length;
+      const head = el("div", { class: "card" },
+        el("div", { class: "row" }, el("div", { class: "grow" }, (data.vpn ? "🟢 VPN работает" : "🔴 VPN не работает") + " · " + data.host,
+          el("small", { text: data.stats ? `Людей: ${data.users.length}, сейчас в сети: ${on}` : `Людей: ${data.users.length}` }))));
+      if (data.vless !== null) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.vless ? "🟢" : "🔴") + " Запасной VLESS (TCP 443)",
+        el("small", { text: "Когда Hysteria режут, работает он" }))));
+      scroll.append(head, el("button", { class: "btn wide", style: "margin:0 0 12px", text: "➕ Выдать VPN", onclick: add }));
+      const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан" }));
+      for (const u of data.users) {
+        list.append(el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => card(u.name) },
+          el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
+          el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
+            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "") })), "›"));
+      }
+      scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
+        text: "О каждом добавлении и удалении VPN-бот пишет вам в Telegram. Мосты и сервер — там же." }));
+    }
+    async function add() {
+      if (S.busy.vpn) return;
+      const name = await ask("Имя для VPN", "Латиницей, например mama или ivan_phone");
+      if (!name) return;
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) { toast("Только латиница, цифры, «_» и «-», до 32 знаков", 4000); return; }
+      S.busy.vpn = true;
+      toast("⏳ Добавляю «" + name + "»…", 20000);
+      try {
+        const end = await panel({ op: "add", name });
+        if (end.t !== "done") toast("⚠️ " + end.text, 5000);
+        else { toast("✅ Выдан VPN: " + name); await load(); card(name, end); }
+      } catch (e) { toast(problem(e)); }
+      S.busy.vpn = false;
+    }
+    async function card(name, have) {
+      let u = have;
+      if (!u) {
+        try {
+          const end = await panel({ op: "user", name });
+          if (end.t !== "done") { toast("⚠️ " + end.text); return; }
+          u = end;
+        } catch (e) { toast(problem(e)); return; }
+      }
+      sheet("👤 " + u.name + (u.owner ? " 👑" : ""), (box, close) => {
+        box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
+          text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` }));
+        const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"], ["vless", "VLESS", "запасной, когда режут UDP"]].filter((k) => u.links[k[0]]);
+        const pane = el("div");
+        const chips = el("div", { class: "chips", style: "margin-bottom:10px" });
+        const pick = (k) => {
+          chips.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.k === k[0]));
+          const link = u.links[k[0]];
+          const png = u.qr[k[0]] ? blobOf(u.qr[k[0]], "image/png") : null;
+          const file = `vpn-${u.name}-${k[1].toLowerCase()}.png`;
+          const text = `VPN для ${u.name} (${k[1]}):\n${link}\n\nИмпорт: v2RayTun или v2rayN → «+» → из буфера обмена или по QR-коду.`;
+          pane.innerHTML = "";
+          pane.append(el("div", { style: "font-size:13px;color:var(--muted);margin-bottom:8px", text: k[1] + " — " + k[2] }),
+            png ? el("img", { src: urlOf(png), style: "display:block;width:220px;max-width:70%;margin:0 auto 10px;background:#fff;border-radius:12px;padding:6px",
+              onclick: () => viewer(png, file) }) : null,
+            el("div", { style: "font:12px ui-monospace,monospace;word-break:break-all;background:var(--card);border-radius:10px;padding:8px;margin-bottom:10px", text: link }),
+            el("div", { class: "big-actions" },
+              el("button", { class: "btn", text: "📤 Поделиться", onclick: () => (png ? shareBlob(png, file, text) : copyText(text)) }),
+              el("button", { class: "btn line", text: "📋 Копировать", onclick: () => copyText(link) })));
+        };
+        for (const k of kinds) chips.append(el("button", { class: "chip", "data-k": k[0], text: k[1], onclick: () => pick(k) }));
+        if (kinds.length > 1) box.append(chips);
+        box.append(pane);
+        pick(kinds[0]);
+        if (!u.owner) {
+          box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: async () => {
+            if (!(await confirmBox(`Удалить «${u.name}»? Его VPN сразу перестанет работать.`, "Удалить"))) return;
+            close();
+            toast("⏳ Удаляю «" + u.name + "»…", 20000);
+            try {
+              const end = await panel({ op: "del", name: u.name });
+              toast(end.t === "done" ? "🗑 Удалён: " + u.name : "⚠️ " + end.text, 4000);
+              load();
+            } catch (e) { toast(problem(e)); }
+          } }));
+        }
+      });
+    }
+    return { root, redraw: () => data && draw(), sub: () => "люди, ссылки и QR",
+      buttons: () => (open ? [["🔄", "Обновить", load]] : []),
+      onShow: () => (open && Date.now() - unlockedAt < UNLOCK_MS ? load() : (open = false, enter())) };
   }
 
   // the translator: a full screen of its own

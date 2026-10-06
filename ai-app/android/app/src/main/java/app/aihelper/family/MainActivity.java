@@ -2,6 +2,7 @@ package app.aihelper.family;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.KeyguardManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -30,7 +31,7 @@ import java.io.File;
 
 /** One screen: the assistant's web page, with the phone's camera, microphone, files and network behind it. */
 public class MainActivity extends Activity {
-    private static final int REQ_CAMERA = 1, REQ_FILE = 2, REQ_MIC = 3;
+    private static final int REQ_CAMERA = 1, REQ_FILE = 2, REQ_MIC = 3, REQ_UNLOCK = 4;
     private static final String START = "https://" + WebAssets.ORIGIN_HOST + "/index.html";
     private WebView web;
     private WebAssets assets;
@@ -173,9 +174,34 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** The phone's own lock (fingerprint, face, PIN) before a private part of the page; the page hears ok, no or none. */
+    @SuppressWarnings("deprecation")
+    void unlock(String title) {
+        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        Intent i = km == null || !km.isDeviceSecure() ? null
+                : km.createConfirmDeviceCredentialIntent(title, "Подтвердите, что это вы");
+        if (i == null) {
+            unlocked("none");  // the phone has no screen lock: nothing to ask
+            return;
+        }
+        try {
+            startActivityForResult(i, REQ_UNLOCK);
+        } catch (ActivityNotFoundException e) {
+            unlocked("none");
+        }
+    }
+
+    private void unlocked(String how) {
+        web.evaluateJavascript("window.__aiUnlock&&window.__aiUnlock(" + JSONObject.quote(how) + ")", null);
+    }
+
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_UNLOCK) {
+            unlocked(res == RESULT_OK ? "ok" : "no");
+            return;
+        }
         if (fileCallback == null) return;
         Uri[] out = null;
         if (res == RESULT_OK) {
