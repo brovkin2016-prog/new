@@ -59,7 +59,9 @@ final class Net {
                 .addQuicHint(name, 443, 443)
                 .setUserAgent("AIApp/" + BuildConfig.VERSION_NAME + " (Android)");
         if (!BuildConfig.TEST_HOST_RULES.isEmpty()) {
-            b.setExperimentalOptions("{\"HostResolverRules\":{\"host_resolver_rules\":\"" + BuildConfig.TEST_HOST_RULES + "\"}}");
+            // the emulator test's server has a test CA; Chrome allows QUIC only to publicly trusted roots unless told
+            b.setExperimentalOptions("{\"HostResolverRules\":{\"host_resolver_rules\":\"" + BuildConfig.TEST_HOST_RULES
+                    + "\"},\"QUIC\":{\"allow_unknown_root_cert\":true}}");
         }
         if (engine != null) engine.shutdown();
         engine = b.build();
