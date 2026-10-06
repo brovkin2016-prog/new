@@ -42,6 +42,7 @@ final class Net {
     private static String engineHost = "";
     private static volatile long preferTcpUntil = 0;
     static volatile String host = "";
+    static volatile String lastProto = "";  // what the last answer came over: h3 (UDP), h2 or http/1.1 (TCP 8443)
 
     private Net() {}
 
@@ -161,6 +162,7 @@ final class Net {
             timers.removeCallbacks(connectTimeout);
             timers.postDelayed(idleTimeout, IDLE_MS);
             preferTcpUntil = tcp ? System.currentTimeMillis() + 5 * 60_000 : 0;
+            lastProto = info.getNegotiatedProtocol();
             if (BuildConfig.DEBUG) Log.i(TAG, path + " " + info.getHttpStatusCode() + " via " + info.getNegotiatedProtocol());
             sink.head(info.getHttpStatusCode());
             r.read(ByteBuffer.allocateDirect(32 * 1024));

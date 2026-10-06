@@ -1085,6 +1085,9 @@
       if (Native && Native.version) {
         appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия", el("small", { text: Native.version() })),
           el("button", { class: "act", text: "Проверить обновление", onclick: () => Native.checkUpdate(true) })));
+        const p = Native.netInfo ? Native.netInfo() : "";
+        if (p) appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Связь с сервером",
+          el("small", { text: p === "h3" ? "HTTP/3 по UDP — быстрый путь ✓" : "TCP 8443 — запасной путь (UDP не проходит)" }))));
       }
       appCard.append(el("button", { class: "btn line wide", style: "margin-top:10px", text: "Выйти", onclick: async () => {
         if (await confirmBox("Выйти из приложения? Для входа снова понадобится код.", "Выйти")) logout("");

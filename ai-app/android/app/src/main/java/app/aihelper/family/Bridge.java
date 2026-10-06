@@ -86,6 +86,11 @@ final class Bridge {
     }
 
     @JavascriptInterface
+    public String netInfo() {
+        return Net.lastProto;
+    }
+
+    @JavascriptInterface
     public void checkUpdate(boolean manual) {
         act.runOnUiThread(() -> Updater.check(act, manual));
     }
