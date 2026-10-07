@@ -87,7 +87,7 @@ final class Bridge {
 
     @JavascriptInterface
     public String netInfo() {
-        return Net.lastProto;
+        return Net.lastProto + (Net.lastVpn ? " vpn" : "");
     }
 
     @JavascriptInterface

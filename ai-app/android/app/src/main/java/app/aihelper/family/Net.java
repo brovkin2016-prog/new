@@ -1,6 +1,9 @@
 package app.aihelper.family;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -24,6 +27,7 @@ import java.util.concurrent.TimeUnit;
  * All traffic to the server, through Chrome's network stack (Cronet). It speaks HTTP/3 over UDP 443 first: mobile
  * networks that drop TCP to the server still let it through (the server's VPN listens there and hands everything that
  * is not a VPN login to the assistant). When UDP does not work, the same request goes over TLS on TCP 8443.
+ * With a VPN on the phone the request travels inside the tunnel, where only TCP 8443 reaches the server: it goes first.
  */
 final class Net {
     interface Sink {
@@ -39,14 +43,17 @@ final class Net {
     private static final ExecutorService pool = Executors.newCachedThreadPool();
     private static final Handler timers = new Handler(Looper.getMainLooper());
     private static ExperimentalCronetEngine engine;
+    private static Context app;
     private static String engineHost = "";
     private static volatile long preferTcpUntil = 0;
     static volatile String host = "";
     static volatile String lastProto = "";  // what the last answer came over: h3 (UDP), h2 or http/1.1 (TCP 8443)
+    static volatile boolean lastVpn;       // ... and whether a VPN on the phone carried it
 
     private Net() {}
 
     static synchronized void setHost(Context ctx, String h) {
+        app = ctx.getApplicationContext();
         host = h == null ? "" : h.trim();
         if (host.isEmpty() || host.equals(engineHost)) return;
         String name = host.contains(":") ? host.substring(0, host.indexOf(':')) : host;
@@ -80,7 +87,20 @@ final class Net {
             sink.fail("no host");
             return;
         }
-        new Call(method, path, headers, body, sink, System.currentTimeMillis() < preferTcpUntil).go();
+        boolean vpn = vpnOn();
+        new Call(method, path, headers, body, sink, vpn || System.currentTimeMillis() < preferTcpUntil, vpn).go();
+    }
+
+    /** A VPN app on the phone is carrying the traffic (Hysteria, VLESS or any other). */
+    static boolean vpnOn() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) app.getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network n = cm == null ? null : cm.getActiveNetwork();
+            NetworkCapabilities c = n == null ? null : cm.getNetworkCapabilities(n);
+            return c != null && c.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** A small GET, waiting for the whole answer; null when it failed or the status was not 200. */
@@ -109,11 +129,13 @@ final class Net {
         final byte[] body;
         final Sink sink;
         volatile boolean tcp, triedOther, started, timedOut;
+        final boolean vpn;
         UrlRequest req;
         final Runnable connectTimeout = () -> { timedOut = true; if (req != null) req.cancel(); };
         final Runnable idleTimeout = () -> { timedOut = true; if (req != null) req.cancel(); };
 
-        Call(String method, String path, Map<String, String> headers, byte[] body, Sink sink, boolean tcp) {
+        Call(String method, String path, Map<String, String> headers, byte[] body, Sink sink, boolean tcp, boolean vpn) {
+            this.vpn = vpn;
             this.method = method;
             this.path = path;
             this.headers = headers;
@@ -161,8 +183,9 @@ final class Net {
             started = true;
             timers.removeCallbacks(connectTimeout);
             timers.postDelayed(idleTimeout, IDLE_MS);
-            preferTcpUntil = tcp ? System.currentTimeMillis() + 5 * 60_000 : 0;
+            if (!vpn) preferTcpUntil = tcp ? System.currentTimeMillis() + 5 * 60_000 : 0;
             lastProto = info.getNegotiatedProtocol();
+            lastVpn = vpn;
             if (BuildConfig.DEBUG) Log.i(TAG, path + " " + info.getHttpStatusCode() + " via " + info.getNegotiatedProtocol());
             sink.head(info.getHttpStatusCode());
             r.read(ByteBuffer.allocateDirect(32 * 1024));
