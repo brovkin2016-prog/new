@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Семейный VPN</string>
+    <string name="app_name">Аврора VPN</string>
+    <string name="brand">Аврора</string>
+    <string name="full_name">VPN от Бровкина Алексея</string>
 </resources>

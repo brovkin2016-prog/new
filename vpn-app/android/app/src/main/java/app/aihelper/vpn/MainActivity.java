@@ -20,6 +20,7 @@ import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -35,6 +36,7 @@ public class MainActivity extends Activity implements State.Listener {
     private boolean dark;
     private int text, muted, card, accent;
     private PowerButton power;
+    private AuroraView aurora;
     private TextView status, detail, ping, serverName, serverChange;
     private LinearLayout serverCard;
 
@@ -44,7 +46,7 @@ public class MainActivity extends Activity implements State.Listener {
         dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         text = dark ? 0xFFF3F4F6 : 0xFF111827;
         muted = dark ? 0xFF9CA3AF : 0xFF6B7280;
-        card = dark ? 0xFF1A2029 : 0xFFFFFFFF;
+        card = dark ? 0xE01A2029 : 0xEBFFFFFF;  // cards let the aurora shine through a little
         accent = dark ? 0xFF34D399 : 0xFF0E9F6E;
         build();
         handle(getIntent());
@@ -73,17 +75,34 @@ public class MainActivity extends Activity implements State.Listener {
     // ---------- the screen ----------
 
     private void build() {
+        FrameLayout frame = new FrameLayout(this);
+        aurora = new AuroraView(this, dark);
+        frame.addView(aurora, new FrameLayout.LayoutParams(-1, -1));
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(28), dp(20), dp(20));
         root.setGravity(Gravity.CENTER_HORIZONTAL);
+        frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
-        TextView title = label(getString(R.string.app_name), 24, text, true);
+        // the name: the shield with its turning ring, «Аврора» in the aurora's colours, and whose VPN it is
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(new LogoView(this), new LinearLayout.LayoutParams(dp(56), dp(56)));
+        LinearLayout names = new LinearLayout(this);
+        names.setOrientation(LinearLayout.VERTICAL);
+        names.setPadding(dp(12), 0, 0, 0);
+        TextView title = label(getString(R.string.brand), 28, text, true);
         title.setGravity(Gravity.START);
-        root.addView(title, new LinearLayout.LayoutParams(-1, -2));
-        TextView sub = label("Для своих — одна кнопка", 14, muted, false);
+        title.getPaint().setShader(new android.graphics.LinearGradient(0, 0, dp(130), 0,
+                new int[]{0xFF22D3EE, 0xFF6366F1, 0xFFA855F7}, null, android.graphics.Shader.TileMode.CLAMP));
+        title.setLetterSpacing(0.02f);
+        names.addView(title, new LinearLayout.LayoutParams(-2, -2));
+        TextView sub = label(getString(R.string.full_name), 14, muted, false);
         sub.setGravity(Gravity.START);
-        root.addView(sub, new LinearLayout.LayoutParams(-1, -2));
+        names.addView(sub, new LinearLayout.LayoutParams(-2, -2));
+        head.addView(names, new LinearLayout.LayoutParams(0, -2, 1f));
+        root.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
         root.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
         power = new PowerButton(this, dark);
@@ -152,7 +171,15 @@ public class MainActivity extends Activity implements State.Listener {
         fromImage.setPadding(dp(12), dp(14), dp(12), dp(4));
         fromImage.setOnClickListener(v -> pickImage());
         root.addView(fromImage, new LinearLayout.LayoutParams(-2, -2));
-        setContentView(root);
+        setContentView(frame);
+        // the screen comes in softly: each part rises into place, one after another
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View v = root.getChildAt(i);
+            v.setAlpha(0f);
+            v.setTranslationY(dp(18));
+            v.animate().alpha(1f).translationY(0).setStartDelay(80L + i * 45L).setDuration(420)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        }
     }
 
     @Override
@@ -161,6 +188,7 @@ public class MainActivity extends Activity implements State.Listener {
         List<Profile> all = Profile.all(this);
         boolean has = p != null;
         power.show(State.phase, has);
+        aurora.show(State.phase);
         serverCard.setVisibility(has ? View.VISIBLE : View.GONE);
         if (has) {
             serverName.setText(p.name);

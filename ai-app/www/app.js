@@ -1474,9 +1474,9 @@
         const va = cache.vpn && cache.vpn.vpn_app;
         if (va && u.links.hy2) {
           box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "📲 Отправить приложение VPN и ссылку", onclick: () => {
-            const text = `Привет! Это наш семейный VPN 🛡\n1. Установи приложение «Семейный VPN» из файла (если телефон спросит — разреши установку).\n`
+            const text = `Привет! Это VPN «Аврора» 🛡\n1. Установи приложение «Аврора VPN» из файла (если телефон спросит — разреши установку).\n`
               + `2. Скопируй ссылку ниже, открой приложение и нажми «Вставить ссылку».\n${u.links.hy2}\n3. Нажми большую кнопку — готово.`;
-            if (Native && Native.shareFromServer) Native.shareFromServer("/app/vpn.apk", "Семейный VPN.apk", "application/vnd.android.package-archive", text);
+            if (Native && Native.shareFromServer) Native.shareFromServer("/app/vpn.apk", "Аврора VPN.apk", "application/vnd.android.package-archive", text);
             else { copyText(text); toast("Текст со ссылкой скопирован. Чтобы отправить и сам файл, обновите приложение.", 5000); }
           } }));
         }

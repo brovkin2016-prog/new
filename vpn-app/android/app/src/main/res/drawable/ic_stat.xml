@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- the status bar: the shield with the letter cut out -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFF" android:pathData="M12,2L20,5V11C20,16 16.6,20.6 12,22C7.4,20.6 4,16 4,11V5Z" />
+    android:width="24dp" android:height="24dp" android:viewportWidth="56" android:viewportHeight="62">
+    <group android:translateX="-26" android:translateY="-22.5">
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M54,25L75,32.6V49.8C75,64.2 66,76.4 54,81.6C42,76.4 33,64.2 33,49.8V32.6Z M51.3,36.5H56.7L66.2,67.5H60.2L58.1,60.8H49.9L47.8,67.5H41.8Z M51.6,55.6H56.4L54,47.9Z" />
+    </group>
 </vector>

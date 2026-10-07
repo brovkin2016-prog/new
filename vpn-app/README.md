@@ -1,4 +1,4 @@
-# Семейный VPN — Android app
+# Аврора VPN («VPN от Бровкина Алексея») — Android app
 
 A one-button VPN for the family server: add the server from a QR code (camera or a picture) or a `hysteria2://` link
 (pasted, or tapped in a messenger), press the big button, see the response time and the speed. Nothing else to set.

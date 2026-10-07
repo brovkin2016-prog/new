@@ -10,12 +10,13 @@ import android.graphics.Shader;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 
-/** The big round on/off button: grey when off, amber with a running arc while it connects, green when on. */
+/** The big round on/off button: calm when off, amber with a running arc while it connects, green with waves when on. */
 final class PowerButton extends View {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint icon = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint spin = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint wave = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF box = new RectF();
     private final boolean dark;
     private State.Phase phase = State.Phase.OFF;
@@ -31,6 +32,7 @@ final class PowerButton extends View {
         spin.setStyle(Paint.Style.STROKE);
         spin.setStrokeCap(Paint.Cap.ROUND);
         ring.setStyle(Paint.Style.FILL);
+        wave.setStyle(Paint.Style.STROKE);
         setLayerType(LAYER_TYPE_SOFTWARE, null);  // the shadow under the button needs it
         setClickable(true);
         setFocusable(true);
@@ -44,7 +46,7 @@ final class PowerButton extends View {
         boolean moving = p == State.Phase.CONNECTING || p == State.Phase.RETRYING || p == State.Phase.ON;
         if (moving && anim == null) {
             anim = ValueAnimator.ofFloat(0f, 1f);
-            anim.setDuration(1400);
+            anim.setDuration(2200);
             anim.setRepeatCount(ValueAnimator.INFINITE);
             anim.setInterpolator(new LinearInterpolator());
             anim.addUpdateListener(a -> {
@@ -92,6 +94,15 @@ final class PowerButton extends View {
                 bottom = dark ? 0xFF1C232E : 0xFFE9ECF3;
                 glowColor = dark ? 0x14FFFFFF : 0x0F1F2937;
                 iconColor = enabledLook ? (dark ? 0xFFCBD5E1 : 0xFF64748B) : (dark ? 0xFF475569 : 0xFFCBD5E1);
+        }
+        // protected: two waves leave the button, one after the other
+        if (phase == State.Phase.ON) {
+            for (int i = 0; i < 2; i++) {
+                float f = (angle / 360f + i * 0.5f) % 1f;
+                wave.setColor(0x34D399 | ((int) (0x90 * (1 - f)) << 24));
+                wave.setStrokeWidth(r * 0.025f * (1.4f - f));
+                c.drawCircle(cx, cy, inner + (r - inner) * 0.2f + (r * 0.98f - inner) * f, wave);
+            }
         }
         // a soft halo; it breathes while connected or connecting
         float halo = phase == State.Phase.OFF ? r * 0.9f : r * (0.86f + 0.1f * glow);
