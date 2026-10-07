@@ -24,14 +24,18 @@ wait_log "ping [0-9]* ms" 40 || fail "no response time through the tunnel"
 sleep 2
 adb exec-out screencap -p > "$OUT/2-on.png"
 
-# the phone's own traffic: a name lookup (UDP DNS) and a web page (TCP), through the tunnel
+# the phone's own traffic through the tunnel: a web page (TCP) and a plain DNS question over UDP
+# (Android itself asks DNS over TLS, i.e. TCP 853, so UDP is checked on purpose)
 R=$(adb shell "printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n' | toybox nc -w 15 example.com 80 | head -1")
 echo "through the VPN: $R"
 echo "$R" | grep -q "HTTP/1" || fail "a web page did not come through the VPN"
 sleep 2
-grep -E "TCP request|UDP request" /tmp/t/hy.log | tail -5
-grep -q "TCP request" /tmp/t/hy.log || fail "the server saw no TCP through the tunnel"
-grep -q "UDP request" /tmp/t/hy.log || fail "the server saw no UDP (DNS) through the tunnel"
+N=$(adb shell "( printf '\022\064\001\000\000\001\000\000\000\000\000\000\007example\003com\000\000\001\000\001'; sleep 3 ) | toybox timeout 8 toybox nc -u 8.8.8.8 53 | toybox wc -c" | tr -dc '0-9')
+echo "UDP DNS answer through the VPN: ${N:-0} bytes"
+grep -E "TCP request|UDP request" /tmp/t/hy.log | grep -v ":443\"" | tail -6
+grep -q "TCP request.*:80\"" /tmp/t/hy.log || fail "the server saw no web page through the tunnel"
+grep -q "UDP request.*8.8.8.8:53" /tmp/t/hy.log || fail "the server saw no UDP through the tunnel"
+[ "${N:-0}" -gt 20 ] || fail "no UDP answer came back through the tunnel"
 curl -s http://127.0.0.1:7653/traffic && echo
 sleep 3
 adb exec-out screencap -p > "$OUT/3-traffic.png"

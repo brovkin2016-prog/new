@@ -170,7 +170,7 @@ public class MainActivity extends Activity implements State.Listener {
         switch (State.phase) {
             case ON:
                 st = "Защищено";
-                dt = "Включено " + since() + "  ·  ↓ " + rate(State.downRate) + "  ↑ " + rate(State.upRate);
+                dt = "Включено " + since() + "\n↓\u00a0" + rate(State.downRate) + "   ↑\u00a0" + rate(State.upRate);
                 status.setTextColor(accent);
                 break;
             case CONNECTING:
@@ -410,9 +410,9 @@ public class MainActivity extends Activity implements State.Listener {
     }
 
     private static String rate(double bps) {
-        if (bps < 1024) return "0 КБ/с";
-        if (bps < 1024 * 1024) return Math.round(bps / 1024) + " КБ/с";
-        return String.format(java.util.Locale.ROOT, "%.1f МБ/с", bps / 1024 / 1024).replace('.', ',');
+        if (bps < 1024) return "0\u00a0КБ/с";
+        if (bps < 1024 * 1024) return Math.round(bps / 1024) + "\u00a0КБ/с";
+        return String.format(java.util.Locale.ROOT, "%.1f\u00a0МБ/с", bps / 1024 / 1024).replace('.', ',');
     }
 
     private static String since() {
