@@ -32,7 +32,8 @@ import java.net.URL;
  * The owner's portrait in a circle: an aurora drifts behind the photo, a ring of light turns around, and the picture breathes
  * a little. The photo lives on the family server, not in the app: it comes from /app/vpn-avatar.png and is kept on the
  * phone. On Android 9 and newer the living one comes too (/app/vpn-avatar.webp: the face winks and smiles now and
- * then). Until a picture has come, the shield logo stands in.
+ * then). Until a picture has come, the portrait from the app's own icon stands in (the server puts it there when it
+ * signs the app), and the shield only when there is none.
  */
 final class AvatarView extends View {
     private static final long EVERY_MS = 24 * 3600_000L;
@@ -44,6 +45,8 @@ final class AvatarView extends View {
     private final Drawable shield;
     private final File file, live;
     private Bitmap photo;
+    private final Bitmap iconPhoto;  // the portrait the server put into the icon: the sky and the face, full square
+    private final Rect iconSrc = new Rect();
     private Drawable moving;  // the living portrait (an animated WebP), Android 9+
     private float t;
     private ValueAnimator anim;
@@ -55,6 +58,12 @@ final class AvatarView extends View {
         live = new File(c.getFilesDir(), "avatar.webp");
         photo = BitmapFactory.decodeFile(file.getAbsolutePath());
         moving = decodeLive();
+        Bitmap ic = BitmapFactory.decodeResource(c.getResources(), R.drawable.ic_owner);
+        iconPhoto = ic != null && ic.getWidth() > 8 ? ic : null;  // the repository's placeholder is 1x1
+        if (iconPhoto != null) {  // the icon shows its middle two thirds; so does the circle
+            int w = iconPhoto.getWidth(), h = iconPhoto.getHeight();
+            iconSrc.set(w / 6, h / 6, w - w / 6, h - h / 6);
+        }
         ring.setStyle(Paint.Style.STROKE);
         ring.setStrokeCap(Paint.Cap.ROUND);
         setScaleX(0.4f);
@@ -183,7 +192,7 @@ final class AvatarView extends View {
         ring.setShader(g);
         ring.setStrokeWidth(s * 0.04f);
         c.drawCircle(cx, cy, ringR, ring);
-        if (photo == null && moving == null) {
+        if (photo == null && moving == null && iconPhoto == null) {
             int pad = Math.round(s * -0.06f);
             shield.setBounds(pad, pad, getWidth() - pad, getHeight() - pad);
             shield.draw(c);
@@ -207,6 +216,8 @@ final class AvatarView extends View {
         if (moving != null) {
             moving.setBounds(dst);
             moving.draw(c);
+        } else if (photo == null) {
+            c.drawBitmap(iconPhoto, iconSrc, dst, paint);
         } else {
             c.drawBitmap(photo, null, dst, paint);
         }
