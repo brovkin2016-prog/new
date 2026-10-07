@@ -26,6 +26,7 @@ import java.net.Proxy;
 import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -60,6 +61,7 @@ public final class VpnSvc extends VpnService {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? START : intent.getAction();
         if (STOP.equals(action)) {
+            Apps.setKeepOn(this, false);  // switched off by hand: it stays off after a reboot too
             stop(null);
             return START_NOT_STICKY;
         }
@@ -74,9 +76,11 @@ public final class VpnSvc extends VpnService {
             return START_NOT_STICKY;
         }
         foreground("Подключаюсь…");
+        Apps.setKeepOn(this, true);
+        boolean again = intent != null && intent.getBooleanExtra("again", false);  // the list of apps changed
         Thread old;
         synchronized (lock) {
-            if (wanted && profile != null && profile.link.equals(p.link)) return START_STICKY;  // already on with it
+            if (!again && wanted && profile != null && profile.link.equals(p.link)) return START_STICKY;  // already on with it
             old = worker;
             wanted = false;  // another server was chosen: the old connection goes first
         }
@@ -101,6 +105,7 @@ public final class VpnSvc extends VpnService {
 
     @Override
     public void onRevoke() {
+        Apps.setKeepOn(this, false);  // another VPN app took over: do not take it back after a reboot
         stop("VPN выключен: его забрало другое VPN-приложение или настройки телефона.");
     }
 
@@ -274,11 +279,26 @@ public final class VpnSvc extends VpnService {
             } catch (IllegalArgumentException ignored) {
                 // no IPv6 on this phone
             }
-            try {
-                b.addDisallowedApplication(getPackageName());
-            } catch (PackageManager.NameNotFoundException ignored) {
-                // it is this very package
+            List<String> only = Apps.through(this);  // only Instagram, Telegram… — or null: everything
+            int allowed = 0;
+            if (only != null) {
+                for (String pkg : only) {
+                    try {
+                        b.addAllowedApplication(pkg);
+                        allowed++;
+                    } catch (PackageManager.NameNotFoundException ignored) {
+                        // removed meanwhile
+                    }
+                }
             }
+            if (allowed == 0) {
+                try {
+                    b.addDisallowedApplication(getPackageName());  // everything but this app (its own client goes straight)
+                } catch (PackageManager.NameNotFoundException ignored) {
+                    // it is this very package
+                }
+            }
+            Log.i(TAG, allowed > 0 ? "through the VPN: " + only : "through the VPN: all apps");
             b.setConfigureIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                     PendingIntent.FLAG_IMMUTABLE));
             if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);

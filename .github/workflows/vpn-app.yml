@@ -76,7 +76,11 @@ jobs:
 
       - name: Debug APK for the emulator
         working-directory: vpn-app/android
-        run: gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -Pabis=x86_64
+        run: |
+          # first the next version (code + 1): the test updates the app over itself with it, as a real update does
+          gradle --no-daemon assembleDebug -PversionCode=$(( ${{ steps.v.outputs.code }} + 1 )) -Pabis=x86_64
+          cp app/build/outputs/apk/debug/app-debug.apk /tmp/next-debug.apk
+          gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -Pabis=x86_64
 
       - name: Test server (a real hysteria)
         env:
@@ -114,6 +118,7 @@ jobs:
         env:
           APK: ${{ github.workspace }}/vpn-app/android/app/build/outputs/apk/debug/app-debug.apk
           ICON_APK: /tmp/icon-signed.apk
+          NEXT_APK: /tmp/next-debug.apk
           OUT: /tmp/out
         with:
           api-level: 30

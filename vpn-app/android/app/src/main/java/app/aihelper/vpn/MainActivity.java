@@ -38,8 +38,8 @@ public class MainActivity extends Activity implements State.Listener {
     private PowerButton power;
     private AuroraView aurora;
     private AvatarView avatar;
-    private TextView status, detail, ping, serverName, serverChange;
-    private LinearLayout serverCard;
+    private TextView status, detail, ping, serverName, serverChange, appsName;
+    private LinearLayout serverCard, appsCard;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -154,8 +154,28 @@ public class MainActivity extends Activity implements State.Listener {
         serverChange = label("Сменить", 15, accent, true);
         serverCard.addView(serverChange, new LinearLayout.LayoutParams(-2, -2));
         lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.bottomMargin = dp(12);
+        lp.bottomMargin = dp(8);
         root.addView(serverCard, lp);
+
+        // which apps go through it: by default only Instagram, Telegram, YouTube… — the rest straight, as without a VPN
+        appsCard = new LinearLayout(this);
+        appsCard.setOrientation(LinearLayout.HORIZONTAL);
+        appsCard.setGravity(Gravity.CENTER_VERTICAL);
+        appsCard.setPadding(dp(18), dp(10), dp(18), dp(10));
+        appsCard.setBackground(press(round(card, 18, 0), 18));
+        appsCard.setOnClickListener(v -> chooseApps());
+        col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.addView(label("Через VPN", 13, muted, false), new LinearLayout.LayoutParams(-2, -2));
+        appsName = label("", 15, text, true);
+        appsName.setSingleLine(true);
+        appsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(appsName, new LinearLayout.LayoutParams(-2, -2));
+        appsCard.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+        appsCard.addView(label("Изменить", 15, accent, true), new LinearLayout.LayoutParams(-2, -2));
+        lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(12);
+        root.addView(appsCard, lp);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -193,9 +213,11 @@ public class MainActivity extends Activity implements State.Listener {
         power.show(State.phase, has);
         aurora.show(State.phase);
         serverCard.setVisibility(has ? View.VISIBLE : View.GONE);
+        appsCard.setVisibility(has ? View.VISIBLE : View.GONE);
         if (has) {
             serverName.setText(p.name);
             serverChange.setText(all.size() > 1 ? "Сменить" : "⋯");
+            appsName.setText(Apps.summary(this));
         }
         String st, dt;
         switch (State.phase) {
@@ -312,6 +334,7 @@ public class MainActivity extends Activity implements State.Listener {
         if (i == null) return;
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getDataString() != null) add(i.getDataString());
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
+        if (BuildConfig.DEBUG && i.getBooleanExtra("test_install", false)) Updater.testInstall(this);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_disconnect", false)) {
             startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
         }
@@ -403,6 +426,66 @@ public class MainActivity extends Activity implements State.Listener {
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    // ---------- which apps go through the VPN ----------
+
+    private void chooseApps() {
+        String[] modes = {
+                "Только нужные: Instagram, Telegram, YouTube… Банки, Госуслуги, маркетплейсы — напрямую",
+                "Все приложения"};
+        boolean only = Apps.onlyChosen(this);
+        int[] picked = {only ? 0 : 1};
+        new AlertDialog.Builder(this)
+                .setTitle("Что пускать через VPN")
+                .setSingleChoiceItems(modes, picked[0], (d, w) -> picked[0] = w)
+                .setPositiveButton("Готово", (d, w) -> {
+                    if ((picked[0] == 0) == only) return;
+                    Apps.setOnlyChosen(this, picked[0] == 0);
+                    appsChanged();
+                })
+                .setNeutralButton("Какие приложения", (d, w) -> pickApps())
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void pickApps() {
+        List<String> here = Apps.installed(this);
+        if (here.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Через VPN")
+                    .setMessage("На телефоне пока нет ни Instagram, ни Telegram, ни YouTube и других таких приложений. "
+                            + "Установите нужное — оно само пойдёт через VPN. А пока через VPN идут все приложения.")
+                    .setPositiveButton("Понятно", null)
+                    .show();
+            return;
+        }
+        String[] names = new String[here.size()];
+        boolean[] on = new boolean[here.size()];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = Apps.KNOWN.get(here.get(i));
+            on[i] = Apps.chosen(this, here.get(i));
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Через VPN — только эти")
+                .setMultiChoiceItems(names, on, (d, w, checked) -> on[w] = checked)
+                .setPositiveButton("Готово", (d, w) -> {
+                    for (int i = 0; i < names.length; i++) Apps.choose(this, here.get(i), on[i]);
+                    Apps.setOnlyChosen(this, true);
+                    appsChanged();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /** Takes effect at once: when on, the tunnel is opened again with the new list. */
+    private void appsChanged() {
+        changed();
+        if (State.phase == State.Phase.OFF) return;
+        Intent i = new Intent(this, VpnSvc.class).setAction(VpnSvc.START).putExtra("again", true);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+        else startService(i);
+        Toast.makeText(this, "Готово: " + Apps.summary(this), Toast.LENGTH_SHORT).show();
     }
 
     // ---------- looks ----------

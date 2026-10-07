@@ -51,6 +51,35 @@ echo "after switching off (straight to the internet): $R"
 adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"
 grep -c "hy:" "$OUT/logcat.txt"
 
+# a real update of the app over itself: the next build (version + 1) through the app's own installer, then
+# Android's «install the update?» answered by a tap — the way a phone gets every update
+vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }
+if [ -n "${NEXT_APK:-}" ]; then
+  OLD=$(vcode)
+  adb push "$NEXT_APK" /data/local/tmp/next.apk
+  adb shell "cat /data/local/tmp/next.apk | run-as $PKG sh -c 'mkdir -p cache/update && cat > cache/update/test.apk'"
+  adb shell appops set $PKG REQUEST_INSTALL_PACKAGES allow
+  adb logcat -c
+  adb shell am start -n $ACT --ez test_install true
+  NEW=
+  for _ in $(seq 1 30); do
+    sleep 2
+    NEW=$(vcode)
+    [ "${NEW:-0}" -gt "${OLD:-0}" ] && break
+    adb logcat -d -s AIVPN:V | grep -E "install: |install status [1-7] " && fail "the update did not install"
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    B=$(adb shell cat /sdcard/ui.xml | tr '>' '\n' | grep -E 'resource-id="android:id/button1"|text="(Update|Install|UPDATE|INSTALL|Обновить|Установить)"' \
+      | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 | tr -c '0-9' ' ')
+    if [ -n "$B" ]; then
+      read -r X1 Y1 X2 Y2 <<< "$B"
+      adb shell input tap $(((X1 + X2) / 2)) $(((Y1 + Y2) / 2))
+    fi
+  done
+  adb exec-out screencap -p > "$OUT/4b-update.png"
+  echo "update: version $OLD -> $NEW"
+  [ "${NEW:-0}" -gt "${OLD:-0}" ] || fail "the update did not install (still version $NEW)"
+fi
+
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install
 if [ -n "${ICON_APK:-}" ]; then
   adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"

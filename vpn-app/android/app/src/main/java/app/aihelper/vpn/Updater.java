@@ -14,6 +14,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.Log;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -254,6 +255,12 @@ final class Updater {
         }
     }
 
+    /** The emulator test only: installs the newer build it put into the cache, the same way as a real update. */
+    static void testInstall(Activity a) {
+        current = new WeakReference<>(a);
+        install(a, new File(a.getCacheDir(), "update/test.apk"));
+    }
+
     /** Through the system's package installer: the answer comes back with its status and reason. */
     private static void install(Activity a, File apk) {
         Context app = a.getApplicationContext();
@@ -263,19 +270,20 @@ final class Updater {
             p.setAppPackageName(app.getPackageName());
             p.setSize(apk.length());
             int id = pi.createSession(p);
-            try (PackageInstaller.Session s = pi.openSession(id);
-                 InputStream in = new FileInputStream(apk);
-                 OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
-                byte[] buf = new byte[65536];
-                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
-                s.fsync(out);
-                out.close();
+            try (PackageInstaller.Session s = pi.openSession(id)) {
+                // the file goes in and its stream is closed exactly once, before the commit
+                try (InputStream in = new FileInputStream(apk); OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
+                    byte[] buf = new byte[65536];
+                    for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                    s.fsync(out);
+                }
                 listen(app);
                 int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
                 PendingIntent pend = PendingIntent.getBroadcast(app, id, new Intent(RESULT).setPackage(app.getPackageName()), flags);
                 s.commit(pend.getIntentSender());
             }
         } catch (Exception e) {
+            Log.w("AIVPN", "install: " + e);
             new AlertDialog.Builder(a).setTitle("Не получилось начать установку")
                     .setMessage(String.valueOf(e.getMessage())).setPositiveButton("OK", null).show();
         }
@@ -290,6 +298,7 @@ final class Updater {
             @Override
             public void onReceive(Context c, Intent i) {
                 int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+                Log.i("AIVPN", "install status " + status + " " + i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
                 if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                     @SuppressWarnings("deprecation")
                     Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);

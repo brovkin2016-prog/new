@@ -282,13 +282,13 @@ final class Updater {
             p.setAppPackageName(app.getPackageName());
             p.setSize(apk.length());
             int id = pi.createSession(p);
-            try (PackageInstaller.Session s = pi.openSession(id);
-                 InputStream in = new FileInputStream(apk);
-                 OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
-                byte[] buf = new byte[65536];
-                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
-                s.fsync(out);
-                out.close();
+            try (PackageInstaller.Session s = pi.openSession(id)) {
+                // the file goes in and its stream is closed exactly once, before the commit
+                try (InputStream in = new FileInputStream(apk); OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
+                    byte[] buf = new byte[65536];
+                    for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                    s.fsync(out);
+                }
                 listen(app);
                 int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
                 PendingIntent pend = PendingIntent.getBroadcast(app, id, new Intent(RESULT).setPackage(app.getPackageName()), flags);
