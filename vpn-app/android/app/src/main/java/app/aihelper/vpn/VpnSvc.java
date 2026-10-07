@@ -145,8 +145,8 @@ public final class VpnSvc extends VpnService {
             long[] s = statsOrNull();
             long now = SystemClock.elapsedRealtime();
             if (s != null) {
-                // the tunnel's tx is what it hands to the phone's apps (download), rx what it takes from them (upload)
-                long dn = s[1], upb = s[3];
+                // the tunnel counts tx for what it reads from the phone's apps (upload), rx for what it gives them (download)
+                long dn = s[3], upb = s[1];
                 if (lastStats > 0) {
                     double sec = Math.max(0.2, (now - lastStats) / 1000.0);
                     State.downRate = State.downRate * 0.5 + Math.max(0, dn - prevDown) / sec * 0.5;

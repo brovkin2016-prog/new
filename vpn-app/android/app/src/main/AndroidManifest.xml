@@ -19,6 +19,7 @@
         android:theme="@style/AppTheme"
         android:allowBackup="false"
         android:extractNativeLibs="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="false">
 
         <activity
