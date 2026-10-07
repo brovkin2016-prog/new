@@ -563,16 +563,18 @@
       b.append(el("img", { class: "result", src: urlOf(m.result), onclick: () => viewer(m.result, m.name || "picture.jpg") }));
     }
     if (m.video) b.append(el("video", { class: "result", controls: true, playsinline: true, src: urlOf(m.video) }));
+    if (m.pdf) b.append(el("div", { class: "file-chip", style: "background:var(--accent-soft);margin-bottom:6px", text: "📄 " + (m.name || "document.pdf") }));
     if (m.role === "me") { if (m.text) b.append(el("div", { text: m.text })); }
     else if (m.text) b.append(el("div", { html: md(m.text) }));
     if (m.audio) b.append(el("audio", { controls: true, src: urlOf(m.audio) }));
     wrap.append(b);
     if (m.label) wrap.append(el("div", { class: "label", text: m.label }));
-    const file = m.result || m.video;
-    if (file) {  // a photo tool asked for in the chat: what came out can be kept
+    const file = m.result || m.video || m.pdf;
+    if (file) {  // a picture, video or PDF that came out: keep it, share it, or (in Photo) work on it further
       wrap.append(el("div", { class: "acts" },
         el("button", { class: "act", text: "⬇️ Сохранить", onclick: () => { saveBlob(file, m.name || "result"); toast("Сохранено"); } }),
-        el("button", { class: "act", text: "📤 Поделиться", onclick: () => shareBlob(file, m.name || "result") })));
+        el("button", { class: "act", text: "📤 Поделиться", onclick: () => shareBlob(file, m.name || "result") }),
+        thread === "photo" && m.result ? el("button", { class: "act", text: "✏️ Дальше", onclick: () => S.views.photo.set(m.result) }) : null));
     } else if (m.role === "ai" && m.text && !m.err) {
       const acts = el("div", { class: "acts" });
       acts.append(el("button", { class: "act", text: "📋 Копировать", onclick: () => copyText(plain(m.text)) }));
@@ -597,7 +599,7 @@
       playAudio(m.audio);
     } catch (e) { toast(problem(e)); }
   }
-  // a thread of messages with a live answer bubble; used by Chat and Study
+  // a thread of messages with a live answer bubble; used by Chat, Study and Photo
   function thread(name, scroll, emptyState) {
     const box = el("div", { class: "msgs" });
     const api2 = {
@@ -664,8 +666,9 @@
         if (end.t === "done") {
           if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
           out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
-            audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name,
-            result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null });
+            audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name, op: end.op,
+            result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null,
+            pdf: end.pdf ? blobOf(end.pdf, "application/pdf") : null });
           if (out.audio) playAudio(out.audio);
         } else {
           out = await api2.add({ role: "ai", text: "⚠️ " + end.text, err: true });
@@ -682,13 +685,44 @@
     return api2;
   }
 
+  // speech to text in place of the input row; onText gets what was said
+  async function dictate(row, onText) {
+    try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
+    const time = el("span", { class: "time", text: "0:00" });
+    const recRow = el("div", { class: "rec" }, el("span", { class: "dot" }), time,
+      el("button", { class: "round ghost", text: "✕", onclick: () => finish(false) }),
+      el("button", { class: "round main", text: "✓", onclick: () => finish(true) }));
+    row.replaceWith(recRow);
+    const tick = setInterval(() => {
+      const s = Math.floor((Date.now() - Rec.t0) / 1000);
+      time.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+      if (s >= 290) finish(true);
+    }, 300);
+    let done = false;
+    async function finish(keep) {
+      if (done) return;
+      done = true;
+      clearInterval(tick);
+      recRow.replaceWith(row);
+      const r = Rec.stop(keep);
+      if (!r || r.duration < 0.6) return;
+      toast("🎧 Слушаю…");
+      try {
+        const ev = await stream("/api/hear", { audio: await b64(r.blob), mime: "audio/wav", duration: r.duration }, () => {});
+        if (ev.t !== "done") { toast(ev.text); return; }
+        onText(ev.text);
+      } catch (e) { toast(problem(e)); }
+    }
+  }
+
   // ---------- Chat ----------
   function chatView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
-    const empty = () => el("div", { class: "empty" }, el("div", { class: "big", text: "✦" }), el("h2", { text: "Спросите что угодно" }),
+    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "✦" }), el("h2", { text: "Спросите что угодно" }),
       el("div", { text: "Пишите, говорите голосом 🎤, присылайте фото и документы 📎" }),
       el("div", { class: "hints" }, ...["Объясни, как работает ипотека", "Составь меню на неделю", "Помоги ответить на письмо"]
+        .concat(S.me.can.draw ? ["Нарисуй кота-космонавта на Луне"] : [])
         .map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.focus(); sync(); } }))));
     const th = thread("chat", scroll, empty);
     scroll.append(th.box);
@@ -715,11 +749,9 @@
       chips.innerHTML = "";
       chips.classList.toggle("hidden", !image);
       if (image) {
-        for (const [op, label] of Object.entries(S.me.ai_ops)) {
-          if (op === "edit" || op === "animate") continue;
-          chips.append(el("button", { class: "chip", text: label, onclick: () => (op === "solve" ? toStudy(image) : sendNow({ op })) }));
+        for (const op of ["describe", "ocr", "translate"]) {  // answers in words; tools for the photo itself live in Photo
+          if (S.me.ai_ops[op]) chips.append(el("button", { class: "chip", text: S.me.ai_ops[op], onclick: () => sendNow({ op }) }));
         }
-        chips.append(el("button", { class: "chip", text: "🖼 Обработать фото", onclick: () => { const im = image; image = null; sync(); toPhoto(im); } }));
       }
     }
     ta.addEventListener("input", sync);
@@ -748,30 +780,8 @@
     act.onclick = () => (act.textContent === "➤" ? sendNow() : record());
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); sendNow(); } });
 
-    async function record() {
-      try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
-      const time = el("span", { class: "time", text: "0:00" });
-      const recRow = el("div", { class: "rec" }, el("span", { class: "dot" }), time,
-        el("button", { class: "round ghost", text: "✕", onclick: () => finish(false) }),
-        el("button", { class: "round main", text: "✓", onclick: () => finish(true) }));
-      row.replaceWith(recRow);
-      const tick = setInterval(() => {
-        const s = Math.floor((Date.now() - Rec.t0) / 1000);
-        time.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-        if (s >= 290) finish(true);
-      }, 300);
-      async function finish(keep) {
-        clearInterval(tick);
-        recRow.replaceWith(row);
-        const r = Rec.stop(keep);
-        if (!r || r.duration < 0.6) return;
-        toast("🎧 Слушаю…");
-        try {
-          const ev = await stream("/api/hear", { audio: await b64(r.blob), mime: "audio/wav", duration: r.duration }, () => {});
-          if (ev.t !== "done") { toast(ev.text); return; }
-          th.ask({ text: ev.text, voice: true }, { role: "me", text: "🎤 " + ev.text, ctx: ev.text });
-        } catch (e) { toast(problem(e)); }
-      }
+    function record() {
+      dictate(row, (text) => th.ask({ text, voice: true }, { role: "me", text: "🎤 " + text, ctx: text }));
     }
     function attachMenu() {
       menu("Прикрепить", [
@@ -806,8 +816,6 @@
       onShow: () => th.down(),
     };
   }
-  function toPhoto(im) { show("photo"); S.views.photo.set(im); }
-  function toStudy(im) { show("study"); S.views.study.solve(im); }
 
   // ---------- Study ----------
   const GRADES = [["1", "1 класс"], ["2", "2 класс"], ["3", "3 класс"], ["4", "4 класс"], ["5", "5 класс"], ["6", "6 класс"], ["7", "7 класс"],
@@ -818,6 +826,8 @@
     explain: ["💡 Объяснить", "Подсказки и объяснение по шагам, без готового ответа — чтобы научиться самому."],
     check: ["🔍 Проверить", "Сфотографируйте своё решение: найду ошибки и объясню, как исправить."],
     essay: ["✍️ Сочинение", "Сочинение, эссе или изложение по теме — под возраст и требования."],
+    notes: ["📝 Конспект", "Сфотографируйте параграф: конспект главного и тест из 5 вопросов, чтобы проверить себя."],
+    retell: ["📖 Пересказ", "Сфотографируйте текст: пересказ своими словами, план и главная мысль."],
   };
   function studyView() {
     const root = el("div", { class: "view" });
@@ -825,8 +835,13 @@
     let mode = store.get("studyMode", "solve");
     let grade = store.get("grade", "5");
     const head = el("div");
-    const empty = () => el("div", { class: "empty" }, el("div", { class: "big", text: "📚" }), el("h2", { text: "Сфотографируйте задание" }),
-      el("div", { text: "Примеры, задачи, упражнения, вопросы по любому предмету — от 1 класса до вуза." }));
+    const EMPTY = { notes: ["Сфотографируйте параграф", "Конспект главного и тест, чтобы проверить себя."],
+      retell: ["Сфотографируйте текст", "Пересказ своими словами, план и главная мысль."],
+      essay: ["Тема сочинения", "Напишите тему или сфотографируйте задание — сочинение под возраст и требования."],
+      check: ["Сфотографируйте своё решение", "Найду ошибки и объясню, как исправить."] };
+    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "📚" }),
+      el("h2", { text: (EMPTY[mode] || ["Сфотографируйте задание"])[0] }),
+      el("div", { text: (EMPTY[mode] || ["", "Примеры, задачи, упражнения, вопросы по любому предмету — от 1 класса до вуза."])[1] }));
     const th = thread("study", scroll, empty);
     scroll.append(head, th.box);
     const ta = el("textarea", { rows: 1, placeholder: "Задание, тема сочинения или вопрос" });
@@ -842,7 +857,7 @@
       for (const [k, v] of GRADES) sel.append(el("option", { value: k, text: v, selected: k === grade }));
       const seg = el("div", { class: "seg grid2" });
       for (const [k, v] of Object.entries(STUDY_MODES)) {
-        seg.append(el("button", { class: k === mode ? "on" : "", text: v[0], onclick: () => { mode = k; store.set("studyMode", k); drawHead(); } }));
+        seg.append(el("button", { class: k === mode ? "on" : "", text: v[0], onclick: () => { mode = k; store.set("studyMode", k); drawHead(); if (!S.msgs.study.length) th.redraw(); } }));
       }
       const card = el("div", { class: "card" },
         el("div", { class: "row" }, el("div", { class: "grow" }, "Кто учится"), sel),
@@ -853,7 +868,8 @@
           el("button", { class: "big primary", onclick: () => shoot(true) }, el("span", { class: "ic", text: "📷" }), "Сфотографировать"),
           el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼" }), "Из галереи")));
       }
-      ta.placeholder = mode === "essay" ? "Тема сочинения и требования" : S.msgs.study.length ? "Спросите про решение" : "Задание или вопрос";
+      ta.placeholder = mode === "essay" ? "Тема сочинения и требования" : S.msgs.study.length ? "Спросите про решение"
+        : mode === "notes" || mode === "retell" ? "Текст или тема" : "Задание или вопрос";
     }
     async function shoot(camera) {
       const f = await pickFile("image/*", camera);
@@ -871,7 +887,7 @@
       if (!text) { shoot(true); return; }
       ta.value = "";
       ta.style.height = "auto";
-      const follow = S.msgs.study.length > 0 && mode !== "essay";
+      const follow = S.msgs.study.length > 0 && !["essay", "notes", "retell"].includes(mode);
       th.run("/api/study", { mode: follow ? "ask" : mode, grade, text, context: follow ? context("study") : [] },
         { role: "me", text: follow ? text : STUDY_MODES[mode][0] + ": " + text }).then(drawHead);
     }
@@ -894,144 +910,117 @@
     };
   }
 
-  // ---------- Photo ----------
+  // ---------- Photo: send a photo and say what to do; without a photo, describe a picture to draw ----------
+  const QUICK = ["enhance", "removebg", "restore", "colorize", "animate", "scan"];  // the rest is under «Ещё» or in words
+  const STYLE_ASKS = [["🎌", "В стиле аниме", "Перерисуй в стиле аниме"], ["🧸", "Как мультфильм Pixar", "Сделай как кадр из мультфильма Pixar, 3D"],
+    ["🌻", "Как картина Ван Гога", "Перерисуй как картину Ван Гога"], ["🏖", "Фон — море", "Замени фон на берег моря"],
+    ["🧹", "Убрать лишних людей", "Убери посторонних людей на заднем плане"]];
   function photoView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
-    root.append(scroll);
-    let style = null;
-    function draw() {
-      scroll.innerHTML = "";
-      if (!S.photo) {
-        scroll.append(el("div", { class: "big-actions", style: "margin-bottom:12px" },
-          el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
-          el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼" }), "Выбрать фото")));
-        if (S.me.can.draw) scroll.append(drawCard());
-      } else {
-        scroll.append(el("div", { class: "preview" }, el("img", { src: urlOf(S.photo), onclick: () => viewer(S.photo, "photo.jpg") }),
-          el("button", { class: "x", text: "✕", onclick: () => { S.photo = null; draw(); } })));
-        const tiles = el("div", { class: "tiles", style: "margin-bottom:12px" });
-        for (const [op, label] of Object.entries(S.me.photo_ops)) tiles.append(tile(label, () => runOp(op)));
-        if (S.me.ai_ops.edit) tiles.append(tile(S.me.ai_ops.edit, editByText));
-        if (S.me.ai_ops.animate) tiles.append(tile(S.me.ai_ops.animate, () => runJob("/api/animate", {}, "🎬 Оживить")));
-        tiles.append(tile("💬 Спросить о фото", () => { const im = S.photo; show("chat"); S.views.chat.attachImage(im); }));
-        tiles.append(tile("📚 Решить задание", () => toStudy(S.photo)));
-        scroll.append(tiles);
+    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "🖼" }), el("h2", { text: "Фото и картинки" }),
+      el("div", { text: "Пришлите фото и напишите или скажите 🎤, что сделать: «убери фон», «раскрась», «оживи», «сделай в стиле аниме»."
+        + (S.me.can.draw ? " Без фото — опишите картинку, и я её нарисую." : "") }),
+      el("div", { class: "big-actions", style: "margin:16px 0 4px" },
+        el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
+        el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼" }), "Из галереи")),
+      S.me.can.draw ? el("div", { class: "hints" }, ...["Рыжий кот-космонавт на Луне, акварель", "Уютный домик в снежном лесу ночью",
+        "Открытка с днём рождения для мамы"].map((t) => el("button", { class: "hint", text: "🎨 " + t, onclick: () => { ta.value = t; sync(); ta.focus(); } }))) : null);
+    const th = thread("photo", scroll, empty);
+    scroll.append(th.box);
+    const scanBar = el("div", { class: "banner hidden", style: "margin:0 4px 8px" });
+    const attach = el("div", { class: "attach-row hidden" });
+    const chips = el("div", { class: "chips hidden", style: "padding:0 4px 8px" });
+    const ta = el("textarea", { rows: 1 });
+    autoGrow(ta);
+    const cam = el("button", { class: "round ghost", text: "📷", title: "Фото", onclick: () => menu("Фото", [
+      ["📷", "Снять", () => pick(true)], ["🖼", "Из галереи", () => pick(false)]]) });
+    const act = el("button", { class: "round main", text: "🎤" });
+    const row = el("div", { class: "inrow" }, cam, ta, act);
+    root.append(scroll, el("div", { class: "composer" }, scanBar, attach, chips, row));
+    let photo = null;
+
+    function label(op) { return S.me.photo_ops[op] || S.me.ai_ops[op] || op; }
+    function sync() {
+      act.textContent = ta.value.trim() ? "➤" : "🎤";
+      ta.placeholder = photo ? "Что сделать с фото?" : S.me.can.draw ? "Опишите картинку — нарисую" : "Пришлите фото 📷";
+      attach.innerHTML = "";
+      attach.classList.toggle("hidden", !photo);
+      chips.innerHTML = "";
+      chips.classList.toggle("hidden", !photo);
+      if (photo) {
+        attach.append(el("img", { src: urlOf(photo), onclick: () => viewer(photo, "photo.jpg") }),
+          el("div", { style: "font-size:13px;color:var(--muted);flex:1", text: "Фото выбрано. Нажмите кнопку или напишите, что сделать" }),
+          el("button", { class: "x", text: "✕", onclick: () => { photo = null; sync(); } }));
+        for (const op of QUICK) if (S.me.photo_ops[op] || S.me.ai_ops[op]) chips.append(el("button", { class: "chip", text: label(op), onclick: () => runOp(op) }));
+        chips.append(el("button", { class: "chip", text: "⋯ Ещё", onclick: more }));
       }
+      scanBar.innerHTML = "";
+      scanBar.classList.toggle("hidden", !S.scan.length);
       if (S.scan.length) {
-        scroll.append(el("div", { class: "banner" }, el("span", { class: "grow", style: "flex:1", text: `📑 Страниц для PDF: ${S.scan.length}` }),
+        scanBar.append(el("span", { style: "flex:1", text: `📑 Страниц для PDF: ${S.scan.length}` }),
           el("button", { class: "act", text: "📄 Собрать PDF", onclick: makePdf }),
-          el("button", { class: "act", text: "✕", onclick: () => { S.scan = []; draw(); } })));
+          el("button", { class: "act", text: "✕", onclick: () => { S.scan = []; sync(); } }));
       }
-      const results = S.msgs.photo.slice().reverse();
-      if (results.length) scroll.append(el("h3", { style: "margin:16px 4px 8px;font-size:15px;color:var(--muted)", text: "Готовые" }));
-      for (const m of results) scroll.append(resultCard(m));
     }
-    function tile(label, fn) {
-      const [ic, ...rest] = label.split(" ");
-      return el("button", { class: "tile", onclick: fn }, el("span", { class: "ic", text: ic }), el("span", { text: rest.join(" ") }));
-    }
-    function drawCard() {
-      const ta = el("textarea", { class: "input", rows: 2, placeholder: "Что нарисовать? Например: рыжий кот-космонавт на Луне" });
-      const chips = el("div", { class: "chips", style: "margin:10px 0" });
-      const paint = () => {
-        chips.innerHTML = "";
-        for (const [k, v] of Object.entries(S.me.styles)) {
-          chips.append(el("button", { class: "chip" + (style === k ? " on" : ""), text: v, onclick: () => { style = style === k ? null : k; paint(); } }));
-        }
-      };
-      paint();
-      return el("div", { class: "card" }, el("h3", { text: "🎨 Нарисовать по описанию" }), ta, chips,
-        el("button", { class: "btn wide", text: "Нарисовать", onclick: () => {
-          const p = ta.value.trim();
-          if (!p) { ta.focus(); return; }
-          runJob("/api/draw", { prompt: p, style }, "🎨 " + p, true);
-        } }));
-    }
-    function resultCard(m) {
-      const card = el("div", { class: "card" });
-      if (m.result) card.append(el("img", { class: "result", style: "border-radius:12px;margin-bottom:8px", src: urlOf(m.result), onclick: () => viewer(m.result, m.name, ["🖼 Обработать дальше", () => set(m.result)]) }));
-      if (m.video) card.append(el("video", { controls: true, src: urlOf(m.video), playsinline: true }));
-      if (m.pdf) card.append(el("div", { class: "file-chip", style: "background:var(--accent-soft)", text: "📄 " + m.name }));
-      card.append(el("div", { style: "margin:4px 2px 8px;font-size:14px" + (m.err ? ";color:var(--danger)" : ""), text: m.text || "" }));
-      const blob = m.result || m.video || m.pdf;
-      const acts = el("div", { class: "acts" });
-      if (blob) {
-        acts.append(el("button", { class: "act", text: "⬇️ Сохранить", onclick: () => { saveBlob(blob, m.name); toast("Сохранено"); } }),
-          el("button", { class: "act", text: "📤 Поделиться", onclick: () => shareBlob(blob, m.name) }));
+    ta.addEventListener("input", sync);
+    act.onclick = () => (ta.value.trim() ? send() : dictate(row, (t) => { ta.value = t; send(); }));
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); send(); } });
+    function more() {
+      const items = Object.keys(S.me.photo_ops).filter((op) => !QUICK.includes(op))
+        .map((op) => { const [ic, ...rest] = label(op).split(" "); return [ic, rest.join(" "), () => runOp(op)]; });
+      if (S.me.ai_ops.edit) {
+        for (const [ic, name, words] of STYLE_ASKS) items.push([ic, name, () => { ta.value = words; send(); }]);
+        items.push(["🪄", "Своё изменение — опишите словами", () => { ta.placeholder = "Например: сделай зиму, добавь шляпу"; ta.focus(); }]);
       }
-      if (m.result) acts.append(el("button", { class: "act", text: "🖼 Дальше", onclick: () => set(m.result) }));
-      acts.append(el("button", { class: "act", text: "🗑", onclick: async () => {
-        await DB.del(m.id);
-        S.msgs.photo = S.msgs.photo.filter((x) => x !== m);
-        draw();
-      } }));
-      card.append(acts);
-      return card;
+      menu("Что сделать с фото", items);
     }
     async function pick(camera) {
       const f = await pickFile("image/*", camera);
       if (f) set(f);
     }
-    function set(im) { S.photo = im; draw(); scroll.scrollTop = 0; }
-    async function editByText() {
-      const t = await ask("Что изменить на фото?", "Например: убери людей на заднем плане, сделай фон морем");
-      if (t) runJob("/api/edit", { text: t }, "🪄 " + t);
+    function set(im) { photo = im; show("photo"); sync(); th.down(); }
+    async function go(path, body, shown) {
+      if (S.busy.photo) { toast("Подождите, предыдущая ещё делается"); return; }
+      const im = photo;
+      if (im) body.image = await b64(await shrink(im, 3072, 0.92));
+      const out = await th.run(path, body, { role: "me", image: im, text: shown });
+      if (out && out.op === "scan" && out.result) { S.scan.push(out.result); sync(); }
     }
-    function runOp(op) { runJob("/api/photo", { op }, S.me.photo_ops[op]); }
-    async function runJob(path, body, title, noImage) {
-      if (S.busy.photo) { toast("Подождите, предыдущая обработка ещё идёт"); return; }
-      S.busy.photo = true;
-      const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Отправляю…" }));
-      const card = el("div", { class: "card" }, el("div", { style: "font-weight:600;margin-bottom:6px", text: title }), status);
-      scroll.prepend(card);
-      scroll.scrollTop = 0;
-      try {
-        if (!noImage) body.image = await b64(await shrink(S.photo, 3072, 0.92));
-        const end = await stream(path, body, (ev) => { if (ev.t === "status") status.lastChild.textContent = ev.text; });
-        const m = { role: "ai", thread: "photo" };
-        if (end.t === "done") {
-          m.text = end.caption || title;
-          m.name = end.name || "result";
-          if (end.image) m.result = blobOf(end.image, end.mime);
-          if (end.video) m.video = blobOf(end.video, end.mime);
-          if (end.op === "scan" && m.result) S.scan.push(m.result);
-        } else {
-          m.text = "⚠️ " + end.text;
-          m.err = true;
-        }
-        m.ts = Date.now();
-        await DB.add(m);
-        S.msgs.photo.push(m);
-        if (S.msgs.photo.length > 60) { S.msgs.photo = S.msgs.photo.slice(-50); DB.trim("photo", 50); }
-      } catch (e) {
-        toast(problem(e));
-      }
-      S.busy.photo = false;
-      card.remove();
-      draw();
-      const first = scroll.querySelector(".card .result, .card video, .card .file-chip");
-      if (first) first.closest(".card").scrollIntoView({ behavior: "smooth", block: "start" });
+    function runOp(op) {
+      if (op === "animate") go("/api/animate", {}, label(op));
+      else go("/api/photo", { op }, label(op));
+    }
+    function send() {
+      const text = ta.value.trim();
+      if (!text) return;
+      if (!photo && !S.me.can.draw) { toast("Сначала пришлите фото: 📷 слева"); return; }
+      ta.value = "";
+      ta.style.height = "auto";
+      sync();
+      if (photo) go("/api/photo_do", { text }, text);
+      else go("/api/draw", { prompt: text }, "🎨 " + text);
     }
     async function makePdf() {
-      if (S.busy.photo) return;
+      if (S.busy.photo || !S.scan.length) return;
       const pages = await Promise.all(S.scan.map((b) => b64(b)));
-      S.busy.photo = true;
-      toast("📄 Собираю PDF…");
-      try {
-        const end = await stream("/api/pdf", { pages }, () => {});
-        if (end.t === "done") {
-          const m = { role: "ai", thread: "photo", text: `📄 PDF: ${pages.length} стр.`, name: end.name, pdf: blobOf(end.pdf, "application/pdf"), ts: Date.now() };
-          await DB.add(m);
-          S.msgs.photo.push(m);
-          S.scan = [];
-        } else toast(end.text);
-      } catch (e) { toast(problem(e)); }
-      S.busy.photo = false;
-      draw();
+      const n = pages.length;
+      const out = await th.run("/api/pdf", { pages }, { role: "me", text: `📄 Собрать PDF: ${n} стр.` });
+      if (out && out.pdf) { out.name = out.name || "scan.pdf"; S.scan = []; sync(); }
     }
-    draw();
-    return { root, set, redraw: draw };
+    sync();
+    th.redraw();
+    return {
+      root, set, redraw: th.redraw,
+      sub: () => (photo ? "фото выбрано" : "обработка и рисование"),
+      buttons: () => [["🧹", "Очистить", async () => {
+        if (!S.msgs.photo.length || !(await confirmBox("Удалить все готовые фото и картинки из списка?", "Очистить"))) return;
+        await DB.clear("photo");
+        S.msgs.photo = [];
+        th.redraw();
+      }]],
+      onShow: () => th.down(),
+    };
   }
 
   // ---------- More: translator, settings, memory, limits, app ----------
@@ -1143,7 +1132,7 @@
     const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
     function locked(text, button, action) {
       scroll.innerHTML = "";
-      scroll.append(el("div", { class: "empty" }, el("div", { class: "big", text: "🔒" }), el("h2", { text: "Выдача VPN" }),
+      scroll.append(el("div", { class: "empty" }, el("div", { class: "emoji", text: "🔒" }), el("h2", { text: "Выдача VPN" }),
         el("p", { text }), button ? el("button", { class: "btn", text: button, onclick: action }) : null));
     }
     async function enter() {
