@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
 
@@ -35,6 +36,29 @@ final class Bridge {
         String code = "window.__aiNet&&window.__aiNet(" + JSONObject.quote(id) + "," + JSONObject.quote(type) + ","
                 + JSONObject.quote(arg) + ")";
         web.post(() -> web.evaluateJavascript(code, null));
+    }
+
+    /** A one-shot answer to the page: window.__aiCall(id, ok, text). */
+    private void call(String id, boolean ok, String text) {
+        String code = "window.__aiCall&&window.__aiCall(" + JSONObject.quote(id) + "," + ok + "," + JSONObject.quote(text) + ")";
+        web.post(() -> web.evaluateJavascript(code, null));
+    }
+
+    // the owner's hosting account: sign in once on its own page, then the app reads the balance (see Hosting)
+    @JavascriptInterface
+    public void hostingLogin(String id) {
+        act.runOnUiThread(() -> Hosting.login(act, ok -> call(id, ok, ok ? "ok" : "cancel")));
+    }
+
+    @JavascriptInterface
+    public void hostingBalance(String id) {
+        String ua = WebSettings.getDefaultUserAgent(act);
+        new Thread(() -> call(id, true, Hosting.balance(ua)), "hosting").start();
+    }
+
+    @JavascriptInterface
+    public void hostingLogout() {
+        Hosting.logout();
     }
 
     @JavascriptInterface

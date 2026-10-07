@@ -35,6 +35,15 @@
     else if (type === "end") { delete pending[id]; p.end(); }
     else if (type === "fail") { delete pending[id]; p.fail(new Error(a || "net")); }
   };
+  // one-shot answers from the phone (signing in to the hosting, its balance)
+  const calls = {};
+  window.__aiCall = function (id, ok, text) {
+    const c = calls[id];
+    if (c) { delete calls[id]; c({ ok, text }); }
+  };
+  function nativeCall(name) {
+    return new Promise((resolve) => { const id = "c" + ++seq; calls[id] = resolve; window.AIBridge[name](id); });
+  }
   function fromB64(s) {
     const bin = atob(s);
     const out = new Uint8Array(bin.length);
@@ -1078,7 +1087,7 @@
       for (const [k, [used, max]] of Object.entries(me.limits)) {
         if (k === "video" && !me.ai_ops.animate) continue;
         lim.append(el("div", { style: "margin:6px 0" }, el("div", { style: "display:flex;justify-content:space-between;font-size:14px" },
-          el("span", { text: names[k] || k }), el("span", { text: max ? `${used} из ${max}` : `${used} · без лимита` })),
+          el("span", { text: names[k] || k }), el("span", { text: max ? `${used} из ${max}` : String(used) })),
           max ? el("div", { class: "bar" }, el("i", { style: `width:${Math.min(100, (100 * used) / max)}%` })) : null));
       }
       lim.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:6px", text: "Лимиты обнуляются в полночь." }));
@@ -1086,7 +1095,7 @@
       const theme = el("select", { onchange: () => { store.set("theme", theme.value); applyTheme(); } });
       for (const [k, v] of Object.entries(THEMES)) theme.append(el("option", { value: k, text: v, selected: k === store.get("theme", "system") }));
       const appCard = el("div", { class: "card" }, el("h3", { text: "Приложение" }),
-        el("div", { class: "row" }, el("div", { class: "grow" }, "Вы вошли как", el("small", { text: me.name + (me.vip ? " · без лимитов" : "") }))),
+        el("div", { class: "row" }, el("div", { class: "grow" }, "Вы вошли как", el("small", { text: me.name }))),
         el("div", { class: "row" }, el("div", { class: "grow" }, "Тема"), theme));
       if (Native && Native.version) {
         appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия", el("small", { text: Native.version() })),
@@ -1105,7 +1114,7 @@
     return { root, redraw: draw, onShow: () => api("/api/me", {}).then((m) => { S.me = m; draw(); }).catch(() => {}) };
   }
 
-  // ---------- the owner's VPN tab: giving people VPN access (bridges and the server stay in Telegram) ----------
+  // ---------- the owner's «Управление» tab: the server, VPN access and the app's people ----------
   const UNLOCK_MS = 3 * 60 * 1000;
   let unlockedAt = 0, unlocking = null;
   function unlockPhone() {  // the phone's fingerprint or PIN; true, false, or "old" for an app without it
@@ -1210,13 +1219,25 @@
       scroll.append(head, el("button", { class: "btn wide", style: "margin:0 0 12px", text: "➕ Выдать VPN", onclick: add }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан" }));
       for (const u of data.users) {
-        list.append(el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => card(u.name) },
+        list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
           el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
           el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
-            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "") })), "›"));
+            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "") })),
+          u.owner ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delVpn(u.name); } }),
+          "›"));
       }
       scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
-        text: "О каждом добавлении и удалении VPN-бот пишет вам в Telegram. Мосты и сервер — там же." }));
+        text: "Удалить — 🗑 в строке человека: его VPN сразу перестанет работать. Все добавления и удаления видны в «🖥 Сервер» → «События»." }));
+    }
+    async function delVpn(name) {
+      if (S.busy.vpn || !(await confirmBox(`Удалить «${name}»? Его VPN сразу перестанет работать.`, "Удалить"))) return;
+      S.busy.vpn = true;
+      toast("⏳ Удаляю «" + name + "»…", 20000);
+      try {
+        const end = await panel({ op: "del", name });
+        toast(end.t === "done" ? "🗑 Удалён: " + name : "⚠️ " + end.text, 4000);
+        load();
+      } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
     }
     // ---- the server at a glance, its bridges, traffic, events and the big buttons ----
     function stat(title, value, sub, pct, bad) {
@@ -1239,6 +1260,8 @@
       if (brBad.length) bad.push(brBad.length === 1 ? `не работает мост «${brBad[0].label}»` : `не работают мосты: ${brBad.length}`);
       if (d.cert_days !== null && d.cert_days < 10) bad.push(`сертификат кончается через ${d.cert_days} дн.`);
       if (d.disk[1] && d.disk[0] / d.disk[1] > 0.92) bad.push("диск почти заполнен");
+      const host = d.hosting;
+      if (host && host.set && host.days_left < 5) bad.push(`хостинг: осталось ${Math.floor(host.days_left)} дн., пополните`);
       scroll.append(el("div", { class: "card hero" + (bad.length ? " bad" : "") },
         el("div", { class: "emoji", text: bad.length ? "⚠️" : "✅" }),
         el("div", { class: "grow" }, el("b", { text: bad.length ? "Есть проблемы" : "Всё работает" }),
@@ -1251,6 +1274,31 @@
         stat("Диск", `${Math.round(100 * d.disk[0] / d.disk[1])}%`, `${d.disk[0]} из ${d.disk[1]} ГБ`, 100 * d.disk[0] / d.disk[1]),
         stat("Нагрузка", `${Math.round(100 * d.load[0] / d.cpus)}%`, `ядер: ${d.cpus} · работает ${dur(d.uptime)}`, 100 * d.load[0] / d.cpus),
         stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
+      if (host) drawHosting(host);
+      // what takes the memory and the processor: the VPN and the assistant apart
+      if (d.services && d.services.length) {
+        const mb = (v) => (v === null || v === undefined ? "—" : v >= 1024 ? (v / 1024).toFixed(1) + " ГБ" : v + " МБ");
+        const pc = (v) => (v === null || v === undefined ? "—" : v < 1 ? "<1%" : Math.round(v) + "%");
+        const card = el("div", { class: "card" }, el("h3", { text: "📊 Ресурсы" }));
+        let counted = 0;
+        for (const [k, title] of [["vpn", "🛡 VPN"], ["ai", "🤖 Помощник"]]) {
+          const xs = d.services.filter((x) => x.part === k);
+          if (!xs.length) continue;
+          const mem = xs.reduce((a, x) => a + (x.mem || 0), 0), cpu = xs.reduce((a, x) => a + (x.cpu || 0), 0);
+          counted += mem;
+          card.append(el("div", { class: "row" }, el("div", { class: "grow" }, el("b", { text: title })),
+            el("small", { text: `${mb(mem)} · процессор ${pc(cpu)}` })));
+          for (const x of xs) {
+            card.append(el("div", { class: "row", style: "min-height:30px;padding-left:14px" }, el("div", { class: "grow", style: "font-size:14px", text: x.name }),
+              el("small", { text: `${mb(x.mem)} · ${pc(x.cpu)}` })));
+          }
+        }
+        const other = Math.round(d.mem[0] - counted);
+        if (other > 0) card.append(el("div", { class: "row" }, el("div", { class: "grow" }, el("b", { text: "⚙️ Система и прочее" })), el("small", { text: mb(other) })));
+        card.append(el("div", { style: "font-size:12px;color:var(--muted);margin-top:6px",
+          text: `Процессор — доля одного ядра за последнюю секунду (ядер: ${d.cpus}). Помощнику больше всего памяти нужно, пока он обрабатывает фото и голос.` }));
+        scroll.append(card);
+      }
       // bridges
       if (d.bridges.length) {
         const card = el("div", { class: "card" }, el("h3", { text: "🌉 Мосты" }));
@@ -1315,6 +1363,67 @@
         } }),
         el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: d.mail ? "Сбои приходят уведомлением и письмом на почту." : "Почта для оповещений не настроена." }));
     }
+    // the hosting: how many days the balance lasts, and when to pay (the balance is entered after a top-up)
+    function drawHosting(h) {
+      const day = (t) => new Date(t * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+      const sign = { EUR: " €", USD: " $", RUB: " ₽" }[h.currency] || " €";
+      const eur = (v) => v.toFixed(2).replace(".", ",") + sign;
+      const card = el("div", { class: "card" + (h.set && h.days_left < 5 ? " bad" : "") }, el("h3", { text: "💳 Хостинг " + h.provider }));
+      if (h.set) {
+        const n = Math.floor(h.days_left);
+        card.append(el("div", { class: "row" }, el("span", { style: "font-size:22px", text: n < 5 ? "⚠️" : n < 10 ? "🟡" : "🟢" }),
+          el("div", { class: "grow" }, el("b", { text: n > 0 ? `Хватит примерно на ${n} дн.` : "Баланс закончился" }),
+            el("small", { text: n > 0 ? "Пополнить до " + day(h.pay_by) : "Пополните сейчас, иначе сервер остановят" }))),
+          el("div", { style: "font-size:13px;color:var(--muted);margin:2px 0 8px",
+            text: `Сейчас на балансе ≈ ${eur(h.balance)} · тариф ${eur(h.monthly)} в месяц (≈ ${eur(h.per_day)} в день). Считаю от баланса, ${h.source === "auto" ? "взятого из кабинета" : "введённого"} ${day(h.at)}; за 5 дн. до конца напомню.` }));
+      } else {
+        card.append(el("div", { style: "font-size:14px;margin-bottom:8px",
+          text: "Введите баланс из кабинета HostVDS — дальше сервер сам считает, на сколько дней его хватит, и напомнит за 5 дней до конца." }));
+      }
+      const auto = Native && Native.hostingBalance;
+      if (auto && store.get("hostvds", false)) {
+        const st = el("div", { style: "font-size:13px;color:var(--muted);margin:0 0 8px",
+          text: "🔗 Баланс берётся из кабинета HostVDS сам" + (h.source === "auto" && h.at ? " · обновлён " + ago(h.at) + " назад" : "") });
+        card.append(st);
+        if (Date.now() - store.get("hostvdsAt", 0) > 30 * 60000) {  // not on every redraw: at most every half hour
+          store.set("hostvdsAt", Date.now());
+          nativeCall("hostingBalance").then(async (r) => {
+            let js = {};
+            try { js = JSON.parse(r.text); } catch (e) { /* nothing */ }
+            if (js.ok) {
+              const end = await panel({ op: "hosting_set", balance: String(js.balance), currency: js.currency, source: "auto" }).catch(() => null);
+              if (end && end.t === "done") { st.textContent = "🔗 Баланс из кабинета HostVDS обновлён только что"; setTimeout(load, 500); }
+            } else if (js.why === "login") {
+              store.set("hostvds", false);
+              st.textContent = "🔗 Вход в кабинет HostVDS истёк — войдите снова, кнопка ниже";
+            }
+          });
+        }
+      }
+      card.append(el("div", { class: "big-actions" },
+        el("button", { class: "btn", text: h.set ? "💶 Пополнил — ввести баланс" : "💶 Ввести баланс", onclick: async () => {
+          const v = await ask("Баланс HostVDS, €", "Например 12,40 — как в кабинете HostVDS → Биллинг");
+          if (v) act({ op: "hosting_set", balance: v }, null, (r) => toast(`✅ Хватит примерно на ${Math.floor(r.hosting.days_left)} дн.`, 4000));
+        } }),
+        el("a", { class: "btn line", href: h.panel, style: "text-decoration:none;text-align:center", text: "🌐 Кабинет HostVDS" })),
+        auto ? el("button", { class: "btn line wide", style: "margin-top:8px",
+          text: store.get("hostvds", false) ? "🔌 Отключить кабинет HostVDS" : "🔗 Войти в кабинет — баланс будет обновляться сам",
+          onclick: async () => {
+            if (store.get("hostvds", false)) {
+              if (!(await confirmBox("Отключить кабинет HostVDS? Приложение забудет вход, баланс снова вводится вручную.", "Отключить"))) return;
+              Native.hostingLogout(); store.set("hostvds", false); draw(); return;
+            }
+            const r = await nativeCall("hostingLogin");
+            if (!r.ok) return;
+            store.set("hostvds", true); store.set("hostvdsAt", 0);
+            toast("✅ Кабинет подключён — беру баланс…"); draw();
+          } }) : null,
+        el("button", { class: "btn line wide", style: "margin-top:8px", text: `⚙️ Тариф: ${eur(h.monthly)} в месяц`, onclick: async () => {
+          const v = await ask("Сколько стоит сервер в месяц, €", "Сейчас " + eur(h.monthly) + " (HostVDS-4)", String(h.monthly).replace(".", ","));
+          if (v) act({ op: "hosting_set", monthly: v }, null, () => toast("✅ Тариф сохранён"));
+        } }));
+      scroll.append(card);
+    }
     async function act(body, started, done) {  // a server action with its spinner; done(result) when it answers
       if (S.busy.vpn) { toast("Подождите, предыдущее действие ещё идёт"); return; }
       S.busy.vpn = true;
@@ -1341,14 +1450,20 @@
       const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется приложением" }));
       for (const u of d.users) {
         const now = u.seen && Date.now() / 1000 - u.seen < 900;
-        list.append(el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => person(u.id) },
+        list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => person(u.id) },
           el("span", { style: "font-size:20px", text: u.off ? "⏸" : now ? "🟢" : "⚪" }),
-          el("div", { class: "grow" }, u.name + (u.vip ? " 👑" : "") + (u.id === d.me ? " · вы" : ""),
+          el("div", { class: "grow" }, u.name + (u.id === d.me ? " · вы" : ""),
             el("small", { text: u.off ? "доступ отключён" : !u.seen ? "ещё не входил(а)" + (u.codes ? " · код отправлен" : "")
-              : (now ? "сейчас в приложении" : "был(а) " + ago(u.seen) + " назад") + (u.devices > 1 ? ` · телефонов: ${u.devices}` : "") })), "›"));
+              : (now ? "сейчас в приложении" : "был(а) " + ago(u.seen) + " назад") + (u.devices > 1 ? ` · телефонов: ${u.devices}` : "") })),
+          u.id === d.me ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delPerson(u); } }),
+          "›"));
       }
       scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
-        text: (d.apk && d.apk.name ? `Версия приложения: ${d.apk.name}. ` : "") + "О каждом добавлении, отключении и удалении бот пишет вам в Telegram." }));
+        text: (d.apk && d.apk.name ? `Версия приложения: ${d.apk.name}. ` : "") + "Удалить человека — 🗑 в его строке; отключить на время или выйти на его телефонах — в его карточке." }));
+    }
+    async function delPerson(u) {
+      if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
+        appOp({ op: "app_delete", id: u.id }, "🗑 Удалён(а): " + u.name);
     }
     async function appOp(body, done) {
       if (S.busy.vpn) return null;
@@ -1401,26 +1516,22 @@
       if (!u) return;
       const mine = u.id === d.me;
       const t = u.today || {};
-      const lim = (k) => (u.vip ? "" : ` из ${d.limits[k]}`);
-      sheet((u.off ? "⏸ " : "🤖 ") + u.name + (u.vip ? " 👑" : ""), (box, close) => {
+      const lim = () => "";  // no limits in the family app
+      sheet((u.off ? "⏸ " : "🤖 ") + u.name, (box, close) => {
         const act = (label, fn, cls) => el("button", { class: "btn wide " + (cls || "line"), style: "margin-top:8px", text: label, onclick: async () => { close(); await fn(); } });
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 6px",
           text: (u.off ? "Доступ отключён" : !u.seen ? "Ещё не входил(а)" : "Был(а) " + ago(u.seen) + " назад") + ` · телефонов: ${u.devices}` }),
           el("div", { style: "font-size:14px;margin-bottom:6px", text: `Сегодня: вопросов ${t.text || 0}${lim("text")}, картинок ${t.draw || 0}${lim("draw")}, фото ${t.photo || 0}${lim("photo")}` }),
-          act(mine ? "🔑 Код для второго телефона" : "🔑 Новый код и приглашение", async () => { const r = await appOp({ op: "app_code", id: u.id }); if (r) invite(r); }, ""),
-          act(u.vip ? "👑 Снять «без лимитов»" : "👑 Без лимитов", () => appOp({ op: "app_set", id: u.id, vip: !u.vip }, u.vip ? "Лимиты включены" : "👑 Без лимитов")));
+          act(mine ? "🔑 Код для второго телефона" : "🔑 Новый код и приглашение", async () => { const r = await appOp({ op: "app_code", id: u.id }); if (r) invite(r); }, ""));
         if (mine) {
-          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы: отключить или удалить свой вход можно только в Telegram-боте." }));
+          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — «🔑 Код для второго телефона»; если потеряли все телефоны — на сервере команда aiapp-owner." }));
           return;
         }
         box.append(act(u.off ? "▶️ Включить доступ" : "⏸ Отключить доступ", () => appOp({ op: "app_set", id: u.id, off: !u.off }, u.off ? "▶️ Доступ включён" : "⏸ Доступ отключён")),
           act("🚪 Выйти на всех телефонах", async () => {
             if (await confirmBox(`Выйти у «${u.name}» на всех телефонах? Для входа понадобится новый код.`, "Выйти")) appOp({ op: "app_logout", id: u.id }, "🚪 Готово");
           }),
-          act("🗑 Удалить из приложения", async () => {
-            if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
-              appOp({ op: "app_delete", id: u.id }, "🗑 Удалён(а): " + u.name);
-          }, "line danger"));
+          act("🗑 Удалить из приложения", () => delPerson(u), "line danger"));
       });
     }
     async function add() {
@@ -1481,16 +1592,7 @@
           } }));
         }
         if (!u.owner) {
-          box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: async () => {
-            if (!(await confirmBox(`Удалить «${u.name}»? Его VPN сразу перестанет работать.`, "Удалить"))) return;
-            close();
-            toast("⏳ Удаляю «" + u.name + "»…", 20000);
-            try {
-              const end = await panel({ op: "del", name: u.name });
-              toast(end.t === "done" ? "🗑 Удалён: " + u.name : "⚠️ " + end.text, 4000);
-              load();
-            } catch (e) { toast(problem(e)); }
-          } }));
+          box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
         }
       });
     }
