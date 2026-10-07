@@ -2,37 +2,52 @@ package app.aihelper.vpn;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
-
-import androidx.core.content.FileProvider;
 
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.HashSet;
 
 /**
  * The app updates itself from the family server named in its link: /app/vpn.json says which version is there,
- * /app/vpn.apk is the file (checked against its SHA-256; Android also checks it is signed with the same key).
- * With the VPN on, it goes through the tunnel.
+ * /app/vpn.apk is the file. With the VPN on, it goes through the tunnel. A broken download continues where it
+ * stopped (a few tries), the file is checked against its SHA-256 and against this app's signing key, and it is
+ * installed through the system's package installer, so a refusal comes back with its real reason.
  */
 final class Updater {
     private static final long EVERY_MS = 6 * 3600_000L;
-    private static volatile boolean busy;
+    private static final String RESULT = "app.aihelper.vpn.INSTALL_RESULT";
+    private static final int TRIES = 6;
+    private static volatile boolean busy, cancelled;
+    private static WeakReference<Activity> current = new WeakReference<>(null);
 
     private Updater() {}
 
@@ -49,6 +64,7 @@ final class Updater {
     }
 
     static void check(Activity a, boolean manual) {
+        current = new WeakReference<>(a);
         Profile p = Profile.chosen(a);
         String host = p == null ? null : p.updateHost();
         SharedPreferences prefs = a.getSharedPreferences("vpn", Context.MODE_PRIVATE);
@@ -109,53 +125,222 @@ final class Updater {
                     .show();
             return;
         }
+        int pad = (int) (20 * a.getResources().getDisplayMetrics().density);
+        LinearLayout box = new LinearLayout(a);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad / 2, pad, 0);
         ProgressBar bar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(100);
-        bar.setPadding(48, 24, 48, 24);
-        AlertDialog dlg = new AlertDialog.Builder(a).setTitle("Загружаю обновление…").setView(bar).setCancelable(false).show();
+        bar.setMax(1000);
+        TextView line = new TextView(a);
+        line.setPadding(0, pad / 3, 0, 0);
+        line.setText("Подключаюсь…");
+        box.addView(bar);
+        box.addView(line);
+        cancelled = false;
+        AlertDialog dlg = new AlertDialog.Builder(a).setTitle("Загружаю обновление " + info.optString("name", ""))
+                .setView(box).setCancelable(false)
+                .setNegativeButton("Отмена", (d, w) -> cancelled = true).show();
         long size = Math.max(1, info.optLong("size", 1));
+        String want = info.optString("sha256", "");
         File dir = new File(a.getCacheDir(), "update");
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
-        File apk = new File(dir, "vpn.apk");
+        File apk = new File(dir, "vpn-" + info.optInt("code", 0) + ".apk");  // a broken download of this version resumes
+        File[] old = dir.listFiles();
+        if (old != null) for (File f : old) if (!f.equals(apk)) //noinspection ResultOfMethodCallIgnored
+            f.delete();
         new Thread(() -> {
             String err = null;
-            try {
-                HttpURLConnection c = open(base + "vpn.apk");
-                if (c.getResponseCode() != 200) {
-                    err = "не скачалось (" + c.getResponseCode() + ")";
-                } else {
-                    MessageDigest sha = MessageDigest.getInstance("SHA-256");
-                    long got = 0;
-                    try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
-                        byte[] b = new byte[64 * 1024];
-                        for (int n; (n = in.read(b)) > 0; ) {
-                            out.write(b, 0, n);
-                            sha.update(b, 0, n);
-                            got += n;
-                            int pct = (int) Math.min(100, got * 100 / size);
-                            a.runOnUiThread(() -> bar.setProgress(pct));
-                        }
+            for (int t = 0; t < TRIES && !cancelled; t++) {
+                if (apk.length() >= size) break;
+                if (t > 0) {
+                    int n = t;
+                    a.runOnUiThread(() -> line.setText("Связь прервалась, продолжаю… (попытка " + (n + 1) + " из " + TRIES + ")"));
+                    try {
+                        Thread.sleep(1500L * t);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                     }
-                    StringBuilder hex = new StringBuilder();
-                    for (byte x : sha.digest()) hex.append(String.format("%02x", x));
-                    if (!hex.toString().equalsIgnoreCase(info.optString("sha256", ""))) err = "файл повреждён при загрузке";
                 }
-                c.disconnect();
-            } catch (Exception e) {
-                err = "нет связи с сервером";
+                err = fetch(a, base + "vpn.apk", apk, size, bar, line);
+                if (err == null && apk.length() >= size) break;
+            }
+            if (cancelled) err = "отменено";
+            else if (apk.length() < size && err == null) err = "файл скачался не целиком";
+            if (err == null && !want.equalsIgnoreCase(sha256(apk))) {
+                //noinspection ResultOfMethodCallIgnored
+                apk.delete();  // next time from the start
+                err = "файл повреждён при загрузке";
             }
             String fail = err;
+            boolean otherKey = fail == null && !sameSigner(a, apk);
             a.runOnUiThread(() -> {
                 dlg.dismiss();
                 if (fail != null) {
-                    Toast.makeText(a, "Обновление: " + fail + ". Попробуйте позже.", Toast.LENGTH_LONG).show();
+                    if (cancelled) return;
+                    new AlertDialog.Builder(a).setTitle("Обновление не скачалось")
+                            .setMessage("Причина: " + fail + ".\n\nСкачанная часть сохранена — при повторе загрузка продолжится с места обрыва.")
+                            .setPositiveButton("Повторить", (d, w) -> download(a, base, info))
+                            .setNegativeButton("Позже", null).show();
                     return;
                 }
-                Uri uri = FileProvider.getUriForFile(a, a.getPackageName() + ".files", apk);
-                a.startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK));
+                if (otherKey) {
+                    new AlertDialog.Builder(a).setTitle("Нужна переустановка")
+                            .setMessage("Новая версия подписана другим ключом (сервер переустанавливали с нуля). Удалите это "
+                                    + "приложение и поставьте его заново из файла, который пришлёт владелец, затем вставьте ссылку.")
+                            .setPositiveButton("Удалить приложение", (d, w) -> a.startActivity(
+                                    new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + a.getPackageName()))))
+                            .setNegativeButton("Закрыть", null).show();
+                    return;
+                }
+                install(a, apk);
             });
         }, "update-download").start();
+    }
+
+    /** One pass: continues the file from its current length (Range), or starts over when the server sends it whole. */
+    private static String fetch(Activity a, String url, File apk, long size, ProgressBar bar, TextView line) {
+        long have = apk.length();
+        HttpURLConnection c = null;
+        try {
+            c = open(url);
+            if (have > 0) c.setRequestProperty("Range", "bytes=" + have + "-");
+            int code = c.getResponseCode();
+            if (code == 416) {
+                //noinspection ResultOfMethodCallIgnored
+                apk.delete();
+                return "файл на сервере сменился";
+            }
+            if (code != 200 && code != 206) return "сервер ответил " + code;
+            long got = code == 206 ? have : 0;
+            try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(apk, code == 206)) {
+                byte[] b = new byte[64 * 1024];
+                for (int n; !cancelled && (n = in.read(b)) > 0; ) {
+                    out.write(b, 0, n);
+                    got += n;
+                    long g = got;
+                    a.runOnUiThread(() -> {
+                        bar.setProgress((int) Math.min(1000, g * 1000 / size));
+                        line.setText(String.format(java.util.Locale.ROOT, "%.1f из %.1f МБ", g / 1e6, size / 1e6));
+                    });
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return "связь прервалась";
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    /** The new file must be signed with the same key as this app, or Android refuses it with a bare "not installed". */
+    @SuppressWarnings("deprecation")
+    private static boolean sameSigner(Context c, File apk) {
+        try {
+            PackageManager pm = c.getPackageManager();
+            if (Build.VERSION.SDK_INT >= 28) {
+                PackageInfo mine = pm.getPackageInfo(c.getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+                PackageInfo theirs = pm.getPackageArchiveInfo(apk.getPath(), PackageManager.GET_SIGNING_CERTIFICATES);
+                if (theirs == null || theirs.signingInfo == null || mine.signingInfo == null) return true;  // cannot tell
+                return new HashSet<>(Arrays.asList(mine.signingInfo.getApkContentsSigners()))
+                        .equals(new HashSet<>(Arrays.asList(theirs.signingInfo.getApkContentsSigners())));
+            }
+            PackageInfo mine = pm.getPackageInfo(c.getPackageName(), PackageManager.GET_SIGNATURES);
+            PackageInfo theirs = pm.getPackageArchiveInfo(apk.getPath(), PackageManager.GET_SIGNATURES);
+            if (theirs == null || theirs.signatures == null || theirs.signatures.length == 0) return true;
+            return new HashSet<>(Arrays.asList(mine.signatures)).equals(new HashSet<>(Arrays.asList(theirs.signatures)));
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    /** Through the system's package installer: the answer comes back with its status and reason. */
+    private static void install(Activity a, File apk) {
+        Context app = a.getApplicationContext();
+        try {
+            PackageInstaller pi = app.getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            p.setAppPackageName(app.getPackageName());
+            p.setSize(apk.length());
+            int id = pi.createSession(p);
+            try (PackageInstaller.Session s = pi.openSession(id);
+                 InputStream in = new FileInputStream(apk);
+                 OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
+                byte[] buf = new byte[65536];
+                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                s.fsync(out);
+                out.close();
+                listen(app);
+                int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+                PendingIntent pend = PendingIntent.getBroadcast(app, id, new Intent(RESULT).setPackage(app.getPackageName()), flags);
+                s.commit(pend.getIntentSender());
+            }
+        } catch (Exception e) {
+            new AlertDialog.Builder(a).setTitle("Не получилось начать установку")
+                    .setMessage(String.valueOf(e.getMessage())).setPositiveButton("OK", null).show();
+        }
+    }
+
+    private static boolean listening;
+
+    private static synchronized void listen(Context app) {
+        if (listening) return;
+        listening = true;
+        BroadcastReceiver r = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context c, Intent i) {
+                int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    @SuppressWarnings("deprecation")
+                    Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
+                    if (confirm != null) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    return;
+                }
+                if (status == PackageInstaller.STATUS_SUCCESS || status == PackageInstaller.STATUS_FAILURE_ABORTED) return;
+                String why;
+                switch (status) {
+                    case PackageInstaller.STATUS_FAILURE_CONFLICT:
+                        why = "конфликт с установленной версией — обычно это другой ключ подписи. Удалите приложение и поставьте файл заново.";
+                        break;
+                    case PackageInstaller.STATUS_FAILURE_STORAGE:
+                        why = "на телефоне мало места. Освободите 50–100 МБ и повторите.";
+                        break;
+                    case PackageInstaller.STATUS_FAILURE_INVALID:
+                        why = "файл повреждён. Повторите обновление — он скачается заново.";
+                        break;
+                    case PackageInstaller.STATUS_FAILURE_INCOMPATIBLE:
+                        why = "эта версия не подходит к телефону.";
+                        break;
+                    case PackageInstaller.STATUS_FAILURE_BLOCKED:
+                        why = "установку запретил телефон (Play Защита или ограничения).";
+                        break;
+                    default:
+                        why = "Android отказал.";
+                }
+                String detail = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+                Activity a = current.get();
+                String text = "Обновление не установлено: " + why + (detail != null ? "\n\n(" + detail + ")" : "");
+                if (a != null && !a.isFinishing()) {
+                    new AlertDialog.Builder(a).setTitle("Не установилось").setMessage(text).setPositiveButton("OK", null).show();
+                } else {
+                    Toast.makeText(c, text, Toast.LENGTH_LONG).show();
+                }
+            }
+        };
+        if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(r, new IntentFilter(RESULT), Context.RECEIVER_NOT_EXPORTED);
+        else app.registerReceiver(r, new IntentFilter(RESULT));
+    }
+
+    private static String sha256(File f) {
+        try (InputStream in = new FileInputStream(f)) {
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[65536];
+            for (int n; (n = in.read(buf)) > 0; ) sha.update(buf, 0, n);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : sha.digest()) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 }
