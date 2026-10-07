@@ -109,7 +109,7 @@ final class Files {
         }
     }
 
-    private static void send(Activity a, File f, String mime, String text) {
+    static void send(Activity a, File f, String mime, String text) {
         Uri uri = FileProvider.getUriForFile(a, authority(a), f);
         Intent i = new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);

@@ -492,13 +492,14 @@
   async function logout(message) {
     try { await api("/api/logout", {}); } catch (e) { /* signed out anyway */ }
     store.set("token", "");
+    if (Native && Native.setOwner) Native.setOwner("");  // no server notifications on a signed-out phone
     renderLogin(message || "");
   }
 
   // ---------- the main screen ----------
   const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼", "Фото"], ["more", "☰", "Ещё"]];
-  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", vpn: "Близкие", more: "Ещё" };
-  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 3).concat([["vpn", "👥", "Близкие"]], TABS.slice(3)) : TABS);
+  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", vpn: "Управление", more: "Ещё" };
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 3).concat([["vpn", "🛡", "Управление"]], TABS.slice(3)) : TABS);
   async function start() {
     applyTheme();
     try {
@@ -525,7 +526,14 @@
     shell.append(S.top, S.viewsEl, tabs);
     app.append(shell);
     S.views = { chat: chatView(), study: studyView(), photo: photoView(), more: moreView() };
-    if (S.me.panel) S.views.vpn = vpnView();
+    if (S.me.panel) {
+      S.views.vpn = vpnView();
+      if (Native && Native.setOwner) {
+        Native.setOwner(store.get("token", ""));
+        if (!store.get("askedNotify", false) && Native.askNotify) { store.set("askedNotify", true); Native.askNotify(); }
+      }
+      setTimeout(() => S.views.vpn && S.views.vpn.peek(), 1500);
+    }
     for (const v of Object.values(S.views)) S.viewsEl.append(v.root);
     show(tabsFor(S.me).some((t) => t[0] === S.tab) && S.tab !== "vpn" ? S.tab : "chat");
   }
@@ -1111,7 +1119,7 @@
           if (how !== "no") unlockedAt = Date.now();
           resolve(how !== "no");
         };
-        Native.unlock("Близкие: VPN и приложение");
+        Native.unlock("Управление сервером");
       });
     }
     return unlocking;
@@ -1128,18 +1136,34 @@
     const s = Math.max(0, Date.now() / 1000 - ts);
     return s < 3600 ? Math.max(1, Math.round(s / 60)) + " мин" : s < 86400 ? Math.round(s / 3600) + " ч" : Math.round(s / 86400) + " дн.";
   }
-  // the owner's tab «Близкие»: VPN for family, and who may use this app (never in a family member's app)
+  function when(ts) {  // "сегодня 14:05", "вчера 09:12", "3 окт 18:40"
+    const d = new Date(ts * 1000), now = new Date();
+    const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
+    return days === 0 ? "сегодня " + hm : days === 1 ? "вчера " + hm
+      : d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "") + " " + hm;
+  }
+  function badge(n) {  // a red count on the Управление tab
+    const tab = document.querySelector('.tab[data-tab="vpn"]');
+    if (!tab) return;
+    let b = tab.querySelector(".badge");
+    if (!n) { if (b) b.remove(); return; }
+    if (!b) { b = el("span", { class: "badge" }); tab.append(b); }
+    b.textContent = n > 9 ? "9+" : String(n);
+  }
+  // the owner's tab «Управление»: the server, VPN for family, and who may use this app (never in a family member's app)
   function vpnView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     root.append(scroll);
-    let part = store.get("accessPart", "vpn"), open = false;
-    const cache = { vpn: null, app: null };
+    let part = store.get("accessPart", "server"), open = false;
+    const cache = { server: null, vpn: null, app: null, alerts: null };
+    const OPS = { server: "status", vpn: "users", app: "app_list" };
     let data = null;
     const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
     function locked(text, button, action) {
       scroll.innerHTML = "";
-      scroll.append(el("div", { class: "empty" }, el("div", { class: "emoji", text: "🔒" }), el("h2", { text: "Близкие" }),
+      scroll.append(el("div", { class: "empty" }, el("div", { class: "emoji", text: "🔒" }), el("h2", { text: "Управление" }),
         el("p", { text }), button ? el("button", { class: "btn", text: button, onclick: action }) : null));
     }
     async function enter() {
@@ -1159,22 +1183,24 @@
       const want = part;
       if (!cache[want]) { draw(); scroll.append(el("div", { class: "status", style: "padding:20px" }, el("span", { class: "spin" }), "Загружаю…")); }
       try {
-        const end = await panel({ op: want === "vpn" ? "users" : "app_list" });
+        const [end, ev] = await Promise.all([panel({ op: OPS[want] }), want === "server" ? panel({ op: "alerts", since: 0 }) : null]);
         if (end.t !== "done") throw new HttpError(500, end.text);
         cache[want] = end;
+        if (ev && ev.t === "done") cache.alerts = ev.alerts.slice().reverse();
         if (part === want) draw();
       } catch (e) { if (!cache[want]) { draw(); scroll.append(el("p", { class: "status", style: "padding:12px", text: problem(e) })); } else toast(problem(e)); }
     }
     function draw() {
       scroll.innerHTML = "";
       const seg = el("div", { class: "seg", style: "margin-bottom:12px" });
-      for (const [k, v] of [["vpn", "🛡 VPN"], ["app", "🤖 Приложение"]]) {
+      for (const [k, v] of [["server", "🖥 Сервер"], ["vpn", "🛡 VPN"], ["app", "🤖 Приложение"]]) {
         seg.append(el("button", { class: k === part ? "on" : "", text: v, onclick: () => { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); } }));
       }
       scroll.append(seg);
       data = cache[part];
       if (!data) return;
       if (part === "app") return drawApp(data);
+      if (part === "server") return drawServer(data);
       const on = data.users.filter((u) => u.online).length;
       const head = el("div", { class: "card" },
         el("div", { class: "row" }, el("div", { class: "grow" }, (data.vpn ? "🟢 VPN работает" : "🔴 VPN не работает") + " · " + data.host,
@@ -1192,6 +1218,123 @@
       scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
         text: "О каждом добавлении и удалении VPN-бот пишет вам в Telegram. Мосты и сервер — там же." }));
     }
+    // ---- the server at a glance, its bridges, traffic, events and the big buttons ----
+    function stat(title, value, sub, pct, bad) {
+      return el("div", { class: "stat" + (bad ? " bad" : "") }, el("small", { text: title }), el("b", { text: value }),
+        pct !== undefined ? el("div", { class: "bar" }, el("i", { style: `width:${Math.max(2, Math.min(100, pct))}%` + (pct > 85 ? ";background:var(--danger)" : "") })) : null,
+        sub ? el("small", { text: sub }) : null);
+    }
+    function dur(sec) {
+      if (!sec && sec !== 0) return "";
+      sec = Math.max(0, sec);
+      return sec < 3600 ? Math.round(sec / 60) + " мин" : sec < 86400 ? Math.floor(sec / 3600) + " ч " + Math.round(sec % 3600 / 60) + " мин"
+        : Math.floor(sec / 86400) + " д " + Math.round(sec % 86400 / 3600) + " ч";
+    }
+    const UNIT = { failed: "остановился", inactive: "выключен", activating: "запускается", deactivating: "останавливается" };
+    function drawServer(d) {
+      const bad = [];
+      if (!d.vpn.ok) bad.push("VPN не работает");
+      if (d.vless && !d.vless.ok) bad.push("запасной VLESS не работает");
+      const brBad = d.bridges.filter((b) => !b.ok);
+      if (brBad.length) bad.push(brBad.length === 1 ? `не работает мост «${brBad[0].label}»` : `не работают мосты: ${brBad.length}`);
+      if (d.cert_days !== null && d.cert_days < 10) bad.push(`сертификат кончается через ${d.cert_days} дн.`);
+      if (d.disk[1] && d.disk[0] / d.disk[1] > 0.92) bad.push("диск почти заполнен");
+      scroll.append(el("div", { class: "card hero" + (bad.length ? " bad" : "") },
+        el("div", { class: "emoji", text: bad.length ? "⚠️" : "✅" }),
+        el("div", { class: "grow" }, el("b", { text: bad.length ? "Есть проблемы" : "Всё работает" }),
+          el("small", { text: bad.length ? bad.join(" · ") : `${d.host} · ${d.ip}` + (d.online !== null ? ` · в сети: ${d.online}` : "") }))));
+      const brOk = d.bridges.length - brBad.length;
+      scroll.append(el("div", { class: "stats" },
+        stat("VPN", d.vpn.ok ? "работает" : "не работает", d.vpn.ok && d.vpn.since ? dur(d.vpn.since) + " без перерыва" : UNIT[d.vpn.state] || d.vpn.state, undefined, !d.vpn.ok),
+        stat("Мосты", d.bridges.length ? `${brOk} из ${d.bridges.length}` : "нет", brBad.length ? "есть неработающие" : "", undefined, brBad.length > 0),
+        stat("Память", `${Math.round(100 * d.mem[0] / d.mem[1])}%`, `${(d.mem[0] / 1024).toFixed(1)} из ${(d.mem[1] / 1024).toFixed(1)} ГБ`, 100 * d.mem[0] / d.mem[1]),
+        stat("Диск", `${Math.round(100 * d.disk[0] / d.disk[1])}%`, `${d.disk[0]} из ${d.disk[1]} ГБ`, 100 * d.disk[0] / d.disk[1]),
+        stat("Нагрузка", `${Math.round(100 * d.load[0] / d.cpus)}%`, `ядер: ${d.cpus} · работает ${dur(d.uptime)}`, 100 * d.load[0] / d.cpus),
+        stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
+      // bridges
+      if (d.bridges.length) {
+        const card = el("div", { class: "card" }, el("h3", { text: "🌉 Мосты" }));
+        for (const b of d.bridges) {
+          card.append(el("div", { class: "row" }, el("span", { style: "font-size:18px", text: b.ok ? "🟢" : "🔴" }),
+            el("div", { class: "grow" }, b.label, el("small", { text: (b.ok ? "работает " + dur(b.since) : UNIT[b.state] || b.state) + (+b.restarts ? ` · перезапусков: ${b.restarts}` : "") })),
+            b.link ? el("button", { class: "icon-btn", title: "Ссылка", text: "🔗", onclick: () => bridgeLink(b) }) : null,
+            el("button", { class: "icon-btn", title: "Перезапустить", text: "🔄", onclick: async () => {
+              if (await confirmBox(`Перезапустить «${b.label}»? Ссылка останется прежней.`, "Перезапустить")) {
+                act({ op: "bridge_restart", id: b.id }, "🔄 Перезапускаю мост…");
+              }
+            } })));
+        }
+        const st = d.selftest;
+        card.append(el("div", { style: "font-size:13px;color:var(--muted);margin:8px 0", text: !st ? "Автопроверка моста: ещё не было"
+          : st.ok ? `Проверка ${when(st.ts)}: ✓ ${st.mbit} Мбит/с, выход ${st.ip}` : `Проверка ${when(st.ts)}: ✗ ${st.err}` }),
+          el("div", { class: "big-actions" },
+            el("button", { class: "btn line", text: "🧪 Проверить", onclick: () => act({ op: "bridge_test" }, null, (r) => toast(r.selftest && r.selftest.ok ? `✓ Мост работает: ${r.selftest.mbit} Мбит/с` : "✗ Проверка не прошла", 5000)) }),
+            el("button", { class: "btn line", text: "✉️ Тест почты", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) })));
+        scroll.append(card);
+      }
+      scroll.append(trafficCard(), eventsCard(), actionsCard(d));
+    }
+    function trafficCard() {
+      const card = el("div", { class: "card" }, el("h3", { text: "📊 Трафик" }), el("div", { class: "status", text: "…" }));
+      panel({ op: "traffic" }).then((t) => {
+        if (t.t !== "done") return;
+        card.lastChild.remove();
+        if (t.month !== null) {
+          const pct = 100 * t.month / (t.cap_gb * 1024 ** 3);
+          card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "За месяц", el("small", { text: `сегодня ${bytes(t.today)}` })),
+            el("b", { text: `${bytes(t.month)} из ${Math.round(t.cap_gb / 1024)} ТБ` })),
+          el("div", { class: "bar", style: "margin:2px 0 8px" }, el("i", { style: `width:${Math.max(1, Math.min(100, pct))}%` })));
+        }
+        const top = t.users.map((u) => [u.name, (u.tx || 0) + (u.rx || 0)]).filter((u) => u[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 6);
+        for (const [n, v] of top) card.append(el("div", { class: "row", style: "min-height:34px" }, el("div", { class: "grow", text: n }), el("small", { text: bytes(v) })));
+        if (!top.length) card.append(el("small", { style: "color:var(--muted)", text: "С последнего перезапуска VPN трафика ещё не было." }));
+      }).catch(() => { card.lastChild.textContent = "не загрузилось"; });
+      return card;
+    }
+    function eventsCard() {
+      const items = cache.alerts || [];
+      const card = el("div", { class: "card" }, el("h3", { text: "🔔 События" }));
+      if (!items.length) card.append(el("small", { style: "color:var(--muted)", text: "Пока тихо. О сбоях и починке напишу сюда и пришлю уведомление." }));
+      const seen = store.get("alertsSeen", 0);
+      for (const a of items.slice(0, 12)) {
+        card.append(el("div", { class: "event " + a.kind + (a.ts > seen && a.kind !== "log" ? " new" : "") },
+          el("small", { text: when(a.ts) }), el("div", { text: a.text })));
+      }
+      if (items.length) store.set("alertsSeen", items[0].ts);
+      badge(0);
+      return card;
+    }
+    function actionsCard(d) {
+      return el("div", { class: "card" }, el("h3", { text: "⚙️ Сервер" }),
+        el("button", { class: "btn line wide", text: "⚡ Скорость сервера", onclick: () => act({ op: "speed" }, null, (r) => toast(`⚡ Скорость сервера: ${r.mbit} Мбит/с`, 6000)) }),
+        el("button", { class: "btn line wide", style: "margin-top:8px", text: "💾 Резервная копия на почту", onclick: async () => {
+          if (await confirmBox("Сделать резервную копию сейчас? Она придёт на почту через минуту-две.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — она придёт на почту");
+        } }),
+        el("button", { class: "btn line wide danger", style: "margin-top:8px", text: "♻️ Перезагрузить сервер", onclick: async () => {
+          if (await confirmBox("Перезагрузить сервер? VPN, мосты и помощник пропадут примерно на минуту.", "Перезагрузить")) act({ op: "reboot" }, "♻️ Перезагружаюсь, вернусь через минуту");
+        } }),
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: d.mail ? "Сбои приходят уведомлением и письмом на почту." : "Почта для оповещений не настроена." }));
+    }
+    async function act(body, started, done) {  // a server action with its spinner; done(result) when it answers
+      if (S.busy.vpn) { toast("Подождите, предыдущее действие ещё идёт"); return; }
+      S.busy.vpn = true;
+      if (started) toast(started, 4000);
+      try {
+        const end = await panel(body, (t) => toast(t, 120000));
+        if (end.t !== "done") toast("⚠️ " + end.text, 6000);
+        else { if (done) done(end); setTimeout(load, 1500); }
+      } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
+    }
+    function bridgeLink(b) {
+      sheet("🔗 " + b.label, (box) => {
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Ссылку вставляют в приложение моста (whitelist-bypass) на этом устройстве." }),
+          el("div", { style: "font:12px ui-monospace,monospace;word-break:break-all;background:var(--card);border-radius:10px;padding:10px;margin-bottom:10px", text: b.link }),
+          el("div", { class: "big-actions" },
+            el("button", { class: "btn", text: "📋 Копировать", onclick: () => copyText(b.link) }),
+            el("button", { class: "btn line", text: "📤 Поделиться", onclick: () => (navigator.share ? navigator.share({ text: b.link }).catch(() => copyText(b.link)) : copyText(b.link)) })));
+      });
+    }
+
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
       scroll.append(el("button", { class: "btn wide", style: "margin:0 0 12px", text: "➕ Добавить человека", onclick: addPerson }));
@@ -1328,6 +1471,15 @@
         if (kinds.length > 1) box.append(chips);
         box.append(pane);
         pick(kinds[0]);
+        const va = cache.vpn && cache.vpn.vpn_app;
+        if (va && u.links.hy2) {
+          box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "📲 Отправить приложение VPN и ссылку", onclick: () => {
+            const text = `Привет! Это наш семейный VPN 🛡\n1. Установи приложение «Семейный VPN» из файла (если телефон спросит — разреши установку).\n`
+              + `2. Скопируй ссылку ниже, открой приложение и нажми «Вставить ссылку».\n${u.links.hy2}\n3. Нажми большую кнопку — готово.`;
+            if (Native && Native.shareFromServer) Native.shareFromServer("/app/vpn.apk", "Семейный VPN.apk", "application/vnd.android.package-archive", text);
+            else { copyText(text); toast("Текст со ссылкой скопирован. Чтобы отправить и сам файл, обновите приложение.", 5000); }
+          } }));
+        }
         if (!u.owner) {
           box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: async () => {
             if (!(await confirmBox(`Удалить «${u.name}»? Его VPN сразу перестанет работать.`, "Удалить"))) return;
@@ -1342,7 +1494,16 @@
         }
       });
     }
-    return { root, redraw: () => open && draw(), sub: () => (part === "vpn" ? "выдача VPN: ссылки и QR" : "кто пользуется приложением"),
+    // unread events for the tab's badge, without opening the tab (and without the fingerprint question)
+    async function peek() {
+      try {
+        const seen = store.get("alertsSeen", 0);
+        const ev = await panel({ op: "alerts", since: seen });
+        if (ev.t === "done" && S.tab !== "vpn") badge(ev.alerts.filter((a) => a.kind !== "log").length);
+      } catch (e) { /* quiet */ }
+    }
+    return { root, peek, redraw: () => open && draw(),
+      sub: () => ({ server: "состояние, мосты, события", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется приложением" })[part],
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
       onShow: () => (open && Date.now() - unlockedAt < UNLOCK_MS ? load() : (open = false, enter())) };
   }

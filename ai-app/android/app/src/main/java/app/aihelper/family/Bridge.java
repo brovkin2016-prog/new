@@ -107,6 +107,63 @@ final class Bridge {
         act.runOnUiThread(() -> Files.share(act, name, mime, data, text));
     }
 
+    /** The owner signed in: server notifications on this phone (an empty token switches them off). */
+    @JavascriptInterface
+    public void setOwner(String token) {
+        AlertJob.schedule(act, token);
+    }
+
+    @JavascriptInterface
+    public void askNotify() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            act.runOnUiThread(() -> act.requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 9));
+        }
+    }
+
+    /** A file from the server (the family VPN app) handed to a messenger with a message, without passing through the page. */
+    @JavascriptInterface
+    public void shareFromServer(String path, String name, String mime, String text) {
+        if (path == null || !path.startsWith("/app/")) return;
+        act.runOnUiThread(() -> Toast.makeText(act, "Готовлю файл…", Toast.LENGTH_SHORT).show());
+        java.io.File dir = new java.io.File(act.getCacheDir(), "share");
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        java.io.File f = new java.io.File(dir, name.replaceAll("[\\\\/:*?\"<>|]", "_"));
+        java.io.FileOutputStream[] out = {null};
+        try {
+            out[0] = new java.io.FileOutputStream(f);
+        } catch (Exception e) {
+            return;
+        }
+        int[] status = {0};
+        Net.start("GET", path, null, null, new Net.Sink() {
+            public void head(int s) { status[0] = s; }
+            public void data(byte[] chunk) {
+                try {
+                    out[0].write(chunk);
+                } catch (Exception ignored) {
+                    // the end tells
+                }
+            }
+            public void end() {
+                close();
+                if (status[0] == 200) act.runOnUiThread(() -> Files.send(act, f, mime, text));
+                else fail("" + status[0]);
+            }
+            public void fail(String why) {
+                close();
+                act.runOnUiThread(() -> Toast.makeText(act, "Файл не скачался с сервера (" + why + ")", Toast.LENGTH_LONG).show());
+            }
+            private void close() {
+                try {
+                    out[0].close();
+                } catch (Exception ignored) {
+                    // closed
+                }
+            }
+        });
+    }
+
     @JavascriptInterface
     public void shareApp(String text) {
         Files.shareApp(act, text);  // copies the installed APK here, off the main thread, then opens the share sheet
