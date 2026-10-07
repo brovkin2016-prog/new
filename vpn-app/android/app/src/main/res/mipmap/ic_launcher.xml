@@ -3,5 +3,5 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item><shape android:shape="rectangle"><corners android:radius="22dp" />
         <gradient android:startColor="#0B1026" android:centerColor="#1E1B4B" android:endColor="#0F3D4C" android:angle="315" /></shape></item>
-    <item android:drawable="@drawable/ic_launcher_fg" />
+    <item android:drawable="@drawable/ic_launcher_face" />
 </layer-list>

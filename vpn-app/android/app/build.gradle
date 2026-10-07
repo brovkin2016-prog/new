@@ -28,7 +28,7 @@ android {
     }
     buildFeatures { buildConfig true }
     buildTypes {
-        release { minifyEnabled false }
+        release { minifyEnabled false; crunchPngs false }  // PNGs kept byte for byte: the server finds the icon placeholder by its bytes
         debug { applicationIdSuffix ".debug" }
     }
     compileOptions {

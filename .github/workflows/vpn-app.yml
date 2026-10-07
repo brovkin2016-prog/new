@@ -66,6 +66,13 @@ jobs:
           mv app/src/main/jniLibs/x86_64 /tmp/hy-x86_64
           gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }}
           mv /tmp/hy-x86_64 app/src/main/jniLibs/x86_64
+          # the server's icon swap (tools/owner_icon.py) on this very build, with a test picture and a throwaway key:
+          # the emulator test installs the result, so a swapped and re-aligned APK is known to install
+          python3 ../tools/owner_icon.py app/build/outputs/apk/release/app-release-unsigned.apk ../ci/test-icon.png /tmp/icon.apk
+          keytool -genkeypair -keystore /tmp/t.p12 -storetype PKCS12 -alias t -keyalg RSA -keysize 2048 -validity 2 \
+            -dname CN=t -storepass testpass -keypass testpass
+          "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" sign --ks /tmp/t.p12 \
+            --ks-pass pass:testpass --out /tmp/icon-signed.apk /tmp/icon.apk
 
       - name: Debug APK for the emulator
         working-directory: vpn-app/android
@@ -106,6 +113,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         env:
           APK: ${{ github.workspace }}/vpn-app/android/app/build/outputs/apk/debug/app-debug.apk
+          ICON_APK: /tmp/icon-signed.apk
           OUT: /tmp/out
         with:
           api-level: 30

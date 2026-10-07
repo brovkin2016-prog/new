@@ -50,4 +50,15 @@ R=$(page)
 echo "after switching off (straight to the internet): $R"
 adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"
 grep -c "hy:" "$OUT/logcat.txt"
+
+# the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install
+if [ -n "${ICON_APK:-}" ]; then
+  adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"
+  adb shell pm path app.aihelper.vpn | grep -q "base.apk" || fail "the APK with the swapped icon is not installed"
+  adb shell input keyevent KEYCODE_HOME
+  read -r W H < <(adb shell wm size | grep -o "[0-9]*x[0-9]*" | tail -1 | tr x ' ')
+  adb shell input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 5)) 300  # open the list of apps
+  sleep 3
+  adb exec-out screencap -p > "$OUT/5-icon.png"
+fi
 echo "VPN TEST OK"

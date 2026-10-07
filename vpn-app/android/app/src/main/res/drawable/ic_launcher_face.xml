@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the icon's picture: the shield, and over it the owner's portrait. In the repository ic_owner.png is an empty
+     placeholder; the family server swaps in the portrait (over the aurora) when it signs the app, so the photo never
+     goes into this public repository. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_fg" />
+    <item android:drawable="@drawable/ic_owner" />
+</layer-list>

@@ -11,8 +11,11 @@ import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.Shader;
+import android.graphics.ImageDecoder;
 import android.graphics.SweepGradient;
+import android.graphics.drawable.AnimatedImageDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import android.view.animation.OvershootInterpolator;
@@ -26,9 +29,10 @@ import java.net.Proxy;
 import java.net.URL;
 
 /**
- * The owner's portrait in a circle: an aurora drifts behind him, a ring of light turns around, and the picture breathes
+ * The owner's portrait in a circle: an aurora drifts behind the photo, a ring of light turns around, and the picture breathes
  * a little. The photo lives on the family server, not in the app: it comes from /app/vpn-avatar.png and is kept on the
- * phone. Until it has come, the shield logo stands in.
+ * phone. On Android 9 and newer the living one comes too (/app/vpn-avatar.webp: the face winks and smiles now and
+ * then). Until a picture has come, the shield logo stands in.
  */
 final class AvatarView extends View {
     private static final long EVERY_MS = 24 * 3600_000L;
@@ -38,8 +42,9 @@ final class AvatarView extends View {
     private final Path clip = new Path();
     private final Rect dst = new Rect();
     private final Drawable shield;
-    private final File file;
+    private final File file, live;
     private Bitmap photo;
+    private Drawable moving;  // the living portrait (an animated WebP), Android 9+
     private float t;
     private ValueAnimator anim;
 
@@ -47,7 +52,9 @@ final class AvatarView extends View {
         super(c);
         shield = c.getDrawable(R.drawable.ic_launcher_fg);
         file = new File(c.getFilesDir(), "avatar.png");
+        live = new File(c.getFilesDir(), "avatar.webp");
         photo = BitmapFactory.decodeFile(file.getAbsolutePath());
+        moving = decodeLive();
         ring.setStyle(Paint.Style.STROKE);
         ring.setStrokeCap(Paint.Cap.ROUND);
         setScaleX(0.4f);
@@ -61,36 +68,83 @@ final class AvatarView extends View {
         if (host == null) return;
         if (photo != null && System.currentTimeMillis() - file.lastModified() < EVERY_MS) return;
         new Thread(() -> {
-            try {
-                int port = VpnSvc.socksPort;
-                URL u = new URL("https://" + host + ":8443/app/vpn-avatar.png");
-                HttpURLConnection c = (HttpURLConnection) (port > 0
-                        ? u.openConnection(new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", port)))
-                        : u.openConnection());
-                c.setConnectTimeout(15_000);
-                c.setReadTimeout(20_000);
-                if (c.getResponseCode() == 200) {
-                    File tmp = new File(file.getPath() + ".new");
-                    try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(tmp)) {
-                        byte[] b = new byte[16384];
-                        for (int n; (n = in.read(b)) > 0; ) out.write(b, 0, n);
-                    }
-                    Bitmap bmp = BitmapFactory.decodeFile(tmp.getAbsolutePath());
-                    if (bmp != null && tmp.renameTo(file)) post(() -> {
-                        photo = bmp;
-                        invalidate();
-                    });
-                } else if (c.getResponseCode() == 404 && file.delete()) {
-                    post(() -> {  // the owner took the photo away
-                        photo = null;
-                        invalidate();
-                    });
-                }
-                c.disconnect();
-            } catch (Exception ignored) {
-                // try again next time
+            String base = "https://" + host + ":8443/app/vpn-avatar.";
+            int code = fetch(base + "png", file);
+            Bitmap bmp = code == 200 ? BitmapFactory.decodeFile(file.getAbsolutePath()) : null;
+            if (bmp != null) {
+                post(() -> {
+                    photo = bmp;
+                    invalidate();
+                });
+            } else if (code == 404) {
+                post(() -> {  // the owner took the photo away
+                    photo = null;
+                    invalidate();
+                });
+            }
+            if (Build.VERSION.SDK_INT >= 28 && code != -1) {
+                int lc = fetch(base + "webp", live);
+                if (lc == 200 || lc == 404) post(() -> {
+                    stopLive();
+                    moving = decodeLive();
+                    if (isAttachedToWindow()) startLive();
+                    invalidate();
+                });
             }
         }, "avatar").start();
+    }
+
+    /** Downloads url into dst: 200 saved, 404 removed (the owner took it away), -1 no answer; anything else keeps dst. */
+    private static int fetch(String url, File dst) {
+        try {
+            int port = VpnSvc.socksPort;
+            URL u = new URL(url);
+            HttpURLConnection c = (HttpURLConnection) (port > 0
+                    ? u.openConnection(new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", port)))
+                    : u.openConnection());
+            c.setConnectTimeout(15_000);
+            c.setReadTimeout(20_000);
+            int code = c.getResponseCode();
+            if (code == 200) {
+                File tmp = new File(dst.getPath() + ".new");
+                try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(tmp)) {
+                    byte[] b = new byte[16384];
+                    for (int n; (n = in.read(b)) > 0; ) out.write(b, 0, n);
+                }
+                if (!tmp.renameTo(dst)) code = 500;
+            } else if (code == 404) {
+                if (!dst.delete() && dst.exists()) code = 500;
+            }
+            c.disconnect();
+            return code;
+        } catch (Exception e) {
+            return -1;  // try again next time
+        }
+    }
+
+    private Drawable decodeLive() {
+        if (Build.VERSION.SDK_INT < 28 || !live.exists()) return null;
+        try {
+            Drawable d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(live));
+            if (d instanceof AnimatedImageDrawable) ((AnimatedImageDrawable) d).setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
+            d.setCallback(this);
+            return d;
+        } catch (Exception e) {
+            return null;  // a broken file: the still photo stays
+        }
+    }
+
+    private void startLive() {
+        if (Build.VERSION.SDK_INT >= 28 && moving instanceof AnimatedImageDrawable) ((AnimatedImageDrawable) moving).start();
+    }
+
+    private void stopLive() {
+        if (Build.VERSION.SDK_INT >= 28 && moving instanceof AnimatedImageDrawable) ((AnimatedImageDrawable) moving).stop();
+    }
+
+    @Override
+    protected boolean verifyDrawable(Drawable who) {
+        return who == moving || super.verifyDrawable(who);
     }
 
     @Override
@@ -106,11 +160,13 @@ final class AvatarView extends View {
             invalidate();
         });
         anim.start();
+        startLive();
     }
 
     @Override
     protected void onDetachedFromWindow() {
         if (anim != null) anim.cancel();
+        stopLive();
         super.onDetachedFromWindow();
     }
 
@@ -127,7 +183,7 @@ final class AvatarView extends View {
         ring.setShader(g);
         ring.setStrokeWidth(s * 0.04f);
         c.drawCircle(cx, cy, ringR, ring);
-        if (photo == null) {
+        if (photo == null && moving == null) {
             int pad = Math.round(s * -0.06f);
             shield.setBounds(pad, pad, getWidth() - pad, getHeight() - pad);
             shield.draw(c);
@@ -148,7 +204,12 @@ final class AvatarView extends View {
         float breathe = 1f + 0.018f * (float) Math.sin(a * 2);
         float half = r * breathe;
         dst.set(Math.round(cx - half), Math.round(cy - half * 0.98f), Math.round(cx + half), Math.round(cy + half * 1.02f));
-        c.drawBitmap(photo, null, dst, paint);
+        if (moving != null) {
+            moving.setBounds(dst);
+            moving.draw(c);
+        } else {
+            c.drawBitmap(photo, null, dst, paint);
+        }
         c.restore();
     }
 
