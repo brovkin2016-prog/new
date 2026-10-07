@@ -1,0 +1,49 @@
+plugins {
+    id "com.android.application"
+}
+
+// CI passes the version, the native ABIs and (for the emulator test only) the test hooks
+def vCode = (project.findProperty("versionCode") ?: "1") as Integer
+def vName = project.findProperty("versionName") ?: "1.0.${vCode}"
+def abiList = (project.findProperty("abis") ?: "arm64-v8a,armeabi-v7a").split(",")
+
+android {
+    namespace "app.aihelper.vpn"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "app.aihelper.vpn"
+        minSdk 24
+        targetSdk 34
+        versionCode vCode
+        versionName vName
+        ndk { abiFilters(*abiList) }
+        externalNativeBuild {
+            ndkBuild { arguments "APP_PLATFORM=android-24", "-j4" }
+        }
+    }
+    // the tunnel (hev-socks5-tunnel, fetched by CI into app/hev at a pinned tag)
+    externalNativeBuild {
+        ndkBuild { path "hev/Android.mk" }
+    }
+    buildFeatures { buildConfig true }
+    buildTypes {
+        release { minifyEnabled false }
+        debug { applicationIdSuffix ".debug" }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packaging {
+        // the Hysteria client runs as a program, so it must sit unpacked in the app's native library folder
+        jniLibs { useLegacyPackaging true }
+    }
+    lint { abortOnError false }
+}
+
+dependencies {
+    implementation "com.journeyapps:zxing-android-embedded:4.3.0"
+    implementation "com.google.zxing:core:3.5.3"
+    implementation "androidx.core:core:1.13.1"
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- phones before Android 8: a rounded square with the shield -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="96" android:viewportHeight="96">
+    <path android:fillColor="#13B07E" android:pathData="M22,0h52a22,22 0,0 1,22 22v52a22,22 0,0 1,-22 22h-52a22,22 0,0 1,-22 -22v-52a22,22 0,0 1,22 -22z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M48,18L68,25.5V40.5C68,53.2 59.6,64.8 48,69C36.4,64.8 28,53.2 28,40.5V25.5Z" />
+    <path android:strokeColor="#0E9F6E" android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M39,43L45.5,49.5L58,36" />
+</vector>

@@ -61,3 +61,9 @@ ai-app/android/.gradle/
 ai-app/android/local.properties
 ai-app/android/app/src/main/assets/
 ai-app/android/app/src/debug/res/raw/
+# vpn-app (Android): fetched and generated in CI
+vpn-app/android/.gradle/
+vpn-app/android/local.properties
+vpn-app/android/app/hev/
+vpn-app/android/app/.cxx/
+vpn-app/android/app/src/main/jniLibs/

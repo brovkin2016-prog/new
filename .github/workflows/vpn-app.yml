@@ -1,0 +1,134 @@
+# Builds «Семейный VPN» for Android: the official Hysteria 2 client and hev-socks5-tunnel (both pinned and checked),
+# tests it on an emulator against a real hysteria server (the phone's traffic must go through the tunnel), and
+# publishes the unsigned APK as a release: the family server signs it with its own key and hands it out.
+name: vpn-app
+
+on:
+  push:
+    paths: ["vpn-app/**", ".github/workflows/vpn-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vpn-app-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HY_VERSION: app/v2.13.0
+  HY_SHA_ARM64: 13d5b85cd45e11cf02847dc2b6229d6f9a20b3cb87a00b9356cf244e3bd8db84
+  HY_SHA_ARMV7: 41a4c3f1f03fac5da47af33902f34dce66a3b491a59c0879a057b5899037e604
+  HY_SHA_AMD64: 093c3f7b2d8cb255bd62148e2662d9054e1bc6fb69ae57ece4665016dfcd1a03
+  HEV_TAG: "2.18.0"
+  HEV_COMMIT: d9dca26c7ad0e494492244f0309e80ee583e739e
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Version
+        id: v
+        run: echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+
+      - name: Hysteria client and the tunnel (pinned, checked)
+        run: |
+          set -e
+          J=vpn-app/android/app/src/main/jniLibs
+          get() {  # abi, release file, sha256
+            mkdir -p "$J/$1"
+            curl -fsSL -o "$J/$1/libhysteria.so" "https://github.com/apernet/hysteria/releases/download/$HY_VERSION/$2"
+            echo "$3  $J/$1/libhysteria.so" | sha256sum -c -
+          }
+          get arm64-v8a hysteria-android-arm64 "$HY_SHA_ARM64"
+          get armeabi-v7a hysteria-android-armv7 "$HY_SHA_ARMV7"
+          get x86_64 hysteria-android-amd64 "$HY_SHA_AMD64"
+          git clone -q --depth 1 --branch "$HEV_TAG" --recurse-submodules --shallow-submodules \
+            https://github.com/heiher/hev-socks5-tunnel vpn-app/android/app/hev
+          test "$(git -C vpn-app/android/app/hev rev-parse HEAD)" = "$HEV_COMMIT"
+
+      - name: Release APK (unsigned)
+        working-directory: vpn-app/android
+        run: |
+          # the release carries the phone ABIs only; the emulator's x86_64 client stays out of it
+          mv app/src/main/jniLibs/x86_64 /tmp/hy-x86_64
+          gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }}
+          mv /tmp/hy-x86_64 app/src/main/jniLibs/x86_64
+
+      - name: Debug APK for the emulator
+        working-directory: vpn-app/android
+        run: gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -Pabis=x86_64
+
+      - name: Test server (a real hysteria)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p /tmp/t && cd /tmp/t
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj '/CN=vpn.test.local' \
+            -addext 'subjectAltName=DNS:vpn.test.local' -keyout key.pem -out cert.pem
+          gh release download --repo apernet/hysteria --pattern hysteria-linux-amd64 --output hysteria && chmod +x hysteria
+          cat > hy.yaml <<'EOT'
+          listen: :4443
+          tls:
+            cert: /tmp/t/cert.pem
+            key: /tmp/t/key.pem
+          auth:
+            type: userpass
+            userpass:
+              family: "test-pass-123"
+          trafficStats:
+            listen: 127.0.0.1:7653
+          EOT
+          HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
+          sleep 3
+          grep -q "server up and running" hy.log
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Emulator test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK: ${{ github.workspace }}/vpn-app/android/app/build/outputs/apk/debug/app-debug.apk
+          OUT: /tmp/out
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash vpn-app/ci/emulator_test.sh
+
+      - name: Publish
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CODE=${{ steps.v.outputs.code }}
+          APK=vpn-app/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          [ -f "$APK" ] || exit 1
+          mkdir -p /tmp/rel && cp "$APK" /tmp/rel/vpn-app-$CODE-unsigned.apk
+          SHA=$(sha256sum /tmp/rel/vpn-app-$CODE-unsigned.apk | cut -d' ' -f1)
+          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "hysteria": "%s", "hev": "%s", "commit": "%s"}\n' \
+            "$CODE" "$CODE" "$SHA" "$HY_VERSION" "$HEV_TAG" "$GITHUB_SHA" > /tmp/rel/vpn-app-$CODE.json
+          cp /tmp/out/* /tmp/rel/ 2>/dev/null || true
+          cp /tmp/t/hy.log /tmp/rel/hysteria-server.log 2>/dev/null || true
+          STATE="${{ job.status }}"
+          gh release create "vpn-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+            --title "Семейный VPN 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key."
