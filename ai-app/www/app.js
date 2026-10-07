@@ -492,11 +492,33 @@
       try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
       if (t) { inp.value = t.trim(); if (parseLogin(t)) login(); } else toast("В буфере ничего нет — вставьте вручную");
     } });
+    // the owner without a signed-in phone: a new code to the owner's mailbox, no server console needed
+    const mail = el("button", { class: "btn line wide", style: "margin-top:18px", text: "✉️ Я владелец — прислать код на почту", onclick: async () => {
+      if (Native) {
+        const typed = parseLogin(inp.value);
+        let host = (typed && typed.host) || (Native.getHost && Native.getHost());
+        if (!host) {
+          const h = await ask("Адрес вашего сервера", "Например: vpn.sites-s.ru");
+          if (!h) return;
+          host = h.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+        }
+        Native.setHost(host);
+      }
+      mail.disabled = true;
+      err.textContent = "";
+      try {
+        const r = await api("/api/owner_mail", {});
+        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «📋 Вставить из буфера».`;
+      } catch (e) {
+        err.textContent = problem(e);
+      }
+      mail.disabled = false;
+    } });
     app.append(el("div", { class: "login" },
       el("div", { class: "logo", text: "✦" }), el("h1", { text: "ИИ-помощник" }),
       el("p", { text: "Отвечает на вопросы, решает задания по фото, обрабатывает снимки, рисует и переводит." }),
       el("p", { text: "Для входа нужен код от администратора." }),
-      inp, paste, go, err));
+      inp, paste, go, err, mail));
   }
   async function logout(message) {
     try { await api("/api/logout", {}); } catch (e) { /* signed out anyway */ }
