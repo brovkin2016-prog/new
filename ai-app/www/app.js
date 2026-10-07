@@ -1238,7 +1238,9 @@
           el("small", { text: data.stats ? `Людей: ${data.users.length}, сейчас в сети: ${on}` : `Людей: ${data.users.length}` }))));
       if (data.vless !== null) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.vless ? "🟢" : "🔴") + " Запасной VLESS (TCP 443)",
         el("small", { text: "Когда Hysteria режут, работает он" }))));
-      scroll.append(head, el("button", { class: "btn wide", style: "margin:0 0 12px", text: "➕ Выдать VPN", onclick: add }));
+      scroll.append(head, el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
+        el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на приложение Winger VPN (24 ч)",
+          onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан" }));
       for (const u of data.users) {
         list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
@@ -1250,6 +1252,25 @@
       }
       scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
         text: "Удалить — 🗑 в строке человека: его VPN сразу перестанет работать. Все добавления и удаления видны в «🖥 Сервер» → «События»." }));
+    }
+    // a temporary link (24 h) for downloading an app or connecting the VPN: copied and sent however the owner likes
+    async function makeLink(body, title) {
+      if (S.busy.vpn) return;
+      S.busy.vpn = true;
+      toast("⏳ Готовлю ссылку…", 15000);
+      try {
+        const end = await panel(body);
+        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+        document.querySelectorAll(".toast").forEach((t) => t.remove());
+        const until = new Date(end.exp * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+        sheet("🔗 " + title, (box) => {
+          box.append(
+            el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: `Откроется в любом браузере, с VPN и без. Действует до ${until}.` }),
+            el("div", { style: "font:14px ui-monospace,monospace;word-break:break-all;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px;user-select:all", text: end.url }),
+            el("button", { class: "btn wide", text: "📋 Копировать ссылку", onclick: () => { copyText(end.url); toast("✅ Ссылка скопирована — отправьте её как удобно"); } }),
+            el("a", { class: "btn line wide", href: end.url, style: "display:block;text-align:center;text-decoration:none;margin-top:8px", text: "👀 Открыть и посмотреть" }));
+        });
+      } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
     }
     async function delVpn(name) {
       if (S.busy.vpn || !(await confirmBox(`Удалить «${name}»? Его VPN сразу перестанет работать.`, "Удалить"))) return;
@@ -1468,7 +1489,9 @@
 
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      scroll.append(el("button", { class: "btn wide", style: "margin:0 0 12px", text: "➕ Добавить человека", onclick: addPerson }));
+      scroll.append(el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
+        el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на ИИ-приложение (24 ч)",
+          onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется приложением" }));
       for (const u of d.users) {
         const now = u.seen && Date.now() / 1000 - u.seen < 900;
@@ -1502,35 +1525,7 @@
       const name = await ask("Как зовут?", "Например: Мама, Саша");
       if (!name) return;
       const r = await appOp({ op: "app_add", name: name.replace(/\s+/g, " ").trim().slice(0, 40) }, null);
-      if (r) invite(r);
-    }
-    async function apkFile() {  // older app versions cannot hand over themselves: fetch the file from the server
-      const parts = [];
-      let status = 0;
-      await send("/app/ai.apk", null, (st) => (status = st), (b) => parts.push(b));
-      if (status !== 200) throw new HttpError(status, "Файл приложения ещё не готов на сервере");
-      return new Blob(parts, { type: "application/vnd.android.package-archive" });
-    }
-    function invite(r) {
-      const host = (Native && Native.getHost && Native.getHost()) || location.host;
-      const line = `${host}/${r.code}`;
-      const text = `Привет! Это наш семейный ИИ-помощник 🙂\n1. Установи приложение из файла (если телефон спросит — разреши установку из этого источника).\n`
-        + `2. Открой его и вставь код входа (кнопка «📋 Вставить из буфера»):\n${line}\nКод одноразовый, действует ${r.days} дн.`;
-      sheet("✉️ Приглашение для «" + r.name + "»", (box, close) => {
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px",
-          text: "Отправьте приложение и код одним сообщением — в Telegram, WhatsApp или как удобно." }),
-          el("div", { style: "font:15px ui-monospace,monospace;text-align:center;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px", text: line }),
-          el("button", { class: "btn wide", text: "📤 Отправить приложение и код", onclick: async () => {
-            if (Native && Native.shareApp) { Native.shareApp(text); return; }
-            toast("📲 Готовлю файл приложения…", 15000);
-            try { shareBlob(await apkFile(), "ИИ-помощник.apk", text); } catch (e) { toast(problem(e)); }
-          } }),
-          el("div", { style: "height:8px" }),
-          el("div", { class: "big-actions" },
-            el("button", { class: "btn line", text: "📋 Код", onclick: () => copyText(line) }),
-            el("button", { class: "btn line", text: "💬 Только текст", onclick: () => (navigator.share && !Native ? navigator.share({ text }).catch(() => {}) : copyText(text)) })),
-          el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: `Код одноразовый, на ${r.days} дн. Второй телефон — новый код в карточке человека.` }));
-      });
+      if (r) makeLink({ op: "dl_aiapp", id: r.id }, "ИИ-помощник — " + r.name);
     }
     function person(id) {
       const d = cache.app;
@@ -1544,9 +1539,10 @@
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 6px",
           text: (u.off ? "Доступ отключён" : !u.seen ? "Ещё не входил(а)" : "Был(а) " + ago(u.seen) + " назад") + ` · телефонов: ${u.devices}` }),
           el("div", { style: "font-size:14px;margin-bottom:6px", text: `Сегодня: вопросов ${t.text || 0}${lim("text")}, картинок ${t.draw || 0}${lim("draw")}, фото ${t.photo || 0}${lim("photo")}` }),
-          act(mine ? "🔑 Код для второго телефона" : "🔑 Новый код и приглашение", async () => { const r = await appOp({ op: "app_code", id: u.id }); if (r) invite(r); }, ""));
+          act(mine ? "🔗 Ссылка: приложение + код для второго телефона (24 ч)" : "🔗 Ссылка: приложение + код входа (24 ч)",
+            () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""));
         if (mine) {
-          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — «🔑 Код для второго телефона»; если потеряли все телефоны — на сервере команда aiapp-owner." }));
+          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — ссылка выше; если потеряли все телефоны — на экране входа «✉️ Я владелец — прислать код на почту»." }));
           return;
         }
         box.append(act(u.off ? "▶️ Включить доступ" : "⏸ Отключить доступ", () => appOp({ op: "app_set", id: u.id, off: !u.off }, u.off ? "▶️ Доступ включён" : "⏸ Доступ отключён")),
@@ -1604,14 +1600,11 @@
         if (kinds.length > 1) box.append(chips);
         box.append(pane);
         pick(kinds[0]);
-        const va = cache.vpn && cache.vpn.vpn_app;
-        if (va && u.links.hy2) {
-          box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "📲 Отправить приложение VPN и ссылку", onclick: () => {
-            const text = `Привет! Это VPN «Winger» 🛡\n1. Установи приложение «Winger VPN» из файла (если телефон спросит — разреши установку).\n`
-              + `2. Скопируй ссылку ниже, открой приложение и нажми «Вставить ссылку».\n${u.links.hy2}\n3. Нажми большую кнопку — готово.`;
-            if (Native && Native.shareFromServer) Native.shareFromServer("/app/vpn.apk", "Winger VPN.apk", "application/vnd.android.package-archive", text);
-            else { copyText(text); toast("Текст со ссылкой скопирован. Чтобы отправить и сам файл, обновите приложение.", 5000); }
-          } }));
+        if (u.links.hy2) {
+          box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "🔗 Ссылка с QR для подключения (24 ч)",
+            onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "Подключение VPN — " + u.name); } }),
+          el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔗 Ссылка на приложение Winger VPN (24 ч)",
+            onclick: () => { close(); makeLink({ op: "dl_vpnapp", name: u.name }, "Winger VPN — " + u.name); } }));
         }
         if (!u.owner) {
           box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
