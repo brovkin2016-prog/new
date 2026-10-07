@@ -497,8 +497,8 @@
 
   // ---------- the main screen ----------
   const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼", "Фото"], ["more", "☰", "Ещё"]];
-  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", vpn: "Выдача VPN", more: "Ещё" };
-  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 3).concat([["vpn", "🛡", "VPN"]], TABS.slice(3)) : TABS);
+  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", vpn: "Близкие", more: "Ещё" };
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 3).concat([["vpn", "👥", "Близкие"]], TABS.slice(3)) : TABS);
   async function start() {
     applyTheme();
     try {
@@ -1111,7 +1111,7 @@
           if (how !== "no") unlockedAt = Date.now();
           resolve(how !== "no");
         };
-        Native.unlock("Выдача VPN");
+        Native.unlock("Близкие: VPN и приложение");
       });
     }
     return unlocking;
@@ -1124,15 +1124,22 @@
   document.addEventListener("visibilitychange", () => {  // back from the background with the lock expired: ask again
     if (!document.hidden && !unlocking && S.tab === "vpn" && S.views.vpn && Date.now() - unlockedAt >= UNLOCK_MS) S.views.vpn.onShow();
   });
+  function ago(ts) {
+    const s = Math.max(0, Date.now() / 1000 - ts);
+    return s < 3600 ? Math.max(1, Math.round(s / 60)) + " мин" : s < 86400 ? Math.round(s / 3600) + " ч" : Math.round(s / 86400) + " дн.";
+  }
+  // the owner's tab «Близкие»: VPN for family, and who may use this app (never in a family member's app)
   function vpnView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     root.append(scroll);
-    let data = null, open = false;
+    let part = store.get("accessPart", "vpn"), open = false;
+    const cache = { vpn: null, app: null };
+    let data = null;
     const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
     function locked(text, button, action) {
       scroll.innerHTML = "";
-      scroll.append(el("div", { class: "empty" }, el("div", { class: "emoji", text: "🔒" }), el("h2", { text: "Выдача VPN" }),
+      scroll.append(el("div", { class: "empty" }, el("div", { class: "emoji", text: "🔒" }), el("h2", { text: "Близкие" }),
         el("p", { text }), button ? el("button", { class: "btn", text: button, onclick: action }) : null));
     }
     async function enter() {
@@ -1149,16 +1156,25 @@
     }
     async function load() {
       if (!open) return;
-      if (!data) { scroll.innerHTML = ""; scroll.append(el("div", { class: "status", style: "padding:20px" }, el("span", { class: "spin" }), "Загружаю…")); }
+      const want = part;
+      if (!cache[want]) { draw(); scroll.append(el("div", { class: "status", style: "padding:20px" }, el("span", { class: "spin" }), "Загружаю…")); }
       try {
-        const end = await panel({ op: "users" });
+        const end = await panel({ op: want === "vpn" ? "users" : "app_list" });
         if (end.t !== "done") throw new HttpError(500, end.text);
-        data = end;
-        draw();
-      } catch (e) { if (!data) locked(problem(e), "Повторить", load); else toast(problem(e)); }
+        cache[want] = end;
+        if (part === want) draw();
+      } catch (e) { if (!cache[want]) { draw(); scroll.append(el("p", { class: "status", style: "padding:12px", text: problem(e) })); } else toast(problem(e)); }
     }
     function draw() {
       scroll.innerHTML = "";
+      const seg = el("div", { class: "seg", style: "margin-bottom:12px" });
+      for (const [k, v] of [["vpn", "🛡 VPN"], ["app", "🤖 Приложение"]]) {
+        seg.append(el("button", { class: k === part ? "on" : "", text: v, onclick: () => { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); } }));
+      }
+      scroll.append(seg);
+      data = cache[part];
+      if (!data) return;
+      if (part === "app") return drawApp(data);
       const on = data.users.filter((u) => u.online).length;
       const head = el("div", { class: "card" },
         el("div", { class: "row" }, el("div", { class: "grow" }, (data.vpn ? "🟢 VPN работает" : "🔴 VPN не работает") + " · " + data.host,
@@ -1175,6 +1191,94 @@
       }
       scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
         text: "О каждом добавлении и удалении VPN-бот пишет вам в Telegram. Мосты и сервер — там же." }));
+    }
+    // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
+    function drawApp(d) {
+      scroll.append(el("button", { class: "btn wide", style: "margin:0 0 12px", text: "➕ Добавить человека", onclick: addPerson }));
+      const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется приложением" }));
+      for (const u of d.users) {
+        const now = u.seen && Date.now() / 1000 - u.seen < 900;
+        list.append(el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => person(u.id) },
+          el("span", { style: "font-size:20px", text: u.off ? "⏸" : now ? "🟢" : "⚪" }),
+          el("div", { class: "grow" }, u.name + (u.vip ? " 👑" : "") + (u.id === d.me ? " · вы" : ""),
+            el("small", { text: u.off ? "доступ отключён" : !u.seen ? "ещё не входил(а)" + (u.codes ? " · код отправлен" : "")
+              : (now ? "сейчас в приложении" : "был(а) " + ago(u.seen) + " назад") + (u.devices > 1 ? ` · телефонов: ${u.devices}` : "") })), "›"));
+      }
+      scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
+        text: (d.apk && d.apk.name ? `Версия приложения: ${d.apk.name}. ` : "") + "О каждом добавлении, отключении и удалении бот пишет вам в Telegram." }));
+    }
+    async function appOp(body, done) {
+      if (S.busy.vpn) return null;
+      S.busy.vpn = true;
+      try {
+        const end = await panel(body);
+        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return null; }
+        if (done) toast(done);
+        load();
+        return end;
+      } catch (e) { toast(problem(e)); return null; } finally { S.busy.vpn = false; }
+    }
+    async function addPerson() {
+      const name = await ask("Как зовут?", "Например: Мама, Саша");
+      if (!name) return;
+      const r = await appOp({ op: "app_add", name: name.replace(/\s+/g, " ").trim().slice(0, 40) }, null);
+      if (r) invite(r);
+    }
+    async function apkFile() {  // older app versions cannot hand over themselves: fetch the file from the server
+      const parts = [];
+      let status = 0;
+      await send("/app/ai.apk", null, (st) => (status = st), (b) => parts.push(b));
+      if (status !== 200) throw new HttpError(status, "Файл приложения ещё не готов на сервере");
+      return new Blob(parts, { type: "application/vnd.android.package-archive" });
+    }
+    function invite(r) {
+      const host = (Native && Native.getHost && Native.getHost()) || location.host;
+      const line = `${host}/${r.code}`;
+      const text = `Привет! Это наш семейный ИИ-помощник 🙂\n1. Установи приложение из файла (если телефон спросит — разреши установку из этого источника).\n`
+        + `2. Открой его и вставь код входа (кнопка «📋 Вставить из буфера»):\n${line}\nКод одноразовый, действует ${r.days} дн.`;
+      sheet("✉️ Приглашение для «" + r.name + "»", (box, close) => {
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px",
+          text: "Отправьте приложение и код одним сообщением — в Telegram, WhatsApp или как удобно." }),
+          el("div", { style: "font:15px ui-monospace,monospace;text-align:center;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px", text: line }),
+          el("button", { class: "btn wide", text: "📤 Отправить приложение и код", onclick: async () => {
+            if (Native && Native.shareApp) { Native.shareApp(text); return; }
+            toast("📲 Готовлю файл приложения…", 15000);
+            try { shareBlob(await apkFile(), "ИИ-помощник.apk", text); } catch (e) { toast(problem(e)); }
+          } }),
+          el("div", { style: "height:8px" }),
+          el("div", { class: "big-actions" },
+            el("button", { class: "btn line", text: "📋 Код", onclick: () => copyText(line) }),
+            el("button", { class: "btn line", text: "💬 Только текст", onclick: () => (navigator.share && !Native ? navigator.share({ text }).catch(() => {}) : copyText(text)) })),
+          el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: `Код одноразовый, на ${r.days} дн. Второй телефон — новый код в карточке человека.` }));
+      });
+    }
+    function person(id) {
+      const d = cache.app;
+      const u = d && d.users.find((x) => x.id === id);
+      if (!u) return;
+      const mine = u.id === d.me;
+      const t = u.today || {};
+      const lim = (k) => (u.vip ? "" : ` из ${d.limits[k]}`);
+      sheet((u.off ? "⏸ " : "🤖 ") + u.name + (u.vip ? " 👑" : ""), (box, close) => {
+        const act = (label, fn, cls) => el("button", { class: "btn wide " + (cls || "line"), style: "margin-top:8px", text: label, onclick: async () => { close(); await fn(); } });
+        box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 6px",
+          text: (u.off ? "Доступ отключён" : !u.seen ? "Ещё не входил(а)" : "Был(а) " + ago(u.seen) + " назад") + ` · телефонов: ${u.devices}` }),
+          el("div", { style: "font-size:14px;margin-bottom:6px", text: `Сегодня: вопросов ${t.text || 0}${lim("text")}, картинок ${t.draw || 0}${lim("draw")}, фото ${t.photo || 0}${lim("photo")}` }),
+          act(mine ? "🔑 Код для второго телефона" : "🔑 Новый код и приглашение", async () => { const r = await appOp({ op: "app_code", id: u.id }); if (r) invite(r); }, ""),
+          act(u.vip ? "👑 Снять «без лимитов»" : "👑 Без лимитов", () => appOp({ op: "app_set", id: u.id, vip: !u.vip }, u.vip ? "Лимиты включены" : "👑 Без лимитов")));
+        if (mine) {
+          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы: отключить или удалить свой вход можно только в Telegram-боте." }));
+          return;
+        }
+        box.append(act(u.off ? "▶️ Включить доступ" : "⏸ Отключить доступ", () => appOp({ op: "app_set", id: u.id, off: !u.off }, u.off ? "▶️ Доступ включён" : "⏸ Доступ отключён")),
+          act("🚪 Выйти на всех телефонах", async () => {
+            if (await confirmBox(`Выйти у «${u.name}» на всех телефонах? Для входа понадобится новый код.`, "Выйти")) appOp({ op: "app_logout", id: u.id }, "🚪 Готово");
+          }),
+          act("🗑 Удалить из приложения", async () => {
+            if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
+              appOp({ op: "app_delete", id: u.id }, "🗑 Удалён(а): " + u.name);
+          }, "line danger"));
+      });
     }
     async function add() {
       if (S.busy.vpn) return;
@@ -1238,7 +1342,7 @@
         }
       });
     }
-    return { root, redraw: () => data && draw(), sub: () => "люди, ссылки и QR",
+    return { root, redraw: () => open && draw(), sub: () => (part === "vpn" ? "выдача VPN: ссылки и QR" : "кто пользуется приложением"),
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
       onShow: () => (open && Date.now() - unlockedAt < UNLOCK_MS ? load() : (open = false, enter())) };
   }

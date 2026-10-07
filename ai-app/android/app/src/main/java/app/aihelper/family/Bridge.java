@@ -108,6 +108,11 @@ final class Bridge {
     }
 
     @JavascriptInterface
+    public void shareApp(String text) {
+        Files.shareApp(act, text);  // copies the installed APK here, off the main thread, then opens the share sheet
+    }
+
+    @JavascriptInterface
     public void copy(String text) {
         act.runOnUiThread(() -> {
             ClipboardManager cm = (ClipboardManager) act.getSystemService(Context.CLIPBOARD_SERVICE);

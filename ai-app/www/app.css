@@ -205,3 +205,4 @@ select, .input { border: 1px solid var(--line); background: var(--card); border-
 .mic-big.on { background: var(--danger); color: #fff; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { transform: scale(1.06); } }
 @media (min-width: 720px) { .scroll, .composer > * { max-width: 760px; margin-left: auto; margin-right: auto; } .scroll { width: 100%; } }
+.btn.danger { color: var(--danger); }

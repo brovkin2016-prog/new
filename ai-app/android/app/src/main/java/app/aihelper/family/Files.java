@@ -13,7 +13,9 @@ import android.widget.Toast;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 
 /** Saving results to the phone (pictures to Pictures, the rest to Downloads) and sharing them. */
@@ -84,13 +86,34 @@ final class Files {
             try (FileOutputStream out = new FileOutputStream(f)) {
                 out.write(data);
             }
-            Uri uri = FileProvider.getUriForFile(a, authority(a), f);
-            Intent i = new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri)
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            if (text != null && !text.isEmpty()) i.putExtra(Intent.EXTRA_TEXT, text);
-            a.startActivity(Intent.createChooser(i, "Поделиться"));
+            send(a, f, mime, text);
         } catch (Exception e) {
             Toast.makeText(a, "Не получилось поделиться: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** This very app (as installed, signed by the server) with an invitation: how the owner hands it to family. */
+    static void shareApp(Activity a, String text) {
+        try {
+            File dir = new File(a.getCacheDir(), "share");
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+            File f = new File(dir, "ИИ-помощник.apk");
+            try (InputStream in = new FileInputStream(a.getApplicationInfo().sourceDir); OutputStream out = new FileOutputStream(f)) {
+                byte[] buf = new byte[64 * 1024];
+                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+            }
+            a.runOnUiThread(() -> send(a, f, "application/vnd.android.package-archive", text));
+        } catch (Exception e) {
+            a.runOnUiThread(() -> Toast.makeText(a, "Не получилось поделиться: " + e.getMessage(), Toast.LENGTH_LONG).show());
+        }
+    }
+
+    private static void send(Activity a, File f, String mime, String text) {
+        Uri uri = FileProvider.getUriForFile(a, authority(a), f);
+        Intent i = new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        if (text != null && !text.isEmpty()) i.putExtra(Intent.EXTRA_TEXT, text);
+        a.startActivity(Intent.createChooser(i, "Поделиться"));
     }
 }
