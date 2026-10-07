@@ -1,0 +1,160 @@
+package app.aihelper.vpn;
+
+import android.animation.ValueAnimator;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RadialGradient;
+import android.graphics.Rect;
+import android.graphics.Shader;
+import android.graphics.SweepGradient;
+import android.graphics.drawable.Drawable;
+import android.view.View;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.OvershootInterpolator;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.URL;
+
+/**
+ * The owner's portrait in a circle: an aurora drifts behind him, a ring of light turns around, and the picture breathes
+ * a little. The photo lives on the family server, not in the app: it comes from /app/vpn-avatar.png and is kept on the
+ * phone. Until it has come, the shield logo stands in.
+ */
+final class AvatarView extends View {
+    private static final long EVERY_MS = 24 * 3600_000L;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Matrix turn = new Matrix();
+    private final Path clip = new Path();
+    private final Rect dst = new Rect();
+    private final Drawable shield;
+    private final File file;
+    private Bitmap photo;
+    private float t;
+    private ValueAnimator anim;
+
+    AvatarView(Context c) {
+        super(c);
+        shield = c.getDrawable(R.drawable.ic_launcher_fg);
+        file = new File(c.getFilesDir(), "avatar.png");
+        photo = BitmapFactory.decodeFile(file.getAbsolutePath());
+        ring.setStyle(Paint.Style.STROKE);
+        ring.setStrokeCap(Paint.Cap.ROUND);
+        setScaleX(0.4f);
+        setScaleY(0.4f);
+        setAlpha(0f);
+    }
+
+    /** Fetches the portrait from the server named in the link (through the tunnel when the VPN is on), once a day. */
+    void refresh(Profile p) {
+        String host = p == null ? null : p.updateHost();
+        if (host == null) return;
+        if (photo != null && System.currentTimeMillis() - file.lastModified() < EVERY_MS) return;
+        new Thread(() -> {
+            try {
+                int port = VpnSvc.socksPort;
+                URL u = new URL("https://" + host + ":8443/app/vpn-avatar.png");
+                HttpURLConnection c = (HttpURLConnection) (port > 0
+                        ? u.openConnection(new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", port)))
+                        : u.openConnection());
+                c.setConnectTimeout(15_000);
+                c.setReadTimeout(20_000);
+                if (c.getResponseCode() == 200) {
+                    File tmp = new File(file.getPath() + ".new");
+                    try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(tmp)) {
+                        byte[] b = new byte[16384];
+                        for (int n; (n = in.read(b)) > 0; ) out.write(b, 0, n);
+                    }
+                    Bitmap bmp = BitmapFactory.decodeFile(tmp.getAbsolutePath());
+                    if (bmp != null && tmp.renameTo(file)) post(() -> {
+                        photo = bmp;
+                        invalidate();
+                    });
+                } else if (c.getResponseCode() == 404 && file.delete()) {
+                    post(() -> {  // the owner took the photo away
+                        photo = null;
+                        invalidate();
+                    });
+                }
+                c.disconnect();
+            } catch (Exception ignored) {
+                // try again next time
+            }
+        }, "avatar").start();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(700)
+                .setInterpolator(new OvershootInterpolator(2f)).start();
+        anim = ValueAnimator.ofFloat(0f, 1f).setDuration(9000);
+        anim.setRepeatCount(ValueAnimator.INFINITE);
+        anim.setInterpolator(new LinearInterpolator());
+        anim.addUpdateListener(a -> {
+            t = (float) a.getAnimatedValue();
+            invalidate();
+        });
+        anim.start();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        if (anim != null) anim.cancel();
+        super.onDetachedFromWindow();
+    }
+
+    @Override
+    protected void onDraw(Canvas c) {
+        float s = Math.min(getWidth(), getHeight()), cx = getWidth() / 2f, cy = getHeight() / 2f;
+        float ringR = s * 0.47f, r = s * 0.42f;
+        double a = t * 2 * Math.PI;
+        // the turning ring of light
+        SweepGradient g = new SweepGradient(cx, cy, new int[]{0x0022D3EE, 0xFF22D3EE, 0xFF6366F1, 0xFFA855F7, 0x00A855F7},
+                new float[]{0f, 0.25f, 0.5f, 0.75f, 1f});
+        turn.setRotate(t * 720f, cx, cy);
+        g.setLocalMatrix(turn);
+        ring.setShader(g);
+        ring.setStrokeWidth(s * 0.04f);
+        c.drawCircle(cx, cy, ringR, ring);
+        if (photo == null) {
+            int pad = Math.round(s * -0.06f);
+            shield.setBounds(pad, pad, getWidth() - pad, getHeight() - pad);
+            shield.draw(c);
+            return;
+        }
+        // inside the circle: night sky, three drifting lights, then the portrait, breathing a little
+        c.save();
+        clip.reset();
+        clip.addCircle(cx, cy, r, Path.Direction.CW);
+        c.clipPath(clip);
+        paint.setShader(null);
+        paint.setColor(0xFF0B1026);
+        c.drawCircle(cx, cy, r, paint);
+        blob(c, cx + r * 0.5f * (float) Math.sin(a), cy - r * 0.45f + r * 0.2f * (float) Math.cos(a * 2), r * 1.1f, 0xFF22D3EE);
+        blob(c, cx + r * 0.55f * (float) Math.cos(a), cy + r * 0.1f * (float) Math.sin(a), r * 1.0f, 0xFF6366F1);
+        blob(c, cx - r * 0.4f * (float) Math.sin(a * 2 + 1), cy + r * 0.7f, r * 1.0f, 0xFFA855F7);
+        paint.setShader(null);
+        float breathe = 1f + 0.018f * (float) Math.sin(a * 2);
+        float half = r * breathe;
+        dst.set(Math.round(cx - half), Math.round(cy - half * 0.98f), Math.round(cx + half), Math.round(cy + half * 1.02f));
+        c.drawBitmap(photo, null, dst, paint);
+        c.restore();
+    }
+
+    private void blob(Canvas c, float x, float y, float r, int color) {
+        paint.setShader(new RadialGradient(x, y, r, new int[]{(color & 0x00FFFFFF) | 0xB0000000, color & 0x00FFFFFF},
+                null, Shader.TileMode.CLAMP));
+        c.drawCircle(x, y, r, paint);
+    }
+}

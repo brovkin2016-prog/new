@@ -37,6 +37,7 @@ public class MainActivity extends Activity implements State.Listener {
     private int text, muted, card, accent;
     private PowerButton power;
     private AuroraView aurora;
+    private AvatarView avatar;
     private TextView status, detail, ping, serverName, serverChange;
     private LinearLayout serverCard;
 
@@ -63,6 +64,7 @@ public class MainActivity extends Activity implements State.Listener {
         super.onResume();
         State.listen(this);
         changed();
+        avatar.refresh(Profile.chosen(this));
         Updater.check(this, false);
     }
 
@@ -84,11 +86,12 @@ public class MainActivity extends Activity implements State.Listener {
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
-        // the name: the shield with its turning ring, «Аврора» in the aurora's colours, and whose VPN it is
+        // the name: the owner's living portrait (or the shield), «Аврора» in the aurora's colours, whose VPN it is
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.addView(new LogoView(this), new LinearLayout.LayoutParams(dp(56), dp(56)));
+        avatar = new AvatarView(this);
+        head.addView(avatar, new LinearLayout.LayoutParams(dp(68), dp(68)));
         LinearLayout names = new LinearLayout(this);
         names.setOrientation(LinearLayout.VERTICAL);
         names.setPadding(dp(12), 0, 0, 0);

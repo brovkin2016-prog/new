@@ -26,7 +26,9 @@ adb exec-out screencap -p > "$OUT/2-on.png"
 
 # the phone's own traffic through the tunnel: a web page (TCP) and a plain DNS question over UDP
 # (Android itself asks DNS over TLS, i.e. TCP 853, so UDP is checked on purpose)
-R=$(adb shell "printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n' | toybox nc -w 15 example.com 80 | head -1")
+# stdin stays open a few seconds: toybox nc may quit on its EOF before the answer has come
+page() { adb shell "( printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n'; sleep 6 ) | toybox nc -w 15 example.com 80 | head -1"; }
+for _ in 1 2 3; do R=$(page); echo "$R" | grep -q "HTTP/1" && break; sleep 2; done
 echo "through the VPN: $R"
 echo "$R" | grep -q "HTTP/1" || fail "a web page did not come through the VPN"
 sleep 2
@@ -44,7 +46,7 @@ adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off"
 sleep 2
 adb exec-out screencap -p > "$OUT/4-off.png"
-R=$(adb shell "printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n' | toybox nc -w 10 example.com 80 | head -1")
+R=$(page)
 echo "after switching off (straight to the internet): $R"
 adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"
 grep -c "hy:" "$OUT/logcat.txt"
