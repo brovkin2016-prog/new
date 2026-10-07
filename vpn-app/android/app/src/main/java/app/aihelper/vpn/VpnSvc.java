@@ -259,6 +259,10 @@ public final class VpnSvc extends VpnService {
     }
 
     private boolean openTunnel() {
+        if (prepare(this) != null) {  // also makes this app the phone's VPN when permission was given before
+            stop("Нет разрешения на VPN: нажмите кнопку и разрешите.");
+            return false;
+        }
         try {
             Builder b = new Builder().setSession(profile.name).setMtu(8500)
                     .addAddress("198.18.0.1", 32).addRoute("0.0.0.0", 0)

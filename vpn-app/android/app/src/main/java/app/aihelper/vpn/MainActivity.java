@@ -229,6 +229,11 @@ public class MainActivity extends Activity implements State.Listener {
             startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
             return;
         }
+        connect();
+    }
+
+    /** Asks for the VPN permission once (Android's own question), then switches on. */
+    private void connect() {
         Intent ask = VpnService.prepare(this);
         if (ask != null) startActivityForResult(ask, REQ_VPN);
         else start();
@@ -275,7 +280,7 @@ public class MainActivity extends Activity implements State.Listener {
     private void handle(Intent i) {
         if (i == null) return;
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getDataString() != null) add(i.getDataString());
-        if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) start();     // the emulator test only
+        if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_disconnect", false)) {
             startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
         }
