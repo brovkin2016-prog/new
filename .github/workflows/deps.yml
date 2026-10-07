@@ -1,0 +1,36 @@
+# Third-party programs the family server installs, fetched once here and published as releases of this repository with
+# their SHA-256 in the notes: the installer then takes them from here and checks them against the pinned sum.
+#   mtg — the Telegram proxy (MTProto with fake TLS): Telegram without a VPN app.
+name: deps
+
+on:
+  push:
+    paths: [".github/workflows/deps.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mtg:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the latest mtg release and publish it here
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG=$(gh api repos/9seconds/mtg/releases/latest --jq .tag_name)
+          V=${TAG#v}
+          mkdir -p /tmp/m && cd /tmp/m
+          for A in amd64 arm64; do
+            gh release download "$TAG" --repo 9seconds/mtg --pattern "mtg-$V-linux-$A.tar.gz"
+            tar xzf "mtg-$V-linux-$A.tar.gz"
+            install -m 755 "mtg-$V-linux-$A/mtg" "mtg-linux-$A"
+          done
+          ./mtg-linux-amd64 --version
+          sha256sum mtg-linux-amd64 mtg-linux-arm64 | tee sums.txt
+          NOTES=$(printf 'mtg %s from github.com/9seconds/mtg, unpacked.\n\n```\n%s\n```' "$V" "$(cat sums.txt)")
+          gh release delete "dep-mtg-$V" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "dep-mtg-$V" mtg-linux-amd64 mtg-linux-arm64 sums.txt --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --title "mtg $V (Telegram proxy)" --notes "$NOTES"
