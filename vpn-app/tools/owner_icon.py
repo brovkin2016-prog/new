@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Puts the owner's portrait into «Аврора VPN»'s home-screen icon before the family server signs the app.
+"""Puts the owner's portrait into «Winger VPN»'s home-screen icon before the family server signs the app.
 
 The APK carries an empty placeholder picture (res/drawable-nodpi/ic_owner.png, found by its bytes because a release
 build renames resource files); it is swapped for the portrait, and the stored entries are aligned the way zipalign

@@ -1,4 +1,4 @@
-# Builds «Аврора VPN» for Android: the official Hysteria 2 client and hev-socks5-tunnel (both pinned and checked),
+# Builds «Winger VPN» for Android: the official Hysteria 2 client and hev-socks5-tunnel (both pinned and checked),
 # tests it on an emulator against a real hysteria server (the phone's traffic must go through the tunnel), and
 # publishes the unsigned APK as a release: the family server signs it with its own key and hands it out.
 name: vpn-app
@@ -139,4 +139,4 @@ jobs:
           cp /tmp/t/hy.log /tmp/rel/hysteria-server.log 2>/dev/null || true
           STATE="${{ job.status }}"
           gh release create "vpn-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
-            --title "Аврора VPN 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key."
+            --title "Winger VPN 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key."

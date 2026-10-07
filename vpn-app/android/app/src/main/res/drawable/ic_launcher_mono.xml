@@ -3,5 +3,5 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
     <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
-        android:pathData="M54,25L75,32.6V49.8C75,64.2 66,76.4 54,81.6C42,76.4 33,64.2 33,49.8V32.6Z M51.3,36.5H56.7L66.2,67.5H60.2L58.1,60.8H49.9L47.8,67.5H41.8Z M51.6,55.6H56.4L54,47.9Z" />
+        android:pathData="M54,25L75,32.6V49.8C75,64.2 66,76.4 54,81.6C42,76.4 33,64.2 33,49.8V32.6Z M40.6,36.5H46L49.4,58L52.2,45H55.8L58.6,58L62,36.5H67.4L61.4,67.5H56.2L54,56.5L51.8,67.5H46.6Z" />
 </vector>

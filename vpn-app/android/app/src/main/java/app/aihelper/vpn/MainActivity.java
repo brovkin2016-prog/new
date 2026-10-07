@@ -86,7 +86,7 @@ public class MainActivity extends Activity implements State.Listener {
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
-        // the name: the owner's living portrait (or the shield), «Аврора» in the aurora's colours, whose VPN it is
+        // the name: the owner's living portrait (or the shield), «Winger» in the aurora's colours, whose VPN it is
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
