@@ -18,7 +18,8 @@ adb logcat -c
 adb shell "am start -a android.intent.action.VIEW -d '$LINK' -n $ACT"
 sleep 3
 adb exec-out screencap -p > "$OUT/1-added.png"
-adb shell am start -n $ACT --ez test_connect true
+adb shell am start -n $ACT --ez test_all true --ez test_connect true  # first everything through the VPN
+wait_log "through the VPN: all apps" 60 || fail "not all apps through the VPN"
 wait_log "connected via" 60 || fail "no connection to the server"
 wait_log "ping [0-9]* ms" 40 || fail "no response time through the tunnel"
 sleep 2
@@ -28,9 +29,12 @@ adb exec-out screencap -p > "$OUT/2-on.png"
 # (Android itself asks DNS over TLS, i.e. TCP 853, so UDP is checked on purpose)
 # stdin stays open a few seconds: toybox nc may quit on its EOF before the answer has come
 page() { adb shell "( printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n'; sleep 6 ) | toybox nc -w 15 example.com 80 | head -1"; }
+TUNNELED() { grep -cE 'TCP request.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:80"' /tmp/t/hy.log; }  # by address: the tunnel's, not the app's pings
+B0=$(TUNNELED)
 for _ in 1 2 3; do R=$(page); echo "$R" | grep -q "HTTP/1" && break; sleep 2; done
 echo "through the VPN: $R"
 echo "$R" | grep -q "HTTP/1" || fail "a web page did not come through the VPN"
+[ "$(TUNNELED)" -gt "$B0" ] || fail "the page did not go through the tunnel"
 sleep 2
 N=$(adb shell "( printf '\022\064\001\000\000\001\000\000\000\000\000\000\007example\003com\000\000\001\000\001'; sleep 3 ) | toybox timeout 8 toybox nc -u 8.8.8.8 53 | toybox wc -c" | tr -dc '0-9')
 echo "UDP DNS answer through the VPN: ${N:-0} bytes"
@@ -55,14 +59,15 @@ grep -c "hy:" "$OUT/logcat.txt"
 # it (Android 11+ hides other apps unless the manifest names them), and the shell's own traffic must then go straight
 adb logcat -c
 adb shell am start -n $ACT --es test_apps com.android.chrome --ez test_connect true
-wait_log "through the VPN: \[com.android.chrome\]" 60 || fail "the chosen app did not reach the VPN (is it visible to the app?)"
+# (YouTube on this emulator image is ticked by default too: the list must name Chrome, and YouTube shows the app sees them)
+wait_log "through the VPN: \[.*com\.android\.chrome" 60 || fail "the chosen app did not reach the VPN (is it visible to the app?)"
 wait_log "connected via" 60 || fail "no connection with only the chosen apps"
 sleep 2
-BEFORE=$(grep -cE 'TCP request.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:80"' /tmp/t/hy.log)
+BEFORE=$(TUNNELED)
 R=$(page)
 echo "only Chrome through the VPN, the shell straight: $R"
 sleep 2
-AFTER=$(grep -cE 'TCP request.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:80"' /tmp/t/hy.log)
+AFTER=$(TUNNELED)
 [ "$AFTER" = "$BEFORE" ] || fail "the shell's traffic went through the VPN although only Chrome was chosen"
 adb exec-out screencap -p > "$OUT/4a-apps.png"
 adb shell am start -n $ACT --ez test_disconnect true

@@ -1238,6 +1238,8 @@
           el("small", { text: data.stats ? `Людей: ${data.users.length}, сейчас в сети: ${on}` : `Людей: ${data.users.length}` }))));
       if (data.vless !== null) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.vless ? "🟢" : "🔴") + " Запасной VLESS (TCP 443)",
         el("small", { text: "Когда Hysteria режут, работает он" }))));
+      if (data.tg !== null && data.tg !== undefined) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.tg ? "🟢" : "🔴") + " Telegram без VPN",
+        el("small", { text: "Для iPhone и компьютеров: ссылка — в карточке человека и на странице «VPN и Telegram»" }))));
       scroll.append(head, el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
         el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на приложение Winger VPN (24 ч)",
           onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }));
@@ -1299,6 +1301,7 @@
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
       if (d.vless && !d.vless.ok) bad.push("запасной VLESS не работает");
+      if (d.tgproxy && !d.tgproxy.ok) bad.push("Telegram без VPN не работает");
       const brBad = d.bridges.filter((b) => !b.ok);
       if (brBad.length) bad.push(brBad.length === 1 ? `не работает мост «${brBad[0].label}»` : `не работают мосты: ${brBad.length}`);
       if (d.cert_days !== null && d.cert_days < 10) bad.push(`сертификат кончается через ${d.cert_days} дн.`);
@@ -1578,7 +1581,8 @@
       sheet("👤 " + u.name + (u.owner ? " 👑" : ""), (box, close) => {
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
           text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` }));
-        const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"], ["vless", "VLESS", "запасной, когда режут UDP"]].filter((k) => u.links[k[0]]);
+        const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"], ["vless", "VLESS", "запасной, когда режут UDP"],
+          ["tg", "Telegram", "Telegram без VPN: iPhone, компьютер, любой телефон (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
         const chips = el("div", { class: "chips", style: "margin-bottom:10px" });
         const pick = (k) => {
@@ -1586,7 +1590,8 @@
           const link = u.links[k[0]];
           const png = u.qr[k[0]] ? blobOf(u.qr[k[0]], "image/png") : null;
           const file = `vpn-${u.name}-${k[1].toLowerCase()}.png`;
-          const text = `VPN для ${u.name} (${k[1]}):\n${link}\n\nИмпорт: v2RayTun или v2rayN → «+» → из буфера обмена или по QR-коду.`;
+          const text = k[0] === "tg" ? `Telegram без VPN для ${u.name}:\n${link}\n\nНажмите на ссылку — Telegram предложит подключить прокси.`
+            : `VPN для ${u.name} (${k[1]}):\n${link}\n\nИмпорт: v2RayTun или v2rayN → «+» → из буфера обмена или по QR-коду.`;
           pane.innerHTML = "";
           pane.append(el("div", { style: "font-size:13px;color:var(--muted);margin-bottom:8px", text: k[1] + " — " + k[2] }),
             png ? el("img", { src: urlOf(png), style: "display:block;width:220px;max-width:70%;margin:0 auto 10px;background:#fff;border-radius:12px;padding:6px",
@@ -1601,8 +1606,8 @@
         box.append(pane);
         pick(kinds[0]);
         if (u.links.hy2) {
-          box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "🔗 Ссылка с QR для подключения (24 ч)",
-            onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "Подключение VPN — " + u.name); } }),
+          box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "🔗 VPN и Telegram — ссылка с QR (24 ч)",
+            onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); } }),
           el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔗 Ссылка на приложение Winger VPN (24 ч)",
             onclick: () => { close(); makeLink({ op: "dl_vpnapp", name: u.name }, "Winger VPN — " + u.name); } }));
         }

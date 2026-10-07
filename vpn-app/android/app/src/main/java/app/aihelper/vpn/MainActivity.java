@@ -334,6 +334,7 @@ public class MainActivity extends Activity implements State.Listener {
     private void handle(Intent i) {
         if (i == null) return;
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getDataString() != null) add(i.getDataString());
+        if (BuildConfig.DEBUG && i.getBooleanExtra("test_all", false)) Apps.setOnlyChosen(this, false);  // the emulator test only
         String testApps = BuildConfig.DEBUG ? i.getStringExtra("test_apps") : null;  // the emulator test only
         if (testApps != null) {
             Apps.setOnlyChosen(this, true);
