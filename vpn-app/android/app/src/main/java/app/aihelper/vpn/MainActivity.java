@@ -22,6 +22,7 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -85,7 +86,12 @@ public class MainActivity extends Activity implements State.Listener {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(28), dp(20), dp(20));
         root.setGravity(Gravity.CENTER_HORIZONTAL);
-        frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        // on a short screen everything still fits: it scrolls; on a tall one the spacers share the room as before
+        ScrollView scroller = new ScrollView(this);
+        scroller.setFillViewport(true);
+        scroller.setVerticalScrollBarEnabled(false);
+        scroller.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        frame.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
 
         // the name: the owner's living portrait (or the shield), «Winger» in the aurora's colours, whose VPN it is
         LinearLayout head = new LinearLayout(this);
@@ -114,7 +120,8 @@ public class MainActivity extends Activity implements State.Listener {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             toggle();
         });
-        root.addView(power, new LinearLayout.LayoutParams(dp(230), dp(230)));
+        int big = getResources().getConfiguration().screenHeightDp < 720 ? 180 : 230;  // a smaller button on a short screen
+        root.addView(power, new LinearLayout.LayoutParams(dp(big), dp(big)));
 
         status = label("", 24, text, true);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
