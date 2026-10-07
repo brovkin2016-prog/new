@@ -43,7 +43,7 @@ public final class AlertJob extends JobService {
         boolean same = token.equals(p.getString("ownerToken", ""));
         p.edit().putString("ownerToken", token).apply();
         if (js == null || (same && js.getPendingJob(JOB) != null)) return;
-        if (p.getFloat("alertsSince", 0) == 0) p.edit().putFloat("alertsSince", System.currentTimeMillis() / 1000f).apply();
+        if (since(p) == 0) setSince(p, System.currentTimeMillis() / 1000.0);
         js.schedule(new JobInfo.Builder(JOB, new ComponentName(c, AlertJob.class))
                 .setPeriodic(15 * 60 * 1000L)
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
@@ -74,7 +74,7 @@ public final class AlertJob extends JobService {
         String token = p.getString("ownerToken", ""), host = p.getString("host", "");
         if (token.isEmpty() || host.isEmpty()) return;
         Net.setHost(c, host);
-        double since = p.getFloat("alertsSince", 0);
+        double since = since(p);
         Map<String, String> h = new HashMap<>();
         h.put("Authorization", "Bearer " + token);
         h.put("Content-Type", "application/json");
@@ -104,7 +104,25 @@ public final class AlertJob extends JobService {
                 if (!"log".equals(a.optString("kind"))) notify(c, a.optString("text"), (int) (a.optDouble("ts") % 100000));
             }
         }
-        p.edit().putFloat("alertsSince", (float) now).apply();
+        setSince(p, now);
+    }
+
+    /** Since when the alerts were seen, in seconds. Kept as text: a float has only 128-second steps at today's dates,
+     *  which showed some alerts twice or never; the old float value is read once and then replaced. */
+    private static double since(SharedPreferences p) {
+        String s = p.getString("alertsAt", null);
+        if (s != null) {
+            try {
+                return Double.parseDouble(s);
+            } catch (NumberFormatException ignored) {
+                // written by hand: start again from the old value
+            }
+        }
+        return p.getFloat("alertsSince", 0);
+    }
+
+    private static void setSince(SharedPreferences p, double v) {
+        p.edit().putString("alertsAt", Double.toString(v)).apply();
     }
 
     @SuppressWarnings("deprecation")

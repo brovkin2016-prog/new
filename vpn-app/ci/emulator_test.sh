@@ -51,6 +51,23 @@ echo "after switching off (straight to the internet): $R"
 adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"
 grep -c "hy:" "$OUT/logcat.txt"
 
+# only the chosen apps through the VPN: Chrome (on this emulator, not ticked by default) is chosen; the app must see
+# it (Android 11+ hides other apps unless the manifest names them), and the shell's own traffic must then go straight
+adb logcat -c
+adb shell am start -n $ACT --es test_apps com.android.chrome --ez test_connect true
+wait_log "through the VPN: \[com.android.chrome\]" 60 || fail "the chosen app did not reach the VPN (is it visible to the app?)"
+wait_log "connected via" 60 || fail "no connection with only the chosen apps"
+sleep 2
+BEFORE=$(grep -cE 'TCP request.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:80"' /tmp/t/hy.log)
+R=$(page)
+echo "only Chrome through the VPN, the shell straight: $R"
+sleep 2
+AFTER=$(grep -cE 'TCP request.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:80"' /tmp/t/hy.log)
+[ "$AFTER" = "$BEFORE" ] || fail "the shell's traffic went through the VPN although only Chrome was chosen"
+adb exec-out screencap -p > "$OUT/4a-apps.png"
+adb shell am start -n $ACT --ez test_disconnect true
+wait_log "stopped" 20 || fail "did not switch off (only the chosen apps)"
+
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 # Android's «install the update?» answered by a tap — the way a phone gets every update
 vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }

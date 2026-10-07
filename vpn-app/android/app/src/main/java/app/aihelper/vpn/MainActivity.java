@@ -50,7 +50,8 @@ public class MainActivity extends Activity implements State.Listener {
         card = dark ? 0xE01A2029 : 0xEBFFFFFF;  // cards let the aurora shine through a little
         accent = dark ? 0xFF34D399 : 0xFF0E9F6E;
         build();
-        handle(getIntent());
+        // a link that opened the app counts once: not again when Android recreates the screen or reopens it from Recents
+        if (saved == null && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) handle(getIntent());
     }
 
     @Override
@@ -333,6 +334,12 @@ public class MainActivity extends Activity implements State.Listener {
     private void handle(Intent i) {
         if (i == null) return;
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getDataString() != null) add(i.getDataString());
+        String testApps = BuildConfig.DEBUG ? i.getStringExtra("test_apps") : null;  // the emulator test only
+        if (testApps != null) {
+            Apps.setOnlyChosen(this, true);
+            for (String pkg : testApps.split(",")) Apps.choose(this, pkg.trim(), true);
+            appsChanged();
+        }
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_install", false)) Updater.testInstall(this);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_disconnect", false)) {
@@ -417,11 +424,11 @@ public class MainActivity extends Activity implements State.Listener {
         new AlertDialog.Builder(this)
                 .setMessage("Удалить сервер «" + all.get(i).name + "» из приложения?")
                 .setPositiveButton("Удалить", (d, w) -> {
-                    boolean current = i == Math.max(0, Math.min(Profile.current(this), all.size() - 1));
-                    if (current && State.phase != State.Phase.OFF) startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
+                    int cur = Math.max(0, Math.min(Profile.current(this), all.size() - 1));
+                    if (i == cur && State.phase != State.Phase.OFF) startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
                     all.remove(i);
                     Profile.save(this, all);
-                    Profile.select(this, 0);
+                    Profile.select(this, i < cur ? cur - 1 : i == cur ? 0 : cur);  // the server in use stays chosen
                     changed();
                 })
                 .setNegativeButton("Отмена", null)

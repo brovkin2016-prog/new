@@ -36,6 +36,7 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The app updates itself from the family server named in its link: /app/vpn.json says which version is there,
@@ -47,7 +48,7 @@ final class Updater {
     private static final long EVERY_MS = 6 * 3600_000L;
     private static final String RESULT = "app.aihelper.vpn.INSTALL_RESULT";
     private static final int TRIES = 6;
-    private static volatile boolean busy, cancelled;
+    private static volatile boolean busy, downloading;
     private static WeakReference<Activity> current = new WeakReference<>(null);
 
     private Updater() {}
@@ -92,7 +93,7 @@ final class Updater {
             JSONObject found = info;
             a.runOnUiThread(() -> {
                 busy = false;
-                if (a.isFinishing()) return;
+                if (!alive(a)) return;
                 if (found == null) {
                     if (manual) Toast.makeText(a, "Сервер не ответил — попробуйте позже", Toast.LENGTH_LONG).show();
                     return;
@@ -114,7 +115,16 @@ final class Updater {
         }, "update-check").start();
     }
 
+    /** The screen can still show a dialog (not closed, not destroyed by a rotation or a language change). */
+    private static boolean alive(Activity a) {
+        return a != null && !a.isFinishing() && !a.isDestroyed();
+    }
+
     private static void download(Activity a, String base, JSONObject info) {
+        if (downloading) {
+            Toast.makeText(a, "Обновление уже загружается", Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (Build.VERSION.SDK_INT >= 26 && !a.getPackageManager().canRequestPackageInstalls()) {
             new AlertDialog.Builder(a)
                     .setTitle("Нужно одно разрешение")
@@ -137,10 +147,11 @@ final class Updater {
         line.setText("Подключаюсь…");
         box.addView(bar);
         box.addView(line);
-        cancelled = false;
+        AtomicBoolean stop = new AtomicBoolean();  // this download's own: a new one after «Отмена» starts clean
+        downloading = true;
         AlertDialog dlg = new AlertDialog.Builder(a).setTitle("Загружаю обновление " + info.optString("name", ""))
                 .setView(box).setCancelable(false)
-                .setNegativeButton("Отмена", (d, w) -> cancelled = true).show();
+                .setNegativeButton("Отмена", (d, w) -> stop.set(true)).show();
         long size = Math.max(1, info.optLong("size", 1));
         String want = info.optString("sha256", "");
         File dir = new File(a.getCacheDir(), "update");
@@ -152,7 +163,7 @@ final class Updater {
             f.delete();
         new Thread(() -> {
             String err = null;
-            for (int t = 0; t < TRIES && !cancelled; t++) {
+            for (int t = 0; t < TRIES && !stop.get(); t++) {
                 if (apk.length() >= size) break;
                 if (t > 0) {
                     int n = t;
@@ -163,10 +174,10 @@ final class Updater {
                         Thread.currentThread().interrupt();
                     }
                 }
-                err = fetch(a, base + "vpn.apk", apk, size, bar, line);
+                err = fetch(a, base + "vpn.apk", apk, size, bar, line, stop);
                 if (err == null && apk.length() >= size) break;
             }
-            if (cancelled) err = "отменено";
+            if (stop.get()) err = "отменено";
             else if (apk.length() < size && err == null) err = "файл скачался не целиком";
             if (err == null && !want.equalsIgnoreCase(sha256(apk))) {
                 //noinspection ResultOfMethodCallIgnored
@@ -176,9 +187,11 @@ final class Updater {
             String fail = err;
             boolean otherKey = fail == null && !sameSigner(a, apk);
             a.runOnUiThread(() -> {
-                dlg.dismiss();
+                downloading = false;
+                if (alive(a)) dlg.dismiss();
+                if (stop.get()) return;
                 if (fail != null) {
-                    if (cancelled) return;
+                    if (!alive(a)) return;
                     new AlertDialog.Builder(a).setTitle("Обновление не скачалось")
                             .setMessage("Причина: " + fail + ".\n\nСкачанная часть сохранена — при повторе загрузка продолжится с места обрыва.")
                             .setPositiveButton("Повторить", (d, w) -> download(a, base, info))
@@ -186,6 +199,7 @@ final class Updater {
                     return;
                 }
                 if (otherKey) {
+                    if (!alive(a)) return;
                     new AlertDialog.Builder(a).setTitle("Нужна переустановка")
                             .setMessage("Новая версия подписана другим ключом (сервер переустанавливали с нуля). Удалите это "
                                     + "приложение и поставьте его заново из файла, который пришлёт владелец, затем вставьте ссылку.")
@@ -200,7 +214,7 @@ final class Updater {
     }
 
     /** One pass: continues the file from its current length (Range), or starts over when the server sends it whole. */
-    private static String fetch(Activity a, String url, File apk, long size, ProgressBar bar, TextView line) {
+    private static String fetch(Activity a, String url, File apk, long size, ProgressBar bar, TextView line, AtomicBoolean stop) {
         long have = apk.length();
         HttpURLConnection c = null;
         try {
@@ -216,7 +230,7 @@ final class Updater {
             long got = code == 206 ? have : 0;
             try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(apk, code == 206)) {
                 byte[] b = new byte[64 * 1024];
-                for (int n; !cancelled && (n = in.read(b)) > 0; ) {
+                for (int n; !stop.get() && (n = in.read(b)) > 0; ) {
                     out.write(b, 0, n);
                     got += n;
                     long g = got;
@@ -264,12 +278,29 @@ final class Updater {
     /** Through the system's package installer: the answer comes back with its status and reason. */
     private static void install(Activity a, File apk) {
         Context app = a.getApplicationContext();
+        new Thread(() -> {
+            String err = write(app, apk);
+            if (err == null) return;
+            a.runOnUiThread(() -> {
+                if (alive(a)) {
+                    new AlertDialog.Builder(a).setTitle("Не получилось начать установку")
+                            .setMessage(err).setPositiveButton("OK", null).show();
+                } else {
+                    Toast.makeText(app, "Не получилось начать установку: " + err, Toast.LENGTH_LONG).show();
+                }
+            });
+        }, "update-install").start();
+    }
+
+    /** Hands the file to Android's installer (the copy takes a few seconds: not on the screen's thread). Null when done. */
+    private static String write(Context app, File apk) {
+        PackageInstaller pi = app.getPackageManager().getPackageInstaller();
+        int id = -1;
         try {
-            PackageInstaller pi = app.getPackageManager().getPackageInstaller();
             PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             p.setAppPackageName(app.getPackageName());
             p.setSize(apk.length());
-            int id = pi.createSession(p);
+            id = pi.createSession(p);
             try (PackageInstaller.Session s = pi.openSession(id)) {
                 // the file goes in and its stream is closed exactly once, before the commit
                 try (InputStream in = new FileInputStream(apk); OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
@@ -282,10 +313,17 @@ final class Updater {
                 PendingIntent pend = PendingIntent.getBroadcast(app, id, new Intent(RESULT).setPackage(app.getPackageName()), flags);
                 s.commit(pend.getIntentSender());
             }
+            return null;
         } catch (Exception e) {
             Log.w("AIVPN", "install: " + e);
-            new AlertDialog.Builder(a).setTitle("Не получилось начать установку")
-                    .setMessage(String.valueOf(e.getMessage())).setPositiveButton("OK", null).show();
+            if (id >= 0) {
+                try {
+                    pi.abandonSession(id);  // not left half-written in the phone's installer
+                } catch (Exception ignored) {
+                    // committed or gone already
+                }
+            }
+            return String.valueOf(e.getMessage());
         }
     }
 
@@ -329,7 +367,7 @@ final class Updater {
                 String detail = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
                 Activity a = current.get();
                 String text = "Обновление не установлено: " + why + (detail != null ? "\n\n(" + detail + ")" : "");
-                if (a != null && !a.isFinishing()) {
+                if (alive(a)) {
                     new AlertDialog.Builder(a).setTitle("Не установилось").setMessage(text).setPositiveButton("OK", null).show();
                 } else {
                     Toast.makeText(c, text, Toast.LENGTH_LONG).show();

@@ -30,6 +30,11 @@ import java.util.concurrent.TimeUnit;
  * With a VPN on the phone the request travels inside the tunnel, where only TCP 8443 reaches the server: it goes first.
  */
 final class Net {
+    /** A started request, to be called off (an update download the person cancelled). */
+    interface Handle {
+        void cancel();
+    }
+
     interface Sink {
         void head(int status);
         void data(byte[] chunk);
@@ -38,11 +43,13 @@ final class Net {
     }
 
     private static final String TAG = "AINet";
-    private static final long CONNECT_MS = 20_000;   // no answer at all by then: try the other way
+    private static final long CONNECT_MS = 20_000;   // no answer at all by then: give up on this way
+    private static final long FIRST_MS = 6_000;      // ... but the first way gets less: the other one is tried sooner
+    private static final long REMEMBER_MS = 30 * 60_000;  // UDP did not work: TCP first for this long
     private static final long IDLE_MS = 90_000;      // the server pings every 15 s while it works
     private static final ExecutorService pool = Executors.newCachedThreadPool();
     private static final Handler timers = new Handler(Looper.getMainLooper());
-    private static ExperimentalCronetEngine engine;
+    private static volatile ExperimentalCronetEngine engine;
     private static Context app;
     private static String engineHost = "";
     private static volatile long preferTcpUntil = 0;
@@ -71,7 +78,13 @@ final class Net {
             b.setExperimentalOptions("{\"HostResolverRules\":{\"host_resolver_rules\":\"" + BuildConfig.TEST_HOST_RULES
                     + "\"},\"QUIC\":{\"allow_unknown_root_cert\":true}}");
         }
-        if (engine != null) engine.shutdown();
+        if (engine != null) {
+            try {
+                engine.shutdown();
+            } catch (RuntimeException e) {
+                Log.i(TAG, "old engine still busy, left to finish: " + e.getMessage());
+            }
+        }
         engine = b.build();
         engineHost = host;
     }
@@ -82,13 +95,15 @@ final class Net {
     }
 
     /** Starts a request; the sink hears the status, the body as it arrives, and the end. */
-    static void start(String method, String path, Map<String, String> headers, byte[] body, Sink sink) {
+    static Handle start(String method, String path, Map<String, String> headers, byte[] body, Sink sink) {
         if (engine == null || host.isEmpty()) {
             sink.fail("no host");
-            return;
+            return () -> { };
         }
         boolean vpn = vpnOn();
-        new Call(method, path, headers, body, sink, vpn || System.currentTimeMillis() < preferTcpUntil, vpn).go();
+        Call c = new Call(method, path, headers, body, sink, vpn || System.currentTimeMillis() < preferTcpUntil, vpn);
+        c.go();
+        return c;
     }
 
     /** A VPN app on the phone is carrying the traffic (Hysteria, VLESS or any other). */
@@ -123,12 +138,12 @@ final class Net {
         return ok[0] && status[0] == 200 ? out.toByteArray() : null;
     }
 
-    private static final class Call extends UrlRequest.Callback {
+    private static final class Call extends UrlRequest.Callback implements Handle {
         final String method, path;
         final Map<String, String> headers;
         final byte[] body;
         final Sink sink;
-        volatile boolean tcp, triedOther, started, timedOut;
+        volatile boolean tcp, triedOther, started, timedOut, stopped;
         final boolean vpn;
         UrlRequest req;
         final Runnable connectTimeout = () -> { timedOut = true; if (req != null) req.cancel(); };
@@ -160,12 +175,24 @@ final class Net {
                 rb.setUploadDataProvider(UploadDataProviders.create(body), pool);
             }
             req = rb.build();
-            timers.postDelayed(connectTimeout, CONNECT_MS + (body == null ? 0 : body.length / 50));  // ~50 kB/s at worst
+            // QUIC that gets no answer is usually UDP dropped by the network: TCP is tried after a few seconds, not 20
+            // (with a VPN on the phone only TCP goes anyway, so it is given the full time)
+            long wait = triedOther || vpn ? CONNECT_MS : FIRST_MS;
+            timers.postDelayed(connectTimeout, wait + (body == null ? 0 : body.length / 50));  // ~50 kB/s at worst
             req.start();
         }
 
+        @Override
+        public void cancel() {
+            stopped = true;
+            timers.removeCallbacks(connectTimeout);
+            timers.removeCallbacks(idleTimeout);
+            UrlRequest q = req;
+            if (q != null) q.cancel();
+        }
+
         private boolean retry(String why) {
-            if (started || triedOther) return false;
+            if (started || triedOther || stopped) return false;
             Log.i(TAG, (tcp ? "TCP" : "QUIC") + " failed (" + why + "), trying " + (tcp ? "QUIC" : "TCP 8443"));
             triedOther = true;
             tcp = !tcp;
@@ -183,7 +210,7 @@ final class Net {
             started = true;
             timers.removeCallbacks(connectTimeout);
             timers.postDelayed(idleTimeout, IDLE_MS);
-            if (!vpn) preferTcpUntil = tcp ? System.currentTimeMillis() + 5 * 60_000 : 0;
+            if (!vpn) preferTcpUntil = tcp ? System.currentTimeMillis() + REMEMBER_MS : 0;
             lastProto = info.getNegotiatedProtocol();
             lastVpn = vpn;
             if (BuildConfig.DEBUG) Log.i(TAG, path + " " + info.getHttpStatusCode() + " via " + info.getNegotiatedProtocol());
@@ -221,7 +248,8 @@ final class Net {
         public void onCanceled(UrlRequest r, UrlResponseInfo info) {
             timers.removeCallbacks(connectTimeout);
             timers.removeCallbacks(idleTimeout);
-            if (!(timedOut && retry("timeout"))) sink.fail("timeout");
+            if (stopped) sink.fail("cancelled");
+            else if (!(timedOut && retry("timeout"))) sink.fail("timeout");
         }
     }
 }

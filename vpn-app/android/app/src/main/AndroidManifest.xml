@@ -13,6 +13,39 @@
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Android 11+ shows an app only the apps it names: these are the ones that may go through the VPN alone -->
+    <queries>
+        <package android:name="com.instagram.android" />
+        <package android:name="com.instagram.barcelona" />
+        <package android:name="org.telegram.messenger" />
+        <package android:name="org.telegram.messenger.web" />
+        <package android:name="org.thunderdog.challegram" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.facebook.orca" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.discord" />
+        <package android:name="org.thoughtcrime.securesms" />
+        <package android:name="com.viber.voip" />
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.ss.android.ugc.trill" />
+        <package android:name="com.linkedin.android" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.netflix.mediaclient" />
+        <package android:name="com.pinterest" />
+        <package android:name="com.reddit.frontpage" />
+        <package android:name="tv.twitch.android.app" />
+        <package android:name="com.snapchat.android" />
+        <package android:name="com.patreon.android" />
+        <package android:name="com.android.chrome" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"

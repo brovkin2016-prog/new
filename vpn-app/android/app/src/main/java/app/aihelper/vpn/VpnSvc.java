@@ -83,16 +83,17 @@ public final class VpnSvc extends VpnService {
             if (!again && wanted && profile != null && profile.link.equals(p.link)) return START_STICKY;  // already on with it
             old = worker;
             wanted = false;  // another server was chosen: the old connection goes first
+            worker = null;   // the old worker sees it is no longer the one and leaves, touching nothing
         }
+        if (old != null) old.interrupt();
+        stopParts();  // its client and tunnel go now: a ping or a lookup it is blocked in ends at once
         if (old != null) {
-            old.interrupt();
             try {
                 old.join(3000);
             } catch (InterruptedException ignored) {
-                // go on
+                // go on: it no longer acts once it notices
             }
         }
-        stopParts();
         synchronized (lock) {
             profile = p;
             wanted = true;
@@ -111,8 +112,20 @@ public final class VpnSvc extends VpnService {
 
     @Override
     public void onDestroy() {
-        stop(null);
+        boolean on;
+        synchronized (lock) {
+            on = wanted || worker != null;
+        }
+        if (on) stop(null);
+        else stopParts();  // already stopped: the reason it stopped stays on the screen
         super.onDestroy();
+    }
+
+    /** This thread is the current worker and the VPN is still wanted. */
+    private boolean mine() {
+        synchronized (lock) {
+            return wanted && worker == Thread.currentThread();
+        }
     }
 
     // ---------- the work: connect, keep it up, say how it goes ----------
@@ -121,18 +134,26 @@ public final class VpnSvc extends VpnService {
         int fails = 0;
         State.set(State.Phase.CONNECTING, "Подключаюсь к серверу…");
         if (socksPort == 0) socksPort = freePort();
-        while (wanted) {
-            String err = startClient();
-            if (err == null && wanted) {
-                if (tun == null && !openTunnel()) return;
+        while (mine()) {
+            Process[] own = {null};
+            String err = startClient(own);
+            if (err == null && mine()) {
+                if (tun == null && !openTunnel()) {
+                    killClient(own[0]);
+                    return;
+                }
+                if (!mine()) {
+                    killClient(own[0]);
+                    break;
+                }
                 fails = 0;
                 State.set(State.Phase.ON, "");
                 Log.i(TAG, "connected via " + profile.host);
                 ping();
-                err = watch();
+                err = watch(own[0]);
             }
-            killClient();
-            if (!wanted) break;
+            killClient(own[0]);  // only its own: a newer worker's client is not touched
+            if (!mine()) break;
             fails++;
             State.set(tun == null ? State.Phase.CONNECTING : State.Phase.RETRYING, err + " Пробую снова…");
             update();
@@ -141,13 +162,12 @@ public final class VpnSvc extends VpnService {
     }
 
     /** While the client runs: speeds every second, the response time every 20 s; null-free reason when it stopped. */
-    private String watch() {
+    private String watch(Process p) {
         long lastPing = SystemClock.elapsedRealtime(), lastStats = 0;
         long prevDown = 0, prevUp = 0;
         int missed = 0;
-        while (wanted) {
+        while (mine()) {
             if (!sleep(1000)) return "";
-            Process p = client;
             if (p == null || !alive(p)) return lastError != null ? lastError : "Клиент VPN остановился.";
             long[] s = statsOrNull();
             long now = SystemClock.elapsedRealtime();
@@ -170,6 +190,12 @@ public final class VpnSvc extends VpnService {
                 lastPing = now;
                 ping();
                 Log.i(TAG, "traffic down " + State.down + " up " + State.up);
+                if (!mine()) return "";  // switched off while it was pinging: the screen says «off», not «retrying»
+                TProxyService t = hev;
+                if (t == null || !t.TProxyIsRunning()) {
+                    stopParts();  // the tunnel is opened anew on the next round
+                    return "Туннель остановился.";
+                }
                 if (State.pingMs == 0) {
                     missed++;
                     State.set(State.Phase.RETRYING, "Сервер не отвечает…");
@@ -186,7 +212,7 @@ public final class VpnSvc extends VpnService {
     }
 
     /** Starts the Hysteria client and waits until it has reached the server. Null when it has. */
-    private String startClient() {
+    private String startClient(Process[] own) {
         Profile p = profile;
         String host = p.host;
         try {
@@ -222,12 +248,13 @@ public final class VpnSvc extends VpnService {
             pb.environment().put("HOME", dir.getAbsolutePath());
             Process proc = pb.start();
             synchronized (lock) {
-                if (!wanted) {
+                if (!wanted || worker != Thread.currentThread()) {
                     proc.destroy();
                     return "";
                 }
                 client = proc;
             }
+            own[0] = proc;
             CountDownLatch up = connected;
             new Thread(() -> read(proc, up), "client-log").start();
             if (!up.await(20, TimeUnit.SECONDS)) return lastError != null ? lastError : "Сервер не отвечает.";
@@ -267,7 +294,7 @@ public final class VpnSvc extends VpnService {
 
     private boolean openTunnel() {
         if (prepare(this) != null) {  // also makes this app the phone's VPN when permission was given before
-            stop("Нет разрешения на VPN: нажмите кнопку и разрешите.");
+            fail("Нет разрешения на VPN: нажмите кнопку и разрешите.");
             return false;
         }
         try {
@@ -304,7 +331,7 @@ public final class VpnSvc extends VpnService {
             if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);
             ParcelFileDescriptor fd = b.establish();
             if (fd == null) {
-                stop("Нет разрешения на VPN: нажмите кнопку ещё раз и разрешите.");
+                fail("Нет разрешения на VPN: нажмите кнопку ещё раз и разрешите.");
                 return false;
             }
             File conf = new File(dir, "tunnel.yaml");
@@ -316,18 +343,21 @@ public final class VpnSvc extends VpnService {
             }
             TProxyService t = new TProxyService();
             synchronized (lock) {
-                if (!wanted) {
+                if (!wanted || worker != Thread.currentThread()) {
                     fd.close();
                     return false;
                 }
                 tun = fd;
                 hev = t;
             }
-            t.TProxyStartService(conf.getAbsolutePath(), fd.getFd());
+            if (!t.TProxyStartService(conf.getAbsolutePath(), fd.getFd())) {
+                fail("Не получилось включить VPN на этом телефоне.");
+                return false;
+            }
             return true;
         } catch (Exception e) {
             Log.w(TAG, "tunnel", e);
-            stop("Не получилось включить VPN на этом телефоне.");
+            fail("Не получилось включить VPN на этом телефоне.");
             return false;
         }
     }
@@ -361,6 +391,11 @@ public final class VpnSvc extends VpnService {
     }
 
     // ---------- stopping ----------
+
+    /** The worker's own failure stops the VPN, unless a newer start has already replaced this worker. */
+    private void fail(String why) {
+        if (mine()) stop(why);
+    }
 
     private void stop(String why) {
         synchronized (lock) {
@@ -409,6 +444,15 @@ public final class VpnSvc extends VpnService {
             client = null;
         }
         if (p != null) p.destroy();
+    }
+
+    /** A worker's own client; the shared field is cleared only when it still points at it. */
+    private void killClient(Process p) {
+        if (p == null) return;
+        synchronized (lock) {
+            if (client == p) client = null;
+        }
+        p.destroy();
     }
 
     // ---------- the notification ----------
