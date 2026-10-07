@@ -7,6 +7,8 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
@@ -414,6 +416,8 @@ public final class VpnSvc extends VpnService {
         if (nm != null) nm.notify(NOTE_ID, note(text));
     }
 
+    private Bitmap emblem;  // the winged shield, the notification's picture
+
     @SuppressWarnings("deprecation")
     private Notification note(String text) {
         NotificationManager nm = getSystemService(NotificationManager.class);
@@ -431,7 +435,9 @@ public final class VpnSvc extends VpnService {
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent off = PendingIntent.getService(this, 1, new Intent(this, VpnSvc.class).setAction(STOP),
                 PendingIntent.FLAG_IMMUTABLE);
+        if (emblem == null) emblem = BitmapFactory.decodeResource(getResources(), R.drawable.emblem);
         return b.setSmallIcon(R.drawable.ic_stat)
+                .setLargeIcon(emblem)
                 .setContentTitle(profile != null ? profile.name : getString(R.string.app_name))
                 .setContentText(text)
                 .setContentIntent(open)

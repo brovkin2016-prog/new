@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- the icon's picture: the shield, and over it the owner's portrait. In the repository ic_owner.png is an empty
-     placeholder; the family server swaps in the portrait (over the aurora) when it signs the app, so the photo never
-     goes into this public repository. -->
+<!-- the icon's picture: the winged shield (in the safe middle of the icon), and over it the owner's portrait. In the
+     repository ic_owner.png is an empty placeholder; the family server swaps in the portrait when it signs the app,
+     so the photo never goes into this public repository. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@drawable/ic_launcher_fg" />
+    <item android:left="21dp" android:top="21dp" android:right="21dp" android:bottom="21dp" android:drawable="@drawable/emblem" />
     <item android:drawable="@drawable/ic_owner" />
 </layer-list>

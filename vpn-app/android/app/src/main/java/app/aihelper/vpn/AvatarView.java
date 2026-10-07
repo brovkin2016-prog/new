@@ -33,7 +33,7 @@ import java.net.URL;
  * a little. The photo lives on the family server, not in the app: it comes from /app/vpn-avatar.png and is kept on the
  * phone. On Android 9 and newer the living one comes too (/app/vpn-avatar.webp: the face winks and smiles now and
  * then). Until a picture has come, the portrait from the app's own icon stands in (the server puts it there when it
- * signs the app), and the shield only when there is none.
+ * signs the app), and the winged shield only when there is none.
  */
 final class AvatarView extends View {
     private static final long EVERY_MS = 24 * 3600_000L;
@@ -42,7 +42,7 @@ final class AvatarView extends View {
     private final Matrix turn = new Matrix();
     private final Path clip = new Path();
     private final Rect dst = new Rect();
-    private final Drawable shield;
+    private final Drawable emblem;  // the winged shield
     private final File file, live;
     private Bitmap photo;
     private final Bitmap iconPhoto;  // the portrait the server put into the icon: the sky and the face, full square
@@ -53,7 +53,7 @@ final class AvatarView extends View {
 
     AvatarView(Context c) {
         super(c);
-        shield = c.getDrawable(R.drawable.ic_launcher_fg);
+        emblem = c.getDrawable(R.drawable.emblem);
         file = new File(c.getFilesDir(), "avatar.png");
         live = new File(c.getFilesDir(), "avatar.webp");
         photo = BitmapFactory.decodeFile(file.getAbsolutePath());
@@ -184,6 +184,12 @@ final class AvatarView extends View {
         float s = Math.min(getWidth(), getHeight()), cx = getWidth() / 2f, cy = getHeight() / 2f;
         float ringR = s * 0.47f, r = s * 0.42f;
         double a = t * 2 * Math.PI;
+        if (photo == null && moving == null && iconPhoto == null) {  // no portrait: the winged shield, floating gently
+            float lift = s * 0.025f * (float) Math.sin(a * 2), half = s * 0.56f;
+            emblem.setBounds(Math.round(cx - half), Math.round(cy - half + lift), Math.round(cx + half), Math.round(cy + half + lift));
+            emblem.draw(c);
+            return;
+        }
         // the turning ring of light
         SweepGradient g = new SweepGradient(cx, cy, new int[]{0x0022D3EE, 0xFF22D3EE, 0xFF6366F1, 0xFFA855F7, 0x00A855F7},
                 new float[]{0f, 0.25f, 0.5f, 0.75f, 1f});
@@ -192,12 +198,6 @@ final class AvatarView extends View {
         ring.setShader(g);
         ring.setStrokeWidth(s * 0.04f);
         c.drawCircle(cx, cy, ringR, ring);
-        if (photo == null && moving == null && iconPhoto == null) {
-            int pad = Math.round(s * -0.06f);
-            shield.setBounds(pad, pad, getWidth() - pad, getHeight() - pad);
-            shield.draw(c);
-            return;
-        }
         // inside the circle: night sky, three drifting lights, then the portrait, breathing a little
         c.save();
         clip.reset();
