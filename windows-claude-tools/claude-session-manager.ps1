@@ -1,9 +1,13 @@
-﻿param([switch]$Backup)
+﻿param([switch]$Backup, [switch]$Reminder)
 
 # =====================================================================
-#  Claude Session Manager  —  GUI для бэкапа/восстановления сессий
-#  Claude Code (Windows). Кнопки + личные примечания.
-#  Запуск с ключом -Backup = тихий бэкап без окна (для автозадачи).
+#  Claude Session Manager (Windows)
+#  - Бэкап/восстановление сессий Claude Code
+#  - Сбор экспорта чатов приложения Claude в бэкап
+#  - Автозахват по расписанию, мгновенный захват (junction), примечания
+#  Ключи: -Backup  = тихий бэкап (+сбор экспорта) для автозадачи
+#         -Reminder= напоминание выгрузить чаты
+#  Работает из ЛЮБОЙ папки (можно держать на диске E:).
 # =====================================================================
 
 # --- пути и конфиг ---
@@ -15,11 +19,17 @@ $ClaudeDir  = Join-Path $env:USERPROFILE ".claude"
 $ProjSrc    = Join-Path $ClaudeDir "projects"
 
 function Load-Cfg {
-    $def = [ordered]@{ Dest = (Join-Path $env:USERPROFILE "OneDrive\Claude-Backup"); Notes = ""; LastBackup = "" }
+    $def = [ordered]@{
+        Dest       = (Join-Path $env:USERPROFILE "OneDrive\Claude-Backup")
+        Downloads  = (Join-Path $env:USERPROFILE "Downloads")
+        Notes      = ""
+        LastBackup = ""
+    }
     if (Test-Path $CfgPath) {
         try {
             $j = Get-Content $CfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($j.Dest) { $def.Dest = $j.Dest }
+            if ($j.Dest)       { $def.Dest = $j.Dest }
+            if ($j.Downloads)  { $def.Downloads = $j.Downloads }
             if ($null -ne $j.Notes) { $def.Notes = [string]$j.Notes }
             if ($j.LastBackup) { $def.LastBackup = $j.LastBackup }
         } catch {}
@@ -37,164 +47,189 @@ function Count-Sessions {
     return 0
 }
 
-# --- ядро бэкапа/восстановления (возвращает текст статуса) ---
+# --- бэкап сессий (синхронно, для тихого режима) ---
 function Run-Backup($dest) {
     if (-not (Test-Path $ProjSrc)) { return "Нет папки сессий: $ProjSrc" }
     if ([string]::IsNullOrWhiteSpace($dest)) { return "Не указана папка бэкапа." }
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    robocopy $ProjSrc (Join-Path $dest "projects") /MIR /R:2 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
+    robocopy $ProjSrc (Join-Path $dest "projects") /MIR /R:1 /W:1 /MT:16 /NFL /NDL /NP /NJH /NJS | Out-Null
     $code = $LASTEXITCODE
     $s = Join-Path $ClaudeDir "settings.json"
     if (Test-Path $s) { Copy-Item $s (Join-Path $dest "settings.json") -Force }
     if ($code -lt 8) { return "OK: бэкап в $dest" } else { return "robocopy вернул код $code (ошибка)" }
 }
-function Run-Restore($src) {
-    $srcProj = Join-Path $src "projects"
-    if (-not (Test-Path $srcProj)) { return "Бэкап не найден: $srcProj" }
-    New-Item -ItemType Directory -Force -Path $ProjSrc | Out-Null
-    robocopy $srcProj $ProjSrc /E /R:2 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
-    $code = $LASTEXITCODE
-    $s = Join-Path $src "settings.json"
-    if (Test-Path $s) { Copy-Item $s (Join-Path $ClaudeDir "settings.json") -Force }
-    if ($code -lt 8) { return "OK: восстановлено в $ClaudeDir  (затем: claude --resume)" } else { return "robocopy код $code (ошибка)" }
+
+# --- сбор скачанного экспорта чатов claude.ai из Загрузок в бэкап ---
+function Collect-ChatExports($dest) {
+    if ([string]::IsNullOrWhiteSpace($dest)) { return "Не указана папка бэкапа." }
+    $dl = $cfg.Downloads
+    if ([string]::IsNullOrWhiteSpace($dl) -or -not (Test-Path $dl)) { $dl = Join-Path $env:USERPROFILE "Downloads" }
+    if (-not (Test-Path $dl)) { return "Папка Загрузок не найдена." }
+    $out = Join-Path $dest "chat-exports"
+    New-Item -ItemType Directory -Force -Path $out | Out-Null
+    $patterns = @("conversations*.json","data-*.json","data-*.zip","claude*export*.zip","*anthropic*.zip")
+    $since = (Get-Date).AddDays(-120)
+    $existing = @(Get-ChildItem $out -File -ErrorAction SilentlyContinue)
+    $n = 0
+    foreach ($p in $patterns) {
+        $files = @(Get-ChildItem -Path $dl -Filter $p -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $since })
+        foreach ($f in $files) {
+            $dup = $existing | Where-Object { $_.Name.EndsWith("__" + $f.Name) -and $_.Length -eq $f.Length }
+            if ($dup) { continue }
+            $dstName = "{0}__{1}" -f $f.LastWriteTime.ToString("yyyy-MM-dd_HHmmss"), $f.Name
+            Copy-Item $f.FullName (Join-Path $out $dstName) -Force
+            $n++
+        }
+    }
+    return "Экспорт чатов: собрано новых файлов — $n (папка chat-exports)"
 }
 
-# --- тихий режим для автозадачи ---
+# --- тихий режим: напоминание ---
+if ($Reminder) {
+    Add-Type -AssemblyName System.Windows.Forms
+    [void][System.Windows.Forms.MessageBox]::Show(
+        "Пора сохранить чаты Claude.`n`nОткройте: claude.ai -> Settings -> Privacy -> Export data.`nСкачайте архив — программа сама заберёт его в бэкап.",
+        "Напоминание: экспорт чатов Claude",
+        [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    try { Start-Process "https://claude.ai/settings" } catch {}
+    exit 0
+}
+
+# --- тихий режим: бэкап + сбор экспорта (для автозадачи) ---
 if ($Backup) {
-    $r = Run-Backup $cfg.Dest
+    Run-Backup $cfg.Dest | Out-Null
+    Collect-ChatExports $cfg.Dest | Out-Null
     $cfg.LastBackup = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     Save-Cfg $cfg
     exit 0
 }
 
-# =====================  GUI  =====================
+# =========================  GUI  =========================
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$clrBg   = [System.Drawing.Color]::FromArgb(245,246,250)
-$clrCard = [System.Drawing.Color]::White
-$clrAcc  = [System.Drawing.Color]::FromArgb(67,56,202)
-$clrGreen= [System.Drawing.Color]::FromArgb(5,150,105)
-$fontUI  = New-Object System.Drawing.Font("Segoe UI",9.5)
-$fontB   = New-Object System.Drawing.Font("Segoe UI",10,[System.Drawing.FontStyle]::Bold)
+$clrBg    = [System.Drawing.Color]::FromArgb(243,244,249)
+$clrCard  = [System.Drawing.Color]::White
+$clrAcc   = [System.Drawing.Color]::FromArgb(67,56,202)
+$clrAcc2  = [System.Drawing.Color]::FromArgb(79,70,229)
+$clrGreen = [System.Drawing.Color]::FromArgb(5,150,105)
+$clrText  = [System.Drawing.Color]::FromArgb(31,41,55)
+$clrGrey  = [System.Drawing.Color]::FromArgb(107,114,128)
+$fontUI   = New-Object System.Drawing.Font("Segoe UI",9.5)
+$fontB    = New-Object System.Drawing.Font("Segoe UI",10,[System.Drawing.FontStyle]::Bold)
+$fontSm   = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
+$fontSec  = New-Object System.Drawing.Font("Segoe UI",10.5,[System.Drawing.FontStyle]::Bold)
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Claude Session Manager"
-$form.Size = New-Object System.Drawing.Size(640,640)
+$form.Size = New-Object System.Drawing.Size(702,728)
 $form.StartPosition = "CenterScreen"
 $form.BackColor = $clrBg
 $form.Font = $fontUI
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox = $false
 
-$title = New-Object System.Windows.Forms.Label
-$title.Text = "Сессии Claude Code — бэкап и восстановление"
-$title.Font = New-Object System.Drawing.Font("Segoe UI",13,[System.Drawing.FontStyle]::Bold)
-$title.ForeColor = $clrAcc
-$title.Location = New-Object System.Drawing.Point(18,14)
-$title.Size = New-Object System.Drawing.Size(600,28)
-$form.Controls.Add($title)
+function Add-Label($text,$x,$y,$w,$h,$font,$color) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x,$y)
+    $l.Size = New-Object System.Drawing.Size($w,$h)
+    if ($font) { $l.Font = $font }
+    if ($color) { $l.ForeColor = $color }
+    $form.Controls.Add($l); return $l
+}
+function New-Btn($text,$x,$y,$w,$h,$font,$accent) {
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $text; $b.Location = New-Object System.Drawing.Point($x,$y)
+    $b.Size = New-Object System.Drawing.Size($w,$h)
+    $b.FlatStyle = "Flat"; $b.Font = $font
+    $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+    if ($accent) {
+        $b.BackColor = $clrAcc; $b.ForeColor = [System.Drawing.Color]::White
+        $b.FlatAppearance.BorderSize = 0
+        $b.FlatAppearance.MouseOverBackColor = $clrAcc2
+    } else {
+        $b.BackColor = $clrCard; $b.ForeColor = $clrText
+        $b.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(209,213,219)
+        $b.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(236,238,246)
+    }
+    $form.Controls.Add($b); return $b
+}
 
-$lblStatus = New-Object System.Windows.Forms.Label
-$lblStatus.Location = New-Object System.Drawing.Point(18,44)
-$lblStatus.Size = New-Object System.Drawing.Size(600,20)
-$lblStatus.ForeColor = [System.Drawing.Color]::FromArgb(75,85,99)
-$form.Controls.Add($lblStatus)
+# --- шапка ---
+Add-Label "Claude Session Manager" 18 14 664 28 (New-Object System.Drawing.Font("Segoe UI",14,[System.Drawing.FontStyle]::Bold)) $clrAcc | Out-Null
+$lblStatus = Add-Label "" 18 46 664 18 $null $clrGrey
 
-# --- папка бэкапа ---
-$lblDest = New-Object System.Windows.Forms.Label
-$lblDest.Text = "Папка бэкапа (копировать сюда / восстанавливать отсюда):"
-$lblDest.Location = New-Object System.Drawing.Point(18,76)
-$lblDest.Size = New-Object System.Drawing.Size(600,18)
-$form.Controls.Add($lblDest)
+# --- Раздел 1: сессии Claude Code ---
+Add-Label "1. Сессии Claude Code  —  бэкап и восстановление" 18 76 664 18 $fontSec $clrAcc | Out-Null
 
+Add-Label "Папка бэкапа (копировать сюда / восстанавливать отсюда):" 18 100 664 16 $null $clrText | Out-Null
 $txtDest = New-Object System.Windows.Forms.TextBox
-$txtDest.Location = New-Object System.Drawing.Point(18,96)
-$txtDest.Size = New-Object System.Drawing.Size(488,24)
+$txtDest.Location = New-Object System.Drawing.Point(18,120)
+$txtDest.Size = New-Object System.Drawing.Size(548,24)
 $txtDest.Text = $cfg.Dest
 $form.Controls.Add($txtDest)
 
-$btnBrowse = New-Object System.Windows.Forms.Button
-$btnBrowse.Text = "Обзор…"
-$btnBrowse.Location = New-Object System.Drawing.Point(512,95)
-$btnBrowse.Size = New-Object System.Drawing.Size(96,26)
-$form.Controls.Add($btnBrowse)
+$btnBrowse = New-Btn "Обзор…" 574 119 108 26 $fontUI $false
 
-# --- кнопки действий ---
-function New-Btn($text,$x,$y,$w,$accent) {
-    $b = New-Object System.Windows.Forms.Button
-    $b.Text = $text
-    $b.Location = New-Object System.Drawing.Point($x,$y)
-    $b.Size = New-Object System.Drawing.Size($w,40)
-    $b.FlatStyle = "Flat"
-    $b.Font = $fontB
-    if ($accent) { $b.BackColor = $clrAcc; $b.ForeColor = [System.Drawing.Color]::White; $b.FlatAppearance.BorderSize = 0 }
-    else { $b.BackColor = $clrCard }
-    return $b
-}
-$btnBackup  = New-Btn "⬆  Сделать бэкап" 18 134 290 $true
-$btnRestore = New-Btn "⬇  Восстановить сессии" 318 134 290 $true
-$form.Controls.Add($btnBackup); $form.Controls.Add($btnRestore)
+$btnBackup  = New-Btn "⬆  Сделать бэкап" 18 154 325 42 $fontB $true
+$btnRestore = New-Btn "⬇  Восстановить сессии" 357 154 325 42 $fontB $true
 
-$fontSm = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
-$btnOpenSess = New-Btn "Папка сессий" 18 182 140 $false
-$btnOpenBak  = New-Btn "Папка бэкапа" 168 182 140 $false
-$btnAuto     = New-Btn "Автозахват: вкл." 318 182 140 $false
-$btnJunc     = New-Btn "Мгновенно: вкл." 468 182 140 $false
-foreach ($b in @($btnOpenSess,$btnOpenBak,$btnAuto,$btnJunc)) { $b.Font = $fontSm; $form.Controls.Add($b) }
+$btnOpenSess = New-Btn "Папка сессий" 18 204 160 34 $fontSm $false
+$btnOpenBak  = New-Btn "Папка бэкапа" 186 204 160 34 $fontSm $false
+$btnAuto     = New-Btn "Автозахват: вкл." 354 204 160 34 $fontSm $false
+$btnJunc     = New-Btn "Мгновенно: вкл." 522 204 160 34 $fontSm $false
 
-$tip = New-Object System.Windows.Forms.ToolTip
-$tip.SetToolTip($btnAuto, "Поставить задачу: копировать все сессии каждый час и при входе в систему")
-$tip.SetToolTip($btnJunc, "Папка сессий станет ссылкой на папку бэкапа — всё из Claude будет попадать туда сразу")
+# --- Раздел 2: чаты приложения Claude ---
+Add-Label "2. Чаты приложения Claude  —  экспорт в бэкап" 18 250 664 18 $fontSec $clrAcc | Out-Null
+
+$btnExport  = New-Btn "Открыть экспорт на claude.ai" 18 274 215 34 $fontSm $false
+$btnCollect = New-Btn "Собрать экспорт в бэкап" 241 274 215 34 $fontSm $false
+$btnRemind  = New-Btn "Напоминание 1×мес: вкл." 464 274 218 34 $fontSm $false
+
+Add-Label ("Нажмите «Экспорт», запросите архив на claude.ai и скачайте его — он сам попадёт в бэкап " +
+           "(при автозахвате или кнопкой «Собрать»).") 18 312 664 30 $null $clrGrey | Out-Null
 
 # --- лог ---
 $log = New-Object System.Windows.Forms.TextBox
 $log.Multiline = $true; $log.ScrollBars = "Vertical"; $log.ReadOnly = $true
-$log.Location = New-Object System.Drawing.Point(18,234)
-$log.Size = New-Object System.Drawing.Size(590,96)
+$log.Location = New-Object System.Drawing.Point(18,348)
+$log.Size = New-Object System.Drawing.Size(664,84)
 $log.BackColor = [System.Drawing.Color]::FromArgb(249,250,251)
 $form.Controls.Add($log)
 function Log($m) { $log.AppendText(("[{0}] {1}`r`n" -f (Get-Date -Format "HH:mm:ss"), $m)) }
 
 # --- примечания ---
-$lblNotes = New-Object System.Windows.Forms.Label
-$lblNotes.Text = "Мои примечания (хранятся локально, только для вас):"
-$lblNotes.Font = $fontB
-$lblNotes.Location = New-Object System.Drawing.Point(18,344)
-$lblNotes.Size = New-Object System.Drawing.Size(590,20)
-$form.Controls.Add($lblNotes)
-
+Add-Label "Мои примечания (хранятся локально рядом с программой, только для вас):" 18 442 664 18 $fontB $clrText | Out-Null
 $txtNotes = New-Object System.Windows.Forms.TextBox
-$txtNotes.Multiline = $true; $txtNotes.ScrollBars = "Vertical"
-$txtNotes.AcceptsReturn = $true
-$txtNotes.Location = New-Object System.Drawing.Point(18,366)
-$txtNotes.Size = New-Object System.Drawing.Size(590,170)
+$txtNotes.Multiline = $true; $txtNotes.ScrollBars = "Vertical"; $txtNotes.AcceptsReturn = $true
+$txtNotes.Location = New-Object System.Drawing.Point(18,464)
+$txtNotes.Size = New-Object System.Drawing.Size(664,142)
 $txtNotes.Text = $cfg.Notes
 $form.Controls.Add($txtNotes)
 
-$btnSaveNotes = New-Btn "💾  Сохранить примечания" 18 544 290 $false
+$btnSaveNotes = New-Btn "💾  Сохранить примечания" 18 616 300 40 $fontB $false
 $btnSaveNotes.ForeColor = $clrGreen
-$form.Controls.Add($btnSaveNotes)
+Add-Label "Примечания и путь сохраняются автоматически при закрытии." 330 626 352 30 $null $clrGrey | Out-Null
 
-$lblHint = New-Object System.Windows.Forms.Label
-$lblHint.Text = "Примечания и путь сохраняются автоматически при закрытии."
-$lblHint.ForeColor = [System.Drawing.Color]::FromArgb(107,114,128)
-$lblHint.Location = New-Object System.Drawing.Point(318,554)
-$lblHint.Size = New-Object System.Drawing.Size(290,34)
-$form.Controls.Add($lblHint)
+# --- подсказки ---
+$tip = New-Object System.Windows.Forms.ToolTip
+$tip.SetToolTip($btnAuto,   "Задача: копировать все сессии + собирать экспорт чатов каждый час и при входе")
+$tip.SetToolTip($btnJunc,   "Папка сессий станет ссылкой на бэкап — всё из Claude Code попадает туда сразу")
+$tip.SetToolTip($btnExport, "Открыть claude.ai: Settings -> Privacy -> Export data")
+$tip.SetToolTip($btnCollect,"Найти скачанный архив экспорта в Загрузках и скопировать в бэкап")
+$tip.SetToolTip($btnRemind, "Напоминать примерно раз в месяц выгрузить чаты Claude")
 
 # --- логика ---
 function Update-Status {
     $n = Count-Sessions
-    $lblStatus.Text = "Сессий на диске: $n    |    последний бэкап: " + ($(if ($cfg.LastBackup) { $cfg.LastBackup } else { "—" }))
+    $ce = 0
+    $out = Join-Path $txtDest.Text "chat-exports"
+    if (Test-Path $out) { $ce = @(Get-ChildItem $out -File -ErrorAction SilentlyContinue).Count }
+    $lblStatus.Text = "Сессий Code: $n    |    экспортов чатов: $ce    |    последний бэкап: " + ($(if ($cfg.LastBackup) { $cfg.LastBackup } else { "—" }))
 }
 function Sync-Cfg { $cfg.Dest = $txtDest.Text; $cfg.Notes = $txtNotes.Text; Save-Cfg $cfg }
 
-$btnBrowse.Add_Click({
-    $fb = New-Object System.Windows.Forms.FolderBrowserDialog
-    if ($fb.ShowDialog() -eq "OK") { $txtDest.Text = $fb.SelectedPath }
-})
 # --- фоновое копирование (чтобы окно не зависало) ---
 $script:proc = $null
 $script:kind = ""
@@ -206,7 +241,6 @@ function Set-Busy($on) {
     if ($on) { $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor }
     else     { $form.Cursor = [System.Windows.Forms.Cursors]::Default }
 }
-
 function Start-Copy($kind) {
     $dest = $txtDest.Text
     if ([string]::IsNullOrWhiteSpace($dest)) { Log "Сначала укажите папку бэкапа."; return }
@@ -226,7 +260,6 @@ function Start-Copy($kind) {
     $script:proc = Start-Process robocopy -ArgumentList $a -WindowStyle Hidden -PassThru
     $timer.Start()
 }
-
 $timer.Add_Tick({
     if ($null -eq $script:proc) { $timer.Stop(); return }
     if (-not $script:proc.HasExited) { return }
@@ -250,6 +283,11 @@ $timer.Add_Tick({
     Sync-Cfg; Update-Status; Set-Busy $false
 })
 
+# --- обработчики ---
+$btnBrowse.Add_Click({
+    $fb = New-Object System.Windows.Forms.FolderBrowserDialog
+    if ($fb.ShowDialog() -eq "OK") { $txtDest.Text = $fb.SelectedPath; Update-Status }
+})
 $btnBackup.Add_Click({ Start-Copy "backup" })
 $btnRestore.Add_Click({
     $ans = [System.Windows.Forms.MessageBox]::Show(
@@ -265,9 +303,9 @@ $btnAuto.Add_Click({
         $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
         $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)
         $t2 = New-ScheduledTaskTrigger -AtLogOn
-        Register-ScheduledTask -TaskName "Claude sessions backup" -Action $act -Trigger $t1,$t2 -Description "Автозахват сессий Claude Code" -Force | Out-Null
+        Register-ScheduledTask -TaskName "Claude sessions backup" -Action $act -Trigger $t1,$t2 -Description "Автозахват сессий + экспорта Claude" -Force | Out-Null
         Sync-Cfg
-        Log "Автозахват включён: все сессии копируются каждый час и при входе. Ничего нажимать не нужно."
+        Log "Автозахват включён: сессии и экспорт чатов собираются каждый час и при входе."
     } catch { Log ("Не удалось создать задачу: " + $_.Exception.Message) }
 })
 $btnJunc.Add_Click({
@@ -275,9 +313,9 @@ $btnJunc.Add_Click({
     if ([string]::IsNullOrWhiteSpace($dest)) { Log "Сначала укажите папку бэкапа."; return }
     $target = Join-Path $dest "projects"
     $item = Get-Item $ProjSrc -ErrorAction SilentlyContinue
-    if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { Log "Папка сессий уже связана с облаком — всё попадает туда само."; return }
+    if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { Log "Папка сессий уже связана с бэкапом — всё попадает туда само."; return }
     $ans = [System.Windows.Forms.MessageBox]::Show(
-        "Папка сессий станет ссылкой на:`n$target`n`nПосле этого ВСЁ из Claude будет сразу попадать в папку бэкапа (и в облако, если это OneDrive).`n`nВАЖНО: сначала ЗАКРОЙТЕ Claude Code. Продолжить?",
+        "Папка сессий станет ссылкой на:`n$target`n`nПосле этого ВСЁ из Claude Code будет сразу попадать в папку бэкапа.`n`nВАЖНО: сначала ЗАКРОЙТЕ Claude Code. Продолжить?",
         "Мгновенный захват", "OKCancel", "Warning")
     if ($ans -ne "OK") { return }
     try {
@@ -289,17 +327,33 @@ $btnJunc.Add_Click({
         $mk = 'mklink /J "{0}" "{1}"' -f $ProjSrc, $target
         cmd /c $mk | Out-Null
         $item2 = Get-Item $ProjSrc -ErrorAction SilentlyContinue
-        if ($item2 -and ($item2.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-            Log "Готово: теперь всё из Claude сразу попадает в $target"
-        } else {
-            Log "Не удалось создать ссылку. Закройте Claude Code и попробуйте снова."
-        }
+        if ($item2 -and ($item2.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { Log "Готово: теперь всё из Claude Code сразу попадает в $target" }
+        else { Log "Не удалось создать ссылку. Закройте Claude Code и попробуйте снова." }
         Sync-Cfg; Update-Status
     } catch { Log ("Ошибка: " + $_.Exception.Message) }
+})
+$btnExport.Add_Click({
+    try { Start-Process "https://claude.ai/settings" } catch { Log "Не удалось открыть браузер." }
+    Log "Открыл claude.ai. Дальше: Settings -> Privacy -> Export data. Архив придёт на почту."
+})
+$btnCollect.Add_Click({
+    Log "Ищу скачанный экспорт в Загрузках…"
+    Log (Collect-ChatExports $txtDest.Text)
+    Sync-Cfg; Update-Status
+})
+$btnRemind.Add_Click({
+    try {
+        $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Reminder"
+        $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
+        $tr  = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Monday -At 12:00PM
+        Register-ScheduledTask -TaskName "Claude chat export reminder" -Action $act -Trigger $tr -Description "Напоминание выгрузить чаты Claude" -Force | Out-Null
+        Log "Напоминание включено: примерно раз в месяц (пн, 12:00) всплывёт подсказка выгрузить чаты."
+    } catch { Log ("Не удалось создать напоминание: " + $_.Exception.Message) }
 })
 $btnSaveNotes.Add_Click({ Sync-Cfg; Log "Примечания сохранены." })
 $form.Add_FormClosing({ Sync-Cfg })
 
 Update-Status
-Log "Готово к работе. Проверьте путь бэкапа и нажмите нужную кнопку."
+Log "Готово. Программу можно держать в любой папке (например на диске E:)."
+Log "Если перенесёте её после включения Автозахвата/Напоминания — нажмите их заново (обновят путь)."
 [void]$form.ShowDialog()
