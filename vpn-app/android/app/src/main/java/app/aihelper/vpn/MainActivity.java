@@ -4,26 +4,34 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.content.res.ColorStateList;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -34,7 +42,13 @@ import com.google.zxing.integration.android.IntentResult;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /** One screen: the big button, how the connection is, the server, and adding a server from a QR code or a link. */
 public class MainActivity extends Activity implements State.Listener {
@@ -367,6 +381,8 @@ public class MainActivity extends Activity implements State.Listener {
             for (String pkg : testApps.split(",")) Apps.choose(this, pkg.trim(), true);
             appsChanged();
         }
+        String testPick = BuildConfig.DEBUG ? i.getStringExtra("test_pick") : null;  // the emulator test only
+        if (testPick != null) pickApps(testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
         if (testBridge != null) add(testBridge);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
@@ -491,7 +507,7 @@ public class MainActivity extends Activity implements State.Listener {
 
     private void chooseApps() {
         String[] modes = {
-                "Только нужные: Instagram, Telegram, YouTube… Банки, Госуслуги, маркетплейсы — напрямую",
+                "Только отмеченные: Instagram, Telegram, YouTube… и любые другие. Банки, Госуслуги, маркетплейсы — напрямую",
                 "Все приложения"};
         boolean only = Apps.onlyChosen(this);
         int[] picked = {only ? 0 : 1};
@@ -503,38 +519,104 @@ public class MainActivity extends Activity implements State.Listener {
                     Apps.setOnlyChosen(this, picked[0] == 0);
                     appsChanged();
                 })
-                .setNeutralButton("Какие приложения", (d, w) -> pickApps())
+                .setNeutralButton("Какие приложения", (d, w) -> pickApps(null))
                 .setNegativeButton("Отмена", null)
                 .show();
     }
 
-    private void pickApps() {
-        List<String> here = Apps.installed(this);
-        if (here.isEmpty()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Через VPN")
-                    .setMessage("На телефоне пока нет ни Instagram, ни Telegram, ни YouTube и других таких приложений. "
-                            + "Установите нужное — оно само пойдёт через VPN. А пока через VPN идут все приложения.")
-                    .setPositiveButton("Понятно", null)
-                    .show();
-            return;
-        }
-        String[] names = new String[here.size()];
-        boolean[] on = new boolean[here.size()];
-        for (int i = 0; i < names.length; i++) {
-            names[i] = Apps.KNOWN.get(here.get(i));
-            on[i] = Apps.chosen(this, here.get(i));
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Через VPN — только эти")
-                .setMultiChoiceItems(names, on, (d, w, checked) -> on[w] = checked)
+    /** Every app on the phone, ticked or not, with a search; the list is gathered off the screen's thread. */
+    private void pickApps(String query) {
+        new Thread(() -> {
+            List<Apps.App> all = Apps.all(this);
+            Set<String> on = new HashSet<>();
+            for (Apps.App a : all) if (Apps.chosen(this, a.pkg)) on.add(a.pkg);
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) showApps(all, on, query);
+            });
+        }, "apps").start();
+    }
+
+    private void showApps(List<Apps.App> all, Set<String> on, String query) {
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        Context dc = b.getContext();
+        PackageManager pm = getPackageManager();
+        EditText search = new EditText(dc);
+        search.setHint("Поиск по названию");
+        search.setSingleLine(true);
+        search.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        List<Apps.App> shown = new ArrayList<>();
+        Map<String, Drawable> icons = new HashMap<>();
+        ArrayAdapter<Apps.App> adapter = new ArrayAdapter<Apps.App>(dc, android.R.layout.simple_list_item_multiple_choice, shown) {
+            @Override
+            public View getView(int pos, View convert, ViewGroup parent) {
+                TextView v = (TextView) super.getView(pos, convert, parent);
+                String pkg = shown.get(pos).pkg;
+                Drawable d = icons.get(pkg);
+                if (d == null) {
+                    try {
+                        d = pm.getApplicationIcon(pkg);
+                    } catch (PackageManager.NameNotFoundException e) {
+                        d = new ColorDrawable(0);
+                    }
+                    d.setBounds(0, 0, dp(32), dp(32));
+                    icons.put(pkg, d);
+                }
+                v.setCompoundDrawablesRelative(d, null, null, null);
+                v.setCompoundDrawablePadding(dp(14));
+                return v;
+            }
+        };
+        ListView list = new ListView(dc);
+        list.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+        list.setAdapter(adapter);
+        LinearLayout box = new LinearLayout(dc);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(4), dp(16), 0);
+        box.addView(search, new LinearLayout.LayoutParams(-1, -2));
+        box.addView(list, new LinearLayout.LayoutParams(-1, getResources().getDisplayMetrics().heightPixels * 55 / 100));
+        AlertDialog dialog = b.setTitle(appsTitle(on.size()))
+                .setView(box)
                 .setPositiveButton("Готово", (d, w) -> {
-                    for (int i = 0; i < names.length; i++) Apps.choose(this, here.get(i), on[i]);
+                    for (Apps.App a : all) Apps.choose(this, a.pkg, on.contains(a.pkg));
                     Apps.setOnlyChosen(this, true);
                     appsChanged();
                 })
                 .setNegativeButton("Отмена", null)
-                .show();
+                .create();
+        Runnable filter = () -> {
+            String q = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            shown.clear();
+            for (Apps.App a : all) {
+                if (q.isEmpty() || a.name.toLowerCase(Locale.ROOT).contains(q) || a.pkg.contains(q)) shown.add(a);
+            }
+            adapter.notifyDataSetChanged();
+            for (int i = 0; i < shown.size(); i++) list.setItemChecked(i, on.contains(shown.get(i).pkg));
+        };
+        list.setOnItemClickListener((p, v, pos, id) -> {
+            if (list.isItemChecked(pos)) on.add(shown.get(pos).pkg);
+            else on.remove(shown.get(pos).pkg);
+            dialog.setTitle(appsTitle(on.size()));
+        });
+        search.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence t, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence t, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable e) {
+                filter.run();
+            }
+        });
+        if (query != null) search.setText(query);
+        filter.run();
+        dialog.show();
+        Log.i("AIVPN", "apps to pick: " + all.size() + ", shown " + shown.size());
+    }
+
+    private static String appsTitle(int n) {
+        return n == 0 ? "Через VPN — отметьте приложения" : "Через VPN — отмечено: " + n;
     }
 
     /** Takes effect at once: when on, the tunnel is opened again with the new list. */

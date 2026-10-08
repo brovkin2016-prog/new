@@ -73,6 +73,26 @@ adb exec-out screencap -p > "$OUT/4a-apps.png"
 adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off (only the chosen apps)"
 
+# any app on the phone can be ticked, not only the known ones: the picker lists them (search «sett» → Settings), and a
+# ticked one (Settings) reaches the VPN
+adb logcat -c
+adb shell am start -n $ACT --es test_pick sett
+wait_log "apps to pick: .*shown [1-9]" 20 || fail "the picker did not list the phone's apps"
+adb logcat -d -s AIVPN:I | grep "apps to pick"
+sleep 2
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb shell cat /sdcard/ui.xml | grep -qE 'text="(Settings|Настройки)"' || fail "the picker does not show Settings"
+adb exec-out screencap -p > "$OUT/4a-pick.png"
+adb shell input keyevent KEYCODE_BACK
+adb shell input keyevent KEYCODE_BACK
+adb logcat -c
+adb shell am start -n $ACT --es test_apps com.android.settings --ez test_connect true
+wait_log "through the VPN: \[.*com\.android\.settings" 60 || fail "an app outside the known list did not reach the VPN"
+wait_log "connected via" 60 || fail "no connection with an app outside the known list"
+adb shell am start -n $ACT --ez test_disconnect true
+wait_log "stopped" 20 || fail "did not switch off (an app outside the known list)"
+echo "any app: the picker lists the phone's apps, Settings ticked goes through the VPN"
+
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 # Android's «install the update?» answered by a tap — the way a phone gets every update
 vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }

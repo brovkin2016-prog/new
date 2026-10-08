@@ -1,10 +1,15 @@
 package app.aihelper.vpn;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 
+import java.text.Collator;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,7 +19,7 @@ import java.util.Set;
 /**
  * What goes through the VPN. By default only the apps that need it (Instagram, Telegram, WhatsApp, YouTube and the
  * like) — the VPN can then stay on all the time, and banks, Gosuslugi, marketplaces and taxis go straight, as if there
- * were no VPN. Or everything, as before.
+ * were no VPN. Any other app on the phone can be ticked too (not by default). Or everything, as before.
  */
 final class Apps {
     /** package → the name shown; the ones in OFF_BY_DEFAULT are offered but not ticked. */
@@ -54,30 +59,74 @@ final class Apps {
         prefs(c).edit().putBoolean("onlyApps", only).apply();
     }
 
-    /** The known apps installed on this phone, in the list's order. */
-    static List<String> installed(Context c) {
-        PackageManager pm = c.getPackageManager();
-        List<String> out = new ArrayList<>();
-        for (String p : KNOWN.keySet()) {
-            try {
-                pm.getPackageInfo(p, 0);
-                out.add(p);
-            } catch (PackageManager.NameNotFoundException ignored) {
-                // not on this phone
-            }
+    /** One app on the phone: its package and the name shown for it. */
+    static final class App {
+        final String pkg, name;
+
+        App(String pkg, String name) {
+            this.pkg = pkg;
+            this.name = name;
         }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+
+    /**
+     * Every app with an icon on the phone's home screen (but this one): first the known ones, then the other ticked
+     * ones, then the rest, by name. Takes a moment on a phone with many apps: not on the screen's thread.
+     */
+    static List<App> all(Context c) {
+        PackageManager pm = c.getPackageManager();
+        Map<String, String> found = new HashMap<>();
+        Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        for (ResolveInfo r : pm.queryIntentActivities(main, 0)) {
+            String p = r.activityInfo.packageName;
+            if (p.equals(c.getPackageName()) || found.containsKey(p)) continue;
+            CharSequence n = r.activityInfo.applicationInfo.loadLabel(pm);
+            found.put(p, n == null || n.toString().trim().isEmpty() ? p : n.toString().trim());
+        }
+        List<App> out = new ArrayList<>(), on = new ArrayList<>(), rest = new ArrayList<>();
+        for (String p : KNOWN.keySet()) if (found.containsKey(p)) out.add(new App(p, KNOWN.get(p)));
+        for (Map.Entry<String, String> e : found.entrySet()) {
+            if (KNOWN.containsKey(e.getKey())) continue;
+            (chosen(c, e.getKey()) ? on : rest).add(new App(e.getKey(), e.getValue()));
+        }
+        Collator byName = Collator.getInstance();
+        Collections.sort(on, (a, b) -> byName.compare(a.name, b.name));
+        Collections.sort(rest, (a, b) -> byName.compare(a.name, b.name));
+        out.addAll(on);
+        out.addAll(rest);
         return out;
     }
 
+    private static boolean here(PackageManager pm, String pkg) {
+        try {
+            pm.getPackageInfo(pkg, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;  // not on this phone
+        }
+    }
+
+    /** The known ones (but Chrome) are ticked unless switched off; any other app only when ticked. */
+    private static boolean onByDefault(String pkg) {
+        return KNOWN.containsKey(pkg) && !OFF_BY_DEFAULT.contains(pkg);
+    }
+
     static boolean chosen(Context c, String pkg) {
-        Set<String> s = prefs(c).getStringSet(OFF_BY_DEFAULT.contains(pkg) ? "appsOn" : "appsOff", new HashSet<>());
-        return OFF_BY_DEFAULT.contains(pkg) == s.contains(pkg);  // ticked by default unless switched off, and the reverse
+        boolean byDefault = onByDefault(pkg);
+        Set<String> s = prefs(c).getStringSet(byDefault ? "appsOff" : "appsOn", new HashSet<>());
+        return byDefault != s.contains(pkg);
     }
 
     static void choose(Context c, String pkg, boolean on) {
-        String key = OFF_BY_DEFAULT.contains(pkg) ? "appsOn" : "appsOff";
+        boolean byDefault = onByDefault(pkg);
+        String key = byDefault ? "appsOff" : "appsOn";
         Set<String> s = new HashSet<>(prefs(c).getStringSet(key, new HashSet<>()));
-        if (OFF_BY_DEFAULT.contains(pkg) == on) s.add(pkg);
+        if (byDefault != on) s.add(pkg);
         else s.remove(pkg);
         prefs(c).edit().putStringSet(key, s).apply();
     }
@@ -85,8 +134,11 @@ final class Apps {
     /** The packages that go through the VPN, or null for all of them (also when none of the chosen ones is here). */
     static List<String> through(Context c) {
         if (!onlyChosen(c)) return null;
-        List<String> out = new ArrayList<>();
-        for (String p : installed(c)) if (chosen(c, p)) out.add(p);
+        PackageManager pm = c.getPackageManager();
+        List<String> out = new ArrayList<>(), more = new ArrayList<>(prefs(c).getStringSet("appsOn", new HashSet<>()));
+        Collections.sort(more);
+        for (String p : KNOWN.keySet()) if (chosen(c, p) && here(pm, p)) out.add(p);
+        for (String p : more) if (!out.contains(p) && chosen(c, p) && here(pm, p)) out.add(p);
         return out.isEmpty() ? null : out;
     }
 
@@ -94,10 +146,18 @@ final class Apps {
     static String summary(Context c) {
         if (!onlyChosen(c)) return "Все приложения";
         List<String> on = through(c);
-        if (on == null) return "Все приложения (нужных пока не установлено)";
+        if (on == null) return "Все приложения (не отмечено ни одно)";
+        PackageManager pm = c.getPackageManager();
         List<String> names = new ArrayList<>();
         for (String p : on) {
             String n = KNOWN.get(p);
+            if (n == null) {
+                try {
+                    n = pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString();
+                } catch (PackageManager.NameNotFoundException e) {
+                    n = p;
+                }
+            }
             if (!names.contains(n)) names.add(n);
         }
         if (names.size() <= 3) return android.text.TextUtils.join(", ", names);

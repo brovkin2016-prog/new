@@ -13,8 +13,13 @@
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
-    <!-- Android 11+ shows an app only the apps it names: these are the ones that may go through the VPN alone -->
+    <!-- Android 11+ shows an app only the apps it names: the known ones, and every app with an icon on the home
+         screen, so that any of them can be ticked to go through the VPN -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <package android:name="com.instagram.android" />
         <package android:name="com.instagram.barcelona" />
         <package android:name="org.telegram.messenger" />
