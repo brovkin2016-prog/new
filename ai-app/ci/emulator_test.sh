@@ -54,8 +54,11 @@ adb shell cat /sdcard/ui.xml > "$OUT/hosting.xml"
 adb logcat -d -s AIHOST:V | tee "$OUT/hosting.log"
 grep -q "Ссылка из письма" "$OUT/hosting.xml" || { echo "the HostVDS sign-in window did not open"; exit 1; }
 # what the page itself shows (the site is outside: only reported, a site down is not this app's fault)
-WORDS=$(tr '>' '\n' < "$OUT/hosting.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Ссылка из письма|Я вошёл|="✕"' | head -15 | tr '\n' ' ')
+WORDS=$(tr '>' '\n' < "$OUT/hosting.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Ссылка из письма|Я вошёл|="✕"|встроенный браузер|Обновить|Закрыть|WebView' | head -15 | tr '\n' ' ')
 echo "hosting page shows: ${WORDS:-NOTHING (white screen?)}"
+# never a white page without a word: the site shows, or (this emulator's built-in browser is old) the app says what to update
+if grep -q "Нужно обновить встроенный браузер" "$OUT/hosting.xml"; then echo "hosting: old WebView — the app explains how to update it"
+elif [ -z "$WORDS" ]; then echo "white HostVDS page and no explanation"; exit 1; fi
 adb shell input keyevent KEYCODE_BACK
 sleep 3
 adb shell am force-stop $PKG

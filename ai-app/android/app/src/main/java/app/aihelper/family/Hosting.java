@@ -60,7 +60,7 @@ final class Hosting {
         FrameLayout frame = new FrameLayout(a);
         WebView w = page(a);
         frame.addView(w, new FrameLayout.LayoutParams(-1, -1));
-        boolean[] finished = {false};
+        boolean[] finished = {false}, told = {false};
         Runnable finish = () -> {
             if (finished[0]) return;
             finished[0] = true;
@@ -95,13 +95,32 @@ final class Hosting {
             public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
                 if (inPanel(url)) finish.run();  // the site is an app in the page: after signing in only the address changes
             }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                // the phone took the page's memory while the owner was in the mail app (a white page): open it anew,
+                // the session (if the e-mail link already let them in) is kept in the cookies
+                Log.w("AIHOST", "page process gone");
+                if (!finished[0]) {
+                    finished[0] = true;
+                    d.dismiss();
+                    login(a, done);
+                }
+                return true;
+            }
         };
         w.setWebViewClient(client);
         // pop-up windows (sign-in with Google and the like) open over the page and close back to it
         w.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
-                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) Log.w("AIHOST", "page: " + m.message());
+                if (m.messageLevel() != android.webkit.ConsoleMessage.MessageLevel.ERROR) return true;
+                Log.w("AIHOST", "page: " + m.message());
+                // the site is written for new browsers: an old built-in one cannot read it and shows a white page
+                if (m.message().contains("SyntaxError") && !told[0] && !finished[0]) {
+                    told[0] = true;
+                    oldBrowser(a);
+                }
                 return true;
             }
 
@@ -161,6 +180,31 @@ final class Hosting {
         d.show();
         Log.i("AIHOST", "login page opened");
         w.loadUrl(SITE + "/login");
+    }
+
+    /** The phone's built-in browser (Android System WebView) is too old for the HostVDS site: how to update it. */
+    private static void oldBrowser(Activity a) {
+        String ver = "";
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.content.pm.PackageInfo p = WebView.getCurrentWebViewPackage();
+            if (p != null) ver = " (сейчас " + p.versionName + ")";
+        }
+        new android.app.AlertDialog.Builder(a)
+                .setTitle("Нужно обновить встроенный браузер")
+                .setMessage("Сайт HostVDS сделан для новых браузеров, а встроенный браузер телефона — «Android System WebView»" + ver
+                        + " — устарел, поэтому страница белая.\n\nОбновите «Android System WebView» (и Chrome) в Google Play или RuStore, "
+                        + "потом снова «Войти в кабинет». Пока можно вводить баланс вручную.")
+                .setPositiveButton("Обновить", (x, y) -> {
+                    try {
+                        a.startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                Uri.parse("market://details?id=com.google.android.webview")));
+                    } catch (Exception e) {
+                        a.startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.webview")));
+                    }
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
     }
 
     private static final Pattern MAIL_LINK = Pattern.compile("https://(?:www\\.)?hostvds\\.com/[^\\s\"'<>]+");

@@ -516,6 +516,18 @@
               : `Подключено людей: ${m.people.length}. Код для человека — в его карточке ниже.`)
               : "Родные пишут и говорят с помощником прямо в MAX — работает и при «белых списках»." })),
           el("button", { class: "btn" + (m.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.on ? "⚙️" : "Подключить", onclick: () => maxSetup(m, fill) })));
+        if (m.on) {  // the server's news to the owner's MAX: problems, fixes, new versions, the hosting's money
+          card.append(el("div", { class: "row" },
+            el("div", { class: "grow" }, "🔔 Тревоги сервера в MAX",
+              el("small", { text: !m.owner_linked ? "Свяжите свой MAX: «💬 Код для помощника в MAX» в своей карточке ниже."
+                : m.alerts ? "Сбои, починки, новые версии, оплата хостинга. О VPN в MAX ни слова — только «посмотрите в приложении»."
+                  : "Выключено: всё только здесь, в «Событиях»." })),
+            el("button", { class: "btn" + (m.alerts ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.alerts ? "Выключить" : "Включить",
+              onclick: async () => {
+                const end = await panel({ op: "max_alerts", on: !m.alerts }).catch(() => null);
+                if (end && end.t === "done") { fill(end); toast(end.alerts ? "🔔 Тревоги сервера будут приходить в MAX" : "🔕 Тревоги в MAX выключены"); }
+              } })));
+        }
       };
       panel({ op: "max_get" }).then((m) => (m.t === "done" ? fill(m) : card.remove())).catch(() => card.remove());
       return card;
