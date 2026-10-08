@@ -99,7 +99,7 @@ final class Profile {
      *   winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F…&fps=24&batch=45&reliable=1&dual=0#name
      *   winger-bridge://wbstream?room=wbstream%3A%2F%2F…&mode=dc#name      (WB Stream; dc is quicker, video the fallback)
      *   winger-bridge://dion?room=dion%3A%2F%2F…#name
-     *   winger-bridge://bitrix?link=https%3A%2F%2F…bitrix24.ru%2Fvideo%2F…&mode=video#name
+     *   winger-bridge://bitrix?link=https%3A%2F%2F…bitrix24.ru%2Fvideo%2F…&mode=dc#name
      */
     private static Profile parseBridge(String s) {
         try {
@@ -139,14 +139,15 @@ final class Profile {
             p.host = plat + ".bridge";
             p.ports = "443";
             p.auth = join;  // the same call is the same bridge: a second copy of the link is not added
+            // each service's best settings unless the link says otherwise: Telemost carries only video (its server cuts
+            // data channels), so a bigger batch per frame; WB Stream and Bitrix24 have a data channel — quicker, and
+            // reliable by itself — tried first, the video (24 frames, 30 per batch, made reliable) when it does not carry
             p.fps = number(u.getQueryParameter("fps"), 24, 1, 60);
-            p.batch = number(u.getQueryParameter("batch"), 45, 1, 200);
+            p.batch = number(u.getQueryParameter("batch"), plat.equals("telemost") ? 45 : 30, 1, 200);
             p.reliable = !"0".equals(u.getQueryParameter("reliable"));
             p.dualTrack = "1".equals(u.getQueryParameter("dual"));
             String mode = u.getQueryParameter("mode");
-            // only WB Stream and Bitrix have a data channel to choose; WB tries it first, Bitrix the video
-            if (plat.equals("wbstream")) p.tunnelMode = "video".equals(mode) ? "video" : "dc";
-            else if (plat.equals("bitrix")) p.tunnelMode = "dc".equals(mode) ? "dc" : "video";
+            if (plat.equals("wbstream") || plat.equals("bitrix")) p.tunnelMode = "video".equals(mode) ? "video" : "dc";
             String frag = u.getFragment();
             p.name = frag != null && !frag.trim().isEmpty() ? frag.trim() : label;
             return p;
