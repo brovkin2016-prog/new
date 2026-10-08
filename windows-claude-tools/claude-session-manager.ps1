@@ -137,10 +137,16 @@ $btnBackup  = New-Btn "⬆  Сделать бэкап" 18 134 290 $true
 $btnRestore = New-Btn "⬇  Восстановить сессии" 318 134 290 $true
 $form.Controls.Add($btnBackup); $form.Controls.Add($btnRestore)
 
-$btnOpenSess = New-Btn "Папка сессий" 18 182 190 $false
-$btnOpenBak  = New-Btn "Папка бэкапа" 218 182 190 $false
-$btnAuto     = New-Btn "Автобэкап: вкл." 418 182 190 $false
-$form.Controls.Add($btnOpenSess); $form.Controls.Add($btnOpenBak); $form.Controls.Add($btnAuto)
+$fontSm = New-Object System.Drawing.Font("Segoe UI",8.5,[System.Drawing.FontStyle]::Bold)
+$btnOpenSess = New-Btn "Папка сессий" 18 182 140 $false
+$btnOpenBak  = New-Btn "Папка бэкапа" 168 182 140 $false
+$btnAuto     = New-Btn "Автозахват: вкл." 318 182 140 $false
+$btnJunc     = New-Btn "Мгновенно: вкл." 468 182 140 $false
+foreach ($b in @($btnOpenSess,$btnOpenBak,$btnAuto,$btnJunc)) { $b.Font = $fontSm; $form.Controls.Add($b) }
+
+$tip = New-Object System.Windows.Forms.ToolTip
+$tip.SetToolTip($btnAuto, "Поставить задачу: копировать все сессии каждый час и при входе в систему")
+$tip.SetToolTip($btnJunc, "Папка сессий станет ссылкой на папку бэкапа — всё из Claude будет попадать туда сразу")
 
 # --- лог ---
 $log = New-Object System.Windows.Forms.TextBox
@@ -206,12 +212,39 @@ $btnAuto.Add_Click({
     try {
         $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Backup"
         $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
-        $t1 = New-ScheduledTaskTrigger -Daily -At 8:00PM
+        $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)
         $t2 = New-ScheduledTaskTrigger -AtLogOn
-        Register-ScheduledTask -TaskName "Claude sessions backup" -Action $act -Trigger $t1,$t2 -Description "Автобэкап сессий Claude Code" -Force | Out-Null
+        Register-ScheduledTask -TaskName "Claude sessions backup" -Action $act -Trigger $t1,$t2 -Description "Автозахват сессий Claude Code" -Force | Out-Null
         Sync-Cfg
-        Log "Автобэкап включён: ежедневно в 20:00 и при входе. (Отключить — в Планировщике заданий.)"
+        Log "Автозахват включён: все сессии копируются каждый час и при входе. Ничего нажимать не нужно."
     } catch { Log ("Не удалось создать задачу: " + $_.Exception.Message) }
+})
+$btnJunc.Add_Click({
+    $dest = $txtDest.Text
+    if ([string]::IsNullOrWhiteSpace($dest)) { Log "Сначала укажите папку бэкапа."; return }
+    $target = Join-Path $dest "projects"
+    $item = Get-Item $ProjSrc -ErrorAction SilentlyContinue
+    if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { Log "Папка сессий уже связана с облаком — всё попадает туда само."; return }
+    $ans = [System.Windows.Forms.MessageBox]::Show(
+        "Папка сессий станет ссылкой на:`n$target`n`nПосле этого ВСЁ из Claude будет сразу попадать в папку бэкапа (и в облако, если это OneDrive).`n`nВАЖНО: сначала ЗАКРОЙТЕ Claude Code. Продолжить?",
+        "Мгновенный захват", "OKCancel", "Warning")
+    if ($ans -ne "OK") { return }
+    try {
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        if (Test-Path $ProjSrc) {
+            robocopy $ProjSrc $target /E /R:1 /W:1 /NFL /NDL /NP /NJH /NJS | Out-Null
+            Remove-Item $ProjSrc -Recurse -Force
+        }
+        $mk = 'mklink /J "{0}" "{1}"' -f $ProjSrc, $target
+        cmd /c $mk | Out-Null
+        $item2 = Get-Item $ProjSrc -ErrorAction SilentlyContinue
+        if ($item2 -and ($item2.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            Log "Готово: теперь всё из Claude сразу попадает в $target"
+        } else {
+            Log "Не удалось создать ссылку. Закройте Claude Code и попробуйте снова."
+        }
+        Sync-Cfg; Update-Status
+    } catch { Log ("Ошибка: " + $_.Exception.Message) }
 })
 $btnSaveNotes.Add_Click({ Sync-Cfg; Log "Примечания сохранены." })
 $form.Add_FormClosing({ Sync-Cfg })
