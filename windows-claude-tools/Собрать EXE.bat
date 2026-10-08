@@ -1,3 +1,3 @@
 @echo off
-rem Сборка claude-session-manager.exe (запустить на Windows, один раз)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Собрать EXE.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0������ EXE.ps1"
+pause
