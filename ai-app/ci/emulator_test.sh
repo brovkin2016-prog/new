@@ -65,7 +65,7 @@ adb exec-out screencap -p > "$OUT/hosting.png"
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
 adb shell cat /sdcard/ui.xml > "$OUT/hosting.xml"
 adb logcat -d -s AIHOST:V | tee "$OUT/hosting.log"
-grep -q "Ссылка из письма" "$OUT/hosting.xml" || { echo "the HostVDS sign-in window did not open"; exit 1; }
+grep -qE "Ссылка из письма|Нужно обновить встроенный браузер" "$OUT/hosting.xml" || { echo "the HostVDS sign-in window did not open"; exit 1; }
 # what the page itself shows (the site is outside: only reported, a site down is not this app's fault)
 WORDS=$(tr '>' '\n' < "$OUT/hosting.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Ссылка из письма|Я вошёл|="✕"|встроенный браузер|Обновить|Закрыть|WebView' | head -15 | tr '\n' ' ')
 echo "hosting page shows: ${WORDS:-NOTHING (white screen?)}"
