@@ -2,6 +2,9 @@ package app.aihelper.vpn;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -13,6 +16,7 @@ import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.LinearLayout;
@@ -119,6 +123,97 @@ final class Updater {
         }, "update-check").start();
     }
 
+    /**
+     * While the VPN is on: a newer Winger is fetched by itself (not over the bridge, which is slow) and checked, then on
+     * Android 12+ put in without a question once the screen is off — the VPN comes back by itself right after. Where
+     * the phone still wants a «yes», a notice asks for it. Older phones are asked when the app is opened, as before.
+     */
+    static void background(Context ctx, boolean viaBridge) {
+        Context c = ctx.getApplicationContext();
+        if (Build.VERSION.SDK_INT < 31 || quiet || downloading || !c.getPackageManager().canRequestPackageInstalls()) return;
+        SharedPreferences prefs = c.getSharedPreferences("vpn", Context.MODE_PRIVATE);
+        File ready = new File(prefs.getString("bgReady", "/nonexistent"));
+        if (prefs.getInt("bgReadyCode", 0) > BuildConfig.VERSION_CODE && ready.isFile()) {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            if (pm != null && !pm.isInteractive()) {  // nobody is looking at the phone: the short gap goes unnoticed
+                prefs.edit().remove("bgReady").remove("bgReadyCode").apply();
+                Diag.i(c, "update: putting in " + ready.getName() + " while the screen is off");
+                quiet = true;
+                new Thread(() -> {
+                    try {
+                        String err = write(c, ready);
+                        if (err != null) Diag.i(c, "update: not started: " + err);
+                    } finally {
+                        quiet = false;
+                    }
+                }, "update-quiet-install").start();
+            }
+            return;
+        }
+        String host = Profile.homeHost(c);
+        long now = System.currentTimeMillis();
+        if (viaBridge || host == null || now - prefs.getLong("bgCheck", 0) < EVERY_MS) return;
+        prefs.edit().putLong("bgCheck", now).apply();
+        quiet = true;
+        String base = "https://" + host + ":8443/app/";
+        new Thread(() -> {
+            try {
+                HttpURLConnection h = open(base + "vpn.json");
+                JSONObject info = null;
+                if (h.getResponseCode() == 200) {
+                    try (InputStream in = h.getInputStream()) {
+                        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+                        byte[] b = new byte[8192];
+                        for (int n; (n = in.read(b)) > 0; ) buf.write(b, 0, n);
+                        info = new JSONObject(buf.toString("UTF-8"));
+                    }
+                }
+                h.disconnect();
+                if (info == null || info.optInt("code", 0) <= BuildConfig.VERSION_CODE) return;
+                long size = Math.max(1, info.optLong("size", 1));
+                File dir = new File(c.getCacheDir(), "update");
+                //noinspection ResultOfMethodCallIgnored
+                dir.mkdirs();
+                File apk = new File(dir, "vpn-" + info.optInt("code", 0) + ".apk");
+                String err = null;
+                for (int t = 0; t < TRIES && apk.length() < size; t++) {
+                    if (t > 0) Thread.sleep(3000L * t);
+                    err = fetch(base + "vpn.apk", apk, size, null, new AtomicBoolean());
+                }
+                if (apk.length() < size || !info.optString("sha256", "").equalsIgnoreCase(sha256(apk)) || !sameSigner(c, apk)) {
+                    //noinspection ResultOfMethodCallIgnored
+                    if (apk.length() >= size) apk.delete();  // a wrong file: from the start next time
+                    Diag.i(c, "update: " + info.optString("name") + " not ready (" + (err != null ? err : "the file does not check out") + ")");
+                    return;
+                }
+                prefs.edit().putString("bgReady", apk.getPath()).putInt("bgReadyCode", info.optInt("code", 0)).apply();
+                Diag.i(c, "update: " + info.optString("name") + " downloaded and checked, goes in when the screen is off");
+            } catch (Exception e) {
+                Diag.i(c, "update: " + e);
+            } finally {
+                quiet = false;
+            }
+        }, "update-quiet").start();
+    }
+
+    private static volatile boolean quiet;
+
+    /** The phone wants a «yes» for the update while the app is in the background: a notice that opens that question. */
+    private static void askLater(Context c, Intent confirm) {
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (nm.getNotificationChannel("update") == null) {
+            nm.createNotificationChannel(new NotificationChannel("update", "Обновления", NotificationManager.IMPORTANCE_DEFAULT));
+        }
+        PendingIntent open = PendingIntent.getActivity(c, 7, confirm, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        nm.notify(7001, new Notification.Builder(c, "update").setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle("Новая версия Winger готова")
+                .setContentText("Нажмите, чтобы установить")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build());
+    }
+
     /** The screen can still show a dialog (not closed, not destroyed by a rotation or a language change). */
     private static boolean alive(Activity a) {
         return a != null && !a.isFinishing() && !a.isDestroyed();
@@ -178,7 +273,10 @@ final class Updater {
                         Thread.currentThread().interrupt();
                     }
                 }
-                err = fetch(a, base + "vpn.apk", apk, size, bar, line, stop);
+                err = fetch(base + "vpn.apk", apk, size, g -> a.runOnUiThread(() -> {
+                    bar.setProgress((int) Math.min(1000, g * 1000 / size));
+                    line.setText(String.format(java.util.Locale.ROOT, "%.1f из %.1f МБ", g / 1e6, size / 1e6));
+                }), stop);
                 if (err == null && apk.length() >= size) break;
             }
             if (stop.get()) err = "отменено";
@@ -218,7 +316,11 @@ final class Updater {
     }
 
     /** One pass: continues the file from its current length (Range), or starts over when the server sends it whole. */
-    private static String fetch(Activity a, String url, File apk, long size, ProgressBar bar, TextView line, AtomicBoolean stop) {
+    interface Progress {
+        void got(long bytes);
+    }
+
+    private static String fetch(String url, File apk, long size, Progress progress, AtomicBoolean stop) {
         long have = apk.length();
         HttpURLConnection c = null;
         try {
@@ -237,11 +339,7 @@ final class Updater {
                 for (int n; !stop.get() && (n = in.read(b)) > 0; ) {
                     out.write(b, 0, n);
                     got += n;
-                    long g = got;
-                    a.runOnUiThread(() -> {
-                        bar.setProgress((int) Math.min(1000, g * 1000 / size));
-                        line.setText(String.format(java.util.Locale.ROOT, "%.1f из %.1f МБ", g / 1e6, size / 1e6));
-                    });
+                    if (progress != null) progress.got(got);
                 }
             }
             return null;
@@ -304,6 +402,8 @@ final class Updater {
             PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             p.setAppPackageName(app.getPackageName());
             p.setSize(apk.length());
+            // Android 12+ lets an app put in its own update without asking; where it still wants a «yes», it asks
+            if (Build.VERSION.SDK_INT >= 31) p.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
             id = pi.createSession(p);
             try (PackageInstaller.Session s = pi.openSession(id)) {
                 // the file goes in and its stream is closed exactly once, before the commit
@@ -344,7 +444,10 @@ final class Updater {
                 if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                     @SuppressWarnings("deprecation")
                     Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
-                    if (confirm != null) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    if (confirm == null) return;
+                    confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (alive(current.get())) c.startActivity(confirm);
+                    else askLater(c, confirm);  // in the background: a notice to tap instead of a screen
                     return;
                 }
                 if (status == PackageInstaller.STATUS_SUCCESS || status == PackageInstaller.STATUS_FAILURE_ABORTED) return;

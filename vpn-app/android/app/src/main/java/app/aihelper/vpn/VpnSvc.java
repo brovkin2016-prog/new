@@ -7,6 +7,8 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.VpnService;
@@ -115,8 +117,48 @@ public final class VpnSvc extends VpnService {
         stop("VPN выключен: его забрало другое VPN-приложение или настройки телефона.");
     }
 
+    private static final String NET_CHANGED = "Сеть сменилась.";
+    private static final String MAPDNS = "198.18.0.2";
+    static volatile boolean testMapdns;  // the emulator test only: the bridge's way with names, tried on the server
+    private volatile boolean netChanged;
+    private ConnectivityManager.NetworkCallback netWatch;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // the phone moved to another network (Wi-Fi ↔ mobile): the connection is opened anew at once, not after a minute
+        // of missed answers (this app is outside its own VPN, so its network is the phone's real one)
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm == null) return;
+        netWatch = new ConnectivityManager.NetworkCallback() {
+            private Network last;
+
+            @Override
+            public void onAvailable(Network n) {
+                if (last != null && !last.equals(n)) {
+                    netChanged = true;
+                    Diag.i(VpnSvc.this, "network changed");
+                }
+                last = n;
+            }
+        };
+        try {
+            cm.registerDefaultNetworkCallback(netWatch);
+        } catch (RuntimeException e) {
+            netWatch = null;
+        }
+    }
+
     @Override
     public void onDestroy() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm != null && netWatch != null) {
+            try {
+                cm.unregisterNetworkCallback(netWatch);
+            } catch (RuntimeException ignored) {
+                // not registered
+            }
+        }
         boolean on;
         synchronized (lock) {
             on = wanted || worker != null;
@@ -159,6 +201,14 @@ public final class VpnSvc extends VpnService {
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
             if (!mine()) break;
+            if (NET_CHANGED.equals(err)) {  // not a failure: straight back on the new network
+                fails = 0;
+                Diag.i(this, "reconnecting on the new network");
+                State.set(State.Phase.RETRYING, "Сеть сменилась — переподключаюсь…");
+                update();
+                if (!sleep(300)) break;
+                continue;
+            }
             fails++;
             Diag.i(this, "retry " + fails + ": " + err);
             State.set(tun == null ? State.Phase.CONNECTING : State.Phase.RETRYING, err + " Пробую снова…");
@@ -172,8 +222,14 @@ public final class VpnSvc extends VpnService {
         long lastPing = SystemClock.elapsedRealtime(), lastStats = 0;
         long prevDown = 0, prevUp = 0;
         int missed = 0;
+        netChanged = false;  // this connection was made on the network there is now
         while (mine()) {
             if (!sleep(1000)) return "";
+            if (netChanged) {
+                netChanged = false;
+                // the bridge's call finds its way back by itself; the server's connection is made anew at once
+                if (!profile.bridge) return NET_CHANGED;
+            }
             if (p == null || !alive(p)) return lastError != null ? lastError : "Клиент VPN остановился.";
             long[] s = statsOrNull();
             long now = SystemClock.elapsedRealtime();
@@ -198,6 +254,7 @@ public final class VpnSvc extends VpnService {
                 Diag.i(this, "traffic down " + State.down + " up " + State.up + ", now " + Math.round(State.downRate / 1024)
                         + "/" + Math.round(State.upRate / 1024) + " KB/s" + (profile.bridge ? " (bridge)" : ""));
                 Diag.upload(this, false);  // now and then the journal goes to the family server
+                Updater.background(this, profile.bridge);  // a newer Winger: fetched now and then, put in while the screen is off
                 if (!mine()) return "";  // switched off while it was pinging: the screen says «off», not «retrying»
                 TProxyService t = hev;
                 if (t == null || !t.TProxyIsRunning()) {
@@ -417,9 +474,13 @@ public final class VpnSvc extends VpnService {
             return false;
         }
         try {
+            // over the bridge the names are looked up on the server's side (the tunnel's own small DNS answers at once and
+            // the connection carries the name): no separate trip through the call for each name, and no UDP needed for it
+            boolean mapped = profile.bridge || testMapdns;
             Builder b = new Builder().setSession(profile.name).setMtu(8500)
-                    .addAddress("198.18.0.1", 32).addRoute("0.0.0.0", 0)
-                    .addDnsServer("1.1.1.1").addDnsServer("8.8.8.8");
+                    .addAddress("198.18.0.1", 32).addRoute("0.0.0.0", 0);
+            if (mapped) b.addDnsServer(MAPDNS);
+            else b.addDnsServer("1.1.1.1").addDnsServer("8.8.8.8");
             try {
                 b.addAddress("fc00::1", 128).addRoute("::", 0);  // IPv6 also goes in, so nothing leaks around the VPN
             } catch (IllegalArgumentException ignored) {
@@ -456,6 +517,8 @@ public final class VpnSvc extends VpnService {
             File conf = new File(dir, "tunnel.yaml");
             String y = "tunnel:\n  mtu: 8500\n  ipv4: 198.18.0.1\n  ipv6: 'fc00::1'\n"
                     + "socks5:\n  port: " + socksPort + "\n  address: 127.0.0.1\n  udp: 'udp'\n"
+                    + (mapped ? "mapdns:\n  address: " + MAPDNS + "\n  port: 53\n  network: 100.64.0.0\n  netmask: 255.192.0.0\n"
+                    + "  cache-size: 10000\n" : "")
                     + "misc:\n  task-stack-size: 81920\n  log-level: warn\n";
             try (FileOutputStream out = new FileOutputStream(conf)) {
                 out.write(y.getBytes(StandardCharsets.UTF_8));

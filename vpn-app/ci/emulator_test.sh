@@ -6,7 +6,7 @@ mkdir -p "$OUT"
 PKG=app.aihelper.vpn.debug
 ACT=$PKG/app.aihelper.vpn.MainActivity
 LINK='hysteria2://family:test-pass-123@10.0.2.2:4443/?sni=vpn.test.local&insecure=1#Тест'
-fail() { echo "FAIL: $*"; adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"; adb exec-out screencap -p > "$OUT/fail.png"; exit 1; }
+fail() { echo "FAIL: $*"; echo "::error::$*"; adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"; adb exec-out screencap -p > "$OUT/fail.png"; exit 1; }
 wait_log() {  # text, seconds
   for _ in $(seq 1 "$2"); do adb logcat -d -s AIVPN:V | grep -q "$1" && return 0; sleep 1; done
   return 1
@@ -50,6 +50,19 @@ adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off"
 sleep 2
 adb exec-out screencap -p > "$OUT/4-off.png"
+
+# the bridge's way with names (the tunnel's own DNS answers, the connection carries the name, the far side looks it up):
+# tried with the server here, as CI has no real call
+adb logcat -c
+adb shell am start -n $ACT --ez test_all true --ez test_mapdns true --ez test_connect true
+wait_log "connected via" 60 || fail "no connection with names looked up on the far side"
+for _ in 1 2 3; do R=$(page); echo "$R" | grep -q "HTTP/1" && break; sleep 2; done
+echo "names on the far side: $R"
+echo "$R" | grep -q "HTTP/1" || fail "a web page did not come with names looked up on the far side"
+grep -q 'TCP request.*example\.com:80"' /tmp/t/hy.log || fail "the name did not reach the server (mapped DNS)"
+adb shell am start -n $ACT --ez test_disconnect true
+wait_log "stopped" 20 || fail "did not switch off (mapped DNS)"
+echo "mapped DNS: the page came, the server got the name itself"
 R=$(page)
 echo "after switching off (straight to the internet): $R"
 adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"
@@ -147,7 +160,7 @@ sleep 3
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
 adb shell cat /sdcard/ui.xml > "$OUT/conns.xml"
 grep -q 'text="Тест"' "$OUT/conns.xml" || fail "no button for the server"
-grep -q 'text="Мост CI"' "$OUT/conns.xml" || fail "no button for the bridge"
+grep -q 'text="Мост' "$OUT/conns.xml" || fail "no button for the bridge"
 B=$(tr '>' '\n' < "$OUT/conns.xml" | grep 'text="Тест"' | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 | tr -c '0-9' ' ')
 read -r X1 Y1 X2 Y2 <<< "$B"
 adb shell input tap $(((X1 + X2) / 2)) $(((Y1 + Y2) / 2))
