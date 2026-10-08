@@ -12,12 +12,20 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** A Hysteria 2 server from a hysteria2:// link, and the saved list of them. */
+/**
+ * A Hysteria 2 server from a hysteria2:// link, and the saved list of them. Also the owner's bridge for days when the
+ * mobile internet lets only «white-listed» services through: winger-bridge://telemost?link=…&fps=24&batch=45&reliable=1
+ * (the traffic rides a Yandex Telemost call to the family server; see Bridge).
+ */
 final class Profile {
-    private static final Pattern LINK = Pattern.compile("(?:hysteria2|hy2)://[^\\s\"'<>]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LINK = Pattern.compile("(?:hysteria2|hy2|winger-bridge)://[^\\s\"'<>]+", Pattern.CASE_INSENSITIVE);
 
     String name, link, host, ports, auth, sni, obfs, obfsPassword, pin;
     boolean insecure;
+    // the bridge: a Telemost call link and how the video carries the data
+    boolean bridge, reliable, dualTrack;
+    String joinLink;
+    int fps, batch;
 
     /** The first hysteria2:// link anywhere in the text (a message, a QR code), or null. */
     static Profile find(String text) {
@@ -28,6 +36,7 @@ final class Profile {
 
     /** Reads hysteria2://auth@host:port/?sni=…&insecure=1&obfs=salamander&obfs-password=…&pinSHA256=…#name */
     static Profile parse(String link) {
+        if (link != null && link.trim().toLowerCase().startsWith("winger-bridge://")) return parseBridge(link.trim());
         try {
             String s = link.trim();
             String rest = s.substring(s.indexOf("://") + 3);
@@ -83,6 +92,40 @@ final class Profile {
         }
     }
 
+    /** winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F…&fps=24&batch=45&reliable=1&dual=0#name */
+    private static Profile parseBridge(String s) {
+        try {
+            Uri u = Uri.parse(s);
+            if (!"telemost".equals(u.getHost())) return null;
+            String join = u.getQueryParameter("link");
+            if (join == null || !join.matches("https://telemost\\.yandex\\.(ru|com)/j/[0-9A-Za-z_-]{6,64}")) return null;
+            Profile p = new Profile();
+            p.bridge = true;
+            p.link = s;
+            p.joinLink = join;
+            p.host = "telemost.yandex.ru";
+            p.ports = "443";
+            p.auth = join;  // the same call is the same bridge: a second copy of the link is not added
+            p.fps = number(u.getQueryParameter("fps"), 24, 1, 60);
+            p.batch = number(u.getQueryParameter("batch"), 45, 1, 200);
+            p.reliable = !"0".equals(u.getQueryParameter("reliable"));
+            p.dualTrack = "1".equals(u.getQueryParameter("dual"));
+            String frag = u.getFragment();
+            p.name = frag != null && !frag.trim().isEmpty() ? frag.trim() : "Мост Телемост";
+            return p;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static int number(String v, int dflt, int min, int max) {
+        try {
+            return Math.max(min, Math.min(max, Integer.parseInt(v)));
+        } catch (RuntimeException e) {
+            return dflt;
+        }
+    }
+
     /** The server name the certificate is for: the link's sni, else its host. */
     String serverName() {
         return sni != null && !sni.isEmpty() ? sni : host;
@@ -90,6 +133,7 @@ final class Profile {
 
     /** Where the app's own update lives on this server (only when the link names a domain). */
     String updateHost() {
+        if (bridge) return null;  // the bridge's host is Yandex, not the family server
         String n = serverName();
         return n.matches("[0-9.]+") || n.contains(":") ? null : n;
     }
@@ -133,6 +177,14 @@ final class Profile {
 
     static void select(Context c, int i) {
         prefs(c).edit().putInt("current", i).apply();
+    }
+
+    /** The family server (for the app's own updates and the portrait): the chosen server's, else any saved one's. */
+    static String homeHost(Context c) {
+        Profile p = chosen(c);
+        if (p != null && p.updateHost() != null) return p.updateHost();
+        for (Profile o : all(c)) if (o.updateHost() != null) return o.updateHost();
+        return null;
     }
 
     static Profile chosen(Context c) {

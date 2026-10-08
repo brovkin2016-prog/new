@@ -67,8 +67,7 @@ final class Updater {
 
     static void check(Activity a, boolean manual) {
         current = new WeakReference<>(a);
-        Profile p = Profile.chosen(a);
-        String host = p == null ? null : p.updateHost();
+        String host = Profile.homeHost(a);
         SharedPreferences prefs = a.getSharedPreferences("vpn", Context.MODE_PRIVATE);
         long now = System.currentTimeMillis();
         if (busy || host == null || (!manual && now - prefs.getLong("updateCheck", 0) < EVERY_MS)) return;

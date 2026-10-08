@@ -73,7 +73,7 @@ final class AvatarView extends View {
 
     /** Fetches the portrait from the server named in the link (through the tunnel when the VPN is on), once a day. */
     void refresh(Profile p) {
-        String host = p == null ? null : p.updateHost();
+        String host = Profile.homeHost(getContext());
         if (host == null) return;
         if (photo != null && System.currentTimeMillis() - file.lastModified() < EVERY_MS) return;
         new Thread(() -> {

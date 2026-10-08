@@ -355,6 +355,8 @@ public class MainActivity extends Activity implements State.Listener {
             for (String pkg : testApps.split(",")) Apps.choose(this, pkg.trim(), true);
             appsChanged();
         }
+        String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
+        if (testBridge != null) add(testBridge);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_install", false)) Updater.testInstall(this);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_disconnect", false)) {

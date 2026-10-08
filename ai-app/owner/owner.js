@@ -473,6 +473,18 @@
           el("div", { class: "big-actions" },
             el("button", { class: "btn", text: "📋 Копировать", onclick: () => copyText(b.link) }),
             el("button", { class: "btn line", text: "📤 Поделиться", onclick: () => (navigator.share ? navigator.share({ text: b.link }).catch(() => copyText(b.link)) : copyText(b.link)) })));
+        // a Telemost bridge right inside Winger, with the settings that work best (only the owner sees this)
+        if (/^https:\/\/telemost\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(b.link || "")) {
+          const w = "winger-bridge://telemost?link=" + encodeURIComponent(b.link) + "&fps=24&batch=45&reliable=1&dual=0#"
+            + encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
+          box.append(el("h3", { style: "margin:16px 0 6px", text: "📲 Мост в Winger — только у вас" }),
+            el("div", { style: "font-size:14px;color:var(--muted);margin-bottom:10px",
+              text: "В Winger появится сервер «Мост»: звонок Телемоста, Video, VP8 24/45, Reliable (KCP) — настраивать ничего не нужно. "
+                + "При шатдауне выберите его в Winger и нажмите большую кнопку; whitelist-bypass и v2RayTun тогда не нужны (выключите их)." }),
+            el("a", { class: "btn wide", href: w, style: "text-decoration:none;text-align:center;display:block", text: "📲 Открыть в Winger" }),
+            el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Скопировать ссылку для Winger",
+              onclick: () => copyText(w) }));
+        }
       });
     }
 

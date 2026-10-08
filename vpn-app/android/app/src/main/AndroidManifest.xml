@@ -73,6 +73,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="hysteria2" />
                 <data android:scheme="hy2" />
+                <data android:scheme="winger-bridge" />
             </intent-filter>
         </activity>
 

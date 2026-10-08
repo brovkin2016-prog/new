@@ -1,0 +1,292 @@
+package rtc
+
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+	"math"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/kulikov0/headless-client/webrtc"
+	"github.com/pion/datachannel"
+
+	"whitelist-bypass/relay/common"
+	"whitelist-bypass/relay/tunnel"
+)
+
+// Telemost chunk size
+const chunkSize = 994
+
+type chunkBuf struct {
+	chunks [][]byte
+	count  int
+	size   int
+}
+
+type DCTunnel struct {
+	dc       *webrtc.DataChannel
+	raw      datachannel.ReadWriteCloser
+	writeRaw datachannel.ReadWriteCloser
+	logFn    func(string, ...any)
+	onData   func([]byte)
+	onClose  func()
+	obf      *tunnel.TunnelObfuscator
+	chunked  bool
+	readBuf  int
+
+	recvBufs  sync.Map
+	sendMsgID uint32
+
+	recvBytes atomic.Uint64
+	sendBytes atomic.Uint64
+	recvMsgs  atomic.Uint64
+	sendMsgs  atomic.Uint64
+}
+
+func NewDCTunnel(dc *webrtc.DataChannel, obf *tunnel.TunnelObfuscator, readBuf int, logFn func(string, ...any)) *DCTunnel {
+	t := &DCTunnel{dc: dc, obf: obf, readBuf: readBuf, logFn: logFn}
+
+	raw, err := dc.Detach()
+	if err != nil {
+		logFn("dctunnel: detach failed, using callback mode: %v", err)
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			t.recvBytes.Add(uint64(len(msg.Data)))
+			t.recvMsgs.Add(1)
+			t.deliverMessage(msg.Data)
+		})
+		dc.OnClose(func() {
+			if t.onClose != nil {
+				t.onClose()
+			}
+		})
+		return t
+	}
+
+	t.raw = raw
+	go t.readLoop()
+	return t
+}
+
+func NewDCTunnelFromRaw(dc *webrtc.DataChannel, raw datachannel.ReadWriteCloser, obf *tunnel.TunnelObfuscator, readBuf int, logFn func(string, ...any)) *DCTunnel {
+	t := &DCTunnel{dc: dc, raw: raw, obf: obf, readBuf: readBuf, logFn: logFn}
+	go t.readLoop()
+	return t
+}
+
+func NewChunkedDCTunnel(readRaw datachannel.ReadWriteCloser, writeDC *webrtc.DataChannel, obf *tunnel.TunnelObfuscator, readBuf int, logFn func(string, ...any)) *DCTunnel {
+	writeRaw, err := writeDC.Detach()
+	if err != nil {
+		logFn("dctunnel: write DC detach failed: %v", err)
+		return nil
+	}
+	t := &DCTunnel{raw: readRaw, writeRaw: writeRaw, obf: obf, readBuf: readBuf, logFn: logFn, chunked: true}
+	go t.readLoop()
+	return t
+}
+
+func NewChunkedDCTunnelFromRaw(readRaw, writeRaw datachannel.ReadWriteCloser, obf *tunnel.TunnelObfuscator, readBuf int, logFn func(string, ...any)) *DCTunnel {
+	t := &DCTunnel{raw: readRaw, writeRaw: writeRaw, obf: obf, readBuf: readBuf, logFn: logFn, chunked: true}
+	go t.readLoop()
+	return t
+}
+
+func (t *DCTunnel) readLoop() {
+	buf := make([]byte, t.readBuf)
+	var stats dcStats
+	for {
+		n, isString, err := t.raw.ReadDataChannel(buf)
+		if err != nil {
+			if err != io.EOF {
+				t.logFn("dctunnel: read error: %v", err)
+			}
+			if t.onClose != nil {
+				t.onClose()
+			}
+			return
+		}
+		if isString {
+			continue
+		}
+		t.recvBytes.Add(uint64(n))
+		t.recvMsgs.Add(1)
+		if t.chunked && n >= 6 {
+			t.handleChunk(buf[:n])
+		} else if n > 0 {
+			t.deliverMessage(buf[:n])
+		}
+		if common.Debug {
+			t.logStats(&stats)
+		}
+	}
+}
+
+func (t *DCTunnel) handleChunk(data []byte) {
+	id := uint16(data[0])<<8 | uint16(data[1])
+	idx := int(uint16(data[2])<<8 | uint16(data[3]))
+	total := int(uint16(data[4])<<8 | uint16(data[5]))
+	payload := data[6:]
+
+	if total == 1 {
+		cp := make([]byte, len(payload))
+		copy(cp, payload)
+		t.deliverMessage(cp)
+		return
+	}
+
+	val, _ := t.recvBufs.LoadOrStore(id, &chunkBuf{chunks: make([][]byte, total)})
+	cb := val.(*chunkBuf)
+	if idx < len(cb.chunks) && cb.chunks[idx] == nil {
+		cp := make([]byte, len(payload))
+		copy(cp, payload)
+		cb.chunks[idx] = cp
+		cb.count++
+		cb.size += len(cp)
+	}
+	if cb.count == total {
+		t.recvBufs.Delete(id)
+		out := make([]byte, 0, cb.size)
+		for _, c := range cb.chunks {
+			out = append(out, c...)
+		}
+		t.deliverMessage(out)
+	}
+}
+
+func (t *DCTunnel) deliverMessage(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	if t.obf != nil {
+		pt, ok := t.obf.DecryptPayload(data)
+		if !ok {
+			if common.Debug {
+				t.logFn("dctunnel: decrypt failed, dropping %d bytes", len(data))
+			}
+			return
+		}
+		data = pt
+	}
+	if t.onData != nil && len(data) > 0 {
+		frame := make([]byte, 4+len(data))
+		binary.BigEndian.PutUint32(frame[0:4], uint32(len(data)))
+		copy(frame[4:], data)
+		t.onData(frame)
+	}
+}
+
+func (t *DCTunnel) sendChunked(data []byte) {
+	w := t.writeRaw
+	if w == nil {
+		w = t.raw
+	}
+	if w == nil {
+		return
+	}
+	total := int(math.Ceil(float64(len(data)) / float64(chunkSize)))
+	if total == 0 {
+		total = 1
+	}
+	id := uint16(atomic.AddUint32(&t.sendMsgID, 1)) & 0xFFFF
+	for i := 0; i < total; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		p := data[start:end]
+		f := make([]byte, 6+len(p))
+		f[0] = byte(id >> 8)
+		f[1] = byte(id & 0xFF)
+		f[2] = byte(i >> 8)
+		f[3] = byte(i & 0xFF)
+		f[4] = byte(total >> 8)
+		f[5] = byte(total & 0xFF)
+		copy(f[6:], p)
+		t.sendBytes.Add(uint64(len(f)))
+		t.sendMsgs.Add(1)
+		w.Write(f)
+	}
+}
+
+func (t *DCTunnel) sendRaw(data []byte) {
+	w := t.writeRaw
+	if w == nil {
+		w = t.raw
+	}
+	if w != nil {
+		t.sendBytes.Add(uint64(len(data)))
+		t.sendMsgs.Add(1)
+		w.Write(data)
+		return
+	}
+	if t.dc == nil || t.dc.ReadyState() != webrtc.DataChannelStateOpen {
+		return
+	}
+	t.sendBytes.Add(uint64(len(data)))
+	t.sendMsgs.Add(1)
+	t.dc.Send(data)
+}
+
+func (t *DCTunnel) SendData(data []byte) {
+	tunnel.DecodeFrames(data, func(connID uint32, msgType byte, payload []byte) {
+		buf := make([]byte, tunnel.WireHeaderLen+len(payload))
+		binary.BigEndian.PutUint32(buf[0:4], connID)
+		buf[4] = msgType
+		copy(buf[tunnel.WireHeaderLen:], payload)
+		wire := buf
+		if t.obf != nil {
+			wire = t.obf.EncryptPayload(buf)
+			if wire == nil {
+				return
+			}
+		}
+		if t.chunked {
+			t.sendChunked(wire)
+		} else {
+			t.sendRaw(wire)
+		}
+	})
+}
+
+func (t *DCTunnel) SetOnData(fn func([]byte))  { t.onData = fn }
+func (t *DCTunnel) OnData() func([]byte)       { return t.onData }
+func (t *DCTunnel) SetOnClose(fn func())       { t.onClose = fn }
+func (t *DCTunnel) Reconfigure(fps, batch int) {}
+
+type dcStats struct {
+	last         time.Time
+	lastRecv     uint64
+	lastSend     uint64
+	lastRecvMsgs uint64
+	lastSendMsgs uint64
+}
+
+func (t *DCTunnel) logStats(s *dcStats) {
+	recv := t.recvBytes.Load()
+	send := t.sendBytes.Load()
+	recvMsgs := t.recvMsgs.Load()
+	sendMsgs := t.sendMsgs.Load()
+	now := time.Now()
+	elapsed := now.Sub(s.last)
+	if s.last.IsZero() || elapsed < 2*time.Second {
+		if s.last.IsZero() {
+			s.last = now
+		}
+		return
+	}
+	secs := elapsed.Seconds()
+	recvDelta := recv - s.lastRecv
+	sendDelta := send - s.lastSend
+	if recvDelta > 0 || sendDelta > 0 {
+		fmt.Printf("DC-STATS: recv=%dKB/s(%dmsg) send=%dKB/s(%dmsg)\n",
+			uint64(float64(recvDelta)/secs)/1024, uint64(float64(recvMsgs-s.lastRecvMsgs)/secs),
+			uint64(float64(sendDelta)/secs)/1024, uint64(float64(sendMsgs-s.lastSendMsgs)/secs))
+	}
+	s.last = now
+	s.lastRecv = recv
+	s.lastSend = send
+	s.lastRecvMsgs = recvMsgs
+	s.lastSendMsgs = sendMsgs
+}

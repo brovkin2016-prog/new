@@ -102,6 +102,23 @@ if [ -n "${NEXT_APK:-}" ]; then
   [ "${NEW:-0}" -gt "${OLD:-0}" ] || fail "the update did not install (still version $NEW)"
 fi
 
+# the owner's bridge: a winger-bridge:// link starts the whitelist-bypass relay instead of Hysteria; it must take the
+# call's settings and ask the app for Telemost's address (the call itself needs the family server's Yandex account,
+# so here a made-up call is refused by Telemost — the point is that everything up to the call works)
+BRIDGE='winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234&fps=24&batch=45&reliable=1#Мост CI'
+adb logcat -c
+adb shell "am start -n $ACT --es test_bridge '$BRIDGE' --ez test_connect true" >/dev/null
+for _ in $(seq 1 40); do adb logcat -d -s AIVPN:V | grep -q "bridge: resolve" && break; sleep 1; done
+sleep 5
+adb logcat -d -s AIVPN:V | grep -E "bridge|relay" | head -20 | tee "$OUT/bridge.log"
+grep -q "bridge: READY" "$OUT/bridge.log" || fail "the bridge relay did not start"
+grep -q "bridge: CONNECTING" "$OUT/bridge.log" || fail "the bridge relay did not take the call's settings"
+grep -qE "bridge: resolve [a-z.-]+yandex[a-z.]* -> [0-9.]+" "$OUT/bridge.log" || fail "the bridge relay got no address from the app"
+adb exec-out screencap -p > "$OUT/6-bridge.png"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+sleep 3
+echo "bridge: relay started, settings taken, addresses answered"
+
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install
 if [ -n "${ICON_APK:-}" ]; then
   adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"

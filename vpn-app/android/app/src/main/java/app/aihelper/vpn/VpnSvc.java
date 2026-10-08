@@ -19,7 +19,10 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -29,6 +32,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
+import org.json.JSONObject;
 
 import hev.htproxy.TProxyService;
 
@@ -132,11 +137,11 @@ public final class VpnSvc extends VpnService {
 
     private void run() {
         int fails = 0;
-        State.set(State.Phase.CONNECTING, "Подключаюсь к серверу…");
+        State.set(State.Phase.CONNECTING, profile.bridge ? "Поднимаю мост через звонок Телемоста… до минуты" : "Подключаюсь к серверу…");
         if (socksPort == 0) socksPort = freePort();
         while (mine()) {
             Process[] own = {null};
-            String err = startClient(own);
+            String err = profile.bridge ? startBridge(own) : startClient(own);
             if (err == null && mine()) {
                 if (tun == null && !openTunnel()) {
                     killClient(own[0]);
@@ -200,7 +205,8 @@ public final class VpnSvc extends VpnService {
                     missed++;
                     State.set(State.Phase.RETRYING, "Сервер не отвечает…");
                     update();
-                    if (missed >= 3) return "Связь с сервером пропала.";  // restart the client: a new network, a new path
+                    // restart the client: a new network, a new path (the bridge first tries to get back into the call itself)
+                    if (missed >= (profile.bridge ? 6 : 3)) return "Связь с сервером пропала.";
                 } else if (missed > 0) {
                     missed = 0;
                     State.set(State.Phase.ON, "");
@@ -265,6 +271,92 @@ public final class VpnSvc extends VpnService {
             Log.w(TAG, "client start", e);
             return "Не получилось запустить VPN на этом телефоне.";
         }
+    }
+
+    /**
+     * The owner's bridge for days when only «white-listed» services work: the relay of the whitelist-bypass project
+     * (MIT, built from vpn-app/bridge) joins the Yandex Telemost call the family server keeps open and carries the
+     * traffic as the call's video; like the Hysteria client it offers a SOCKS5 port here. It asks this app for names
+     * (RESOLVE:host — Android does not let it look them up) and takes the call's settings once it is ready.
+     */
+    private String startBridge(Process[] own) {
+        Profile p = profile;
+        lastError = null;
+        connected = new CountDownLatch(1);
+        try {
+            String join = new JSONObject().put("joinLink", p.joinLink).put("displayName", "Участник")
+                    .put("vp8Fps", p.fps).put("vp8Batch", p.batch).put("reliable", p.reliable).put("dualTrack", p.dualTrack)
+                    .toString();
+            ProcessBuilder pb = new ProcessBuilder(getApplicationInfo().nativeLibraryDir + "/librelay.so",
+                    "--mode", "telemost-headless-joiner", "--ws-port", String.valueOf(freePort()),
+                    "--socks-host", "127.0.0.1", "--socks-port", String.valueOf(socksPort))
+                    .directory(dir).redirectErrorStream(true);
+            pb.environment().put("HOME", dir.getAbsolutePath());
+            Process proc = pb.start();
+            synchronized (lock) {
+                if (!wanted || worker != Thread.currentThread()) {
+                    proc.destroy();
+                    return "";
+                }
+                client = proc;
+            }
+            own[0] = proc;
+            CountDownLatch up = connected;
+            new Thread(() -> readBridge(proc, up, join), "bridge-log").start();
+            if (!up.await(90, TimeUnit.SECONDS)) return lastError != null ? lastError : "Мост не поднялся: звонок не отвечает.";
+            return alive(proc) ? null : (lastError != null ? lastError : "Мост не поднялся.");
+        } catch (InterruptedException e) {
+            return "";
+        } catch (Exception e) {
+            Log.w(TAG, "bridge start", e);
+            return "Не получилось запустить мост на этом телефоне.";
+        }
+    }
+
+    private void readBridge(Process proc, CountDownLatch up, String join) {
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
+             Writer w = new OutputStreamWriter(proc.getOutputStream(), StandardCharsets.UTF_8)) {
+            for (String line; (line = r.readLine()) != null; ) {
+                if (line.startsWith("RESOLVE:")) {
+                    String name = line.substring(8).trim(), ip = "";
+                    try {
+                        InetAddress[] all = InetAddress.getAllByName(name);
+                        InetAddress a = all[0];
+                        for (InetAddress x : all) if (x instanceof Inet4Address) { a = x; break; }
+                        ip = a.getHostAddress();
+                    } catch (Exception e) {
+                        lastError = "Нет интернета: не найден «" + name + "».";
+                    }
+                    Log.i(TAG, "bridge: resolve " + name + " -> " + ip);
+                    w.write(ip + "\n");
+                    w.flush();
+                } else if (line.startsWith("STATUS:")) {
+                    String st = line.substring(7).trim();
+                    Log.i(TAG, "bridge: " + st);
+                    if (st.equals("READY")) {
+                        w.write("JOIN:" + join + "\n");
+                        w.flush();
+                    } else if (st.equals("TUNNEL_CONNECTED")) {
+                        up.countDown();
+                    } else if (st.equals("TUNNEL_LOST") || st.equals("RECONNECTING")) {
+                        if (up.getCount() == 0 && mine()) {
+                            State.set(State.Phase.RETRYING, "Мост переподключается к звонку…");
+                            update();
+                        }
+                    } else if (st.startsWith("ERROR:")) {
+                        lastError = st.toLowerCase().contains("not found") || st.contains("404")
+                                ? "Звонок моста не найден: попросите на сервере новую ссылку моста."
+                                : "Мост не подключился к звонку Телемоста.";
+                        proc.destroy();  // a new try from the start
+                    }
+                } else {
+                    Log.i(TAG, "relay: " + line);
+                }
+            }
+        } catch (Exception ignored) {
+            // the program ended
+        }
+        up.countDown();
     }
 
     private void read(Process proc, CountDownLatch up) {
