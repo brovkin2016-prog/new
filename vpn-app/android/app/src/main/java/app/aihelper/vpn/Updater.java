@@ -54,7 +54,12 @@ final class Updater {
     private Updater() {}
 
     static HttpURLConnection open(String url) throws Exception {
-        int port = VpnSvc.socksPort;
+        return open(url, false);
+    }
+
+    /** Direct: past the VPN even while it is on (this app is never inside its own tunnel), e.g. when the bridge is down. */
+    static HttpURLConnection open(String url, boolean direct) throws Exception {
+        int port = direct ? 0 : VpnSvc.socksPort;
         URL u = new URL(url);
         HttpURLConnection c = (HttpURLConnection) (port > 0
                 ? u.openConnection(new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", port)))

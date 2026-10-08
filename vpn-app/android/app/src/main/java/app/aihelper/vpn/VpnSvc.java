@@ -307,7 +307,31 @@ public final class VpnSvc extends VpnService {
             CountDownLatch up = connected;
             new Thread(() -> readBridge(proc, up, join), "bridge-log").start();
             if (!up.await(90, TimeUnit.SECONDS)) return lastError != null ? lastError : "Мост не поднялся: звонок не отвечает.";
-            return alive(proc) ? null : (lastError != null ? lastError : "Мост не поднялся.");
+            if (!alive(proc)) return lastError != null ? lastError : "Мост не поднялся.";
+            // being in the call is not enough: the bridge counts only when a request really comes back through it
+            State.set(State.Phase.CONNECTING, "Звонок есть. Проверяю, что через мост идут данные…");
+            update();
+            for (int i = 0; i < 4 && mine() && alive(proc); i++) {
+                int ms = probe(10_000);
+                if (ms > 0) {
+                    Diag.i(this, "bridge: data flows, " + ms + " ms");
+                    return null;
+                }
+            }
+            if (!mine()) return "";
+            Diag.i(this, "bridge: in the call, but nothing comes back through it (the server's side of the bridge is not there?)");
+            Diag.upload(this, true, true);  // the journal goes now, past the bridge
+            if (BridgeSync.refreshNow(this)) {
+                Profile fresh = Profile.chosen(this);
+                if (fresh != null && fresh.bridge && !fresh.link.equals(p.link)) {
+                    synchronized (lock) {
+                        if (worker == Thread.currentThread()) profile = fresh;
+                    }
+                    Diag.i(this, "bridge: the server gave a new call, trying it");
+                    return "Мост на сервере сменил звонок — подключаюсь к новому.";
+                }
+            }
+            return "Звонок есть, но мост на сервере не отвечает.";
         } catch (InterruptedException e) {
             return "";
         } catch (Exception e) {
@@ -457,26 +481,31 @@ public final class VpnSvc extends VpnService {
         }
     }
 
+    /** One request through the local proxy, so through the server or the bridge: its time in ms, 0 when none came back. */
+    private int probe(int timeoutMs) {
+        long t0 = SystemClock.elapsedRealtime();
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(PING_URL).openConnection(
+                    new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", socksPort)));
+            c.setConnectTimeout(timeoutMs);
+            c.setReadTimeout(timeoutMs);
+            c.setUseCaches(false);
+            int code = c.getResponseCode();
+            return code == 204 || code == 200 ? (int) Math.max(1, SystemClock.elapsedRealtime() - t0) : 0;
+        } catch (Exception e) {
+            return 0;  // no answer this time
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
     /** The response time through the tunnel: the best of two quick requests; 0 when nothing came back. */
     private void ping() {
         int best = 0;
         for (int i = 0; i < 2; i++) {
-            long t0 = SystemClock.elapsedRealtime();
-            HttpURLConnection c = null;
-            try {
-                c = (HttpURLConnection) new URL(PING_URL).openConnection(
-                        new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", socksPort)));
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(8000);
-                c.setUseCaches(false);
-                int code = c.getResponseCode();
-                int ms = (int) Math.max(1, SystemClock.elapsedRealtime() - t0);
-                if (code == 204 || code == 200) best = best == 0 ? ms : Math.min(best, ms);
-            } catch (Exception ignored) {
-                // no answer this time
-            } finally {
-                if (c != null) c.disconnect();
-            }
+            int ms = probe(8000);
+            if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
         }
         State.pingMs = best;
         State.pingAt = System.currentTimeMillis();

@@ -85,6 +85,11 @@ final class Diag {
 
     /** Sends the newest part of the journal to the family server (at most every half hour, unless now). */
     static void upload(Context ctx, boolean now) {
+        upload(ctx, now, false);
+    }
+
+    /** Direct: past the VPN, for when the connection itself is what does not work. */
+    static void upload(Context ctx, boolean now, boolean direct) {
         Context c = ctx.getApplicationContext();
         SharedPreferences prefs = c.getSharedPreferences("vpn", Context.MODE_PRIVATE);
         if (sending || (!now && System.currentTimeMillis() - prefs.getLong("diagAt", 0) < EVERY_MS)) return;
@@ -98,7 +103,7 @@ final class Diag {
                 String app = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
                 JSONObject body = new JSONObject().put("auth", login).put("log", text)
                         .put("device", Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE).put("app", app);
-                HttpURLConnection h = Updater.open("https://" + host + ":8443/api/winger_log");
+                HttpURLConnection h = Updater.open("https://" + host + ":8443/api/winger_log", direct);
                 h.setRequestMethod("POST");
                 h.setDoOutput(true);
                 h.setRequestProperty("Content-Type", "application/json");

@@ -139,6 +139,25 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 sleep 3
 echo "bridge: relay started, settings taken, addresses answered"
 
+# a button for each connection: the server's and the bridge's are on the screen; a tap on the server's switches on
+# through the server
+adb logcat -c
+adb shell am start -n $ACT >/dev/null
+sleep 3
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb shell cat /sdcard/ui.xml > "$OUT/conns.xml"
+grep -q 'text="Тест"' "$OUT/conns.xml" || fail "no button for the server"
+grep -q 'text="Мост CI"' "$OUT/conns.xml" || fail "no button for the bridge"
+B=$(tr '>' '\n' < "$OUT/conns.xml" | grep 'text="Тест"' | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 | tr -c '0-9' ' ')
+read -r X1 Y1 X2 Y2 <<< "$B"
+adb shell input tap $(((X1 + X2) / 2)) $(((Y1 + Y2) / 2))
+wait_log "connected via 10.0.2.2" 60 || fail "the server's button did not switch on through the server"
+sleep 2
+adb exec-out screencap -p > "$OUT/6a-conns.png"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (the connection's button)"
+echo "connection buttons: the server's and the bridge's shown, the server's switches on through it"
+
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install
 if [ -n "${ICON_APK:-}" ]; then
   adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"

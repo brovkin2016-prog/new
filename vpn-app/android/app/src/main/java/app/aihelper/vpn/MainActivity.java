@@ -58,8 +58,11 @@ public class MainActivity extends Activity implements State.Listener {
     private PowerButton power;
     private AuroraView aurora;
     private AvatarView avatar;
-    private TextView status, detail, ping, serverName, serverChange, appsName;
-    private LinearLayout serverCard, appsCard;
+    private TextView status, detail, ping, appsName;
+    private LinearLayout conns, appsCard;
+    private String connsKey = "";
+    private final List<LinearLayout> connRows = new ArrayList<>();
+    private final List<TextView> connNotes = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -169,24 +172,13 @@ public class MainActivity extends Activity implements State.Listener {
         root.addView(ping, lp);
         root.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
 
-        serverCard = new LinearLayout(this);
-        serverCard.setOrientation(LinearLayout.HORIZONTAL);
-        serverCard.setGravity(Gravity.CENTER_VERTICAL);
-        serverCard.setPadding(dp(18), dp(14), dp(18), dp(14));
-        serverCard.setBackground(press(round(card, 18, 0), 18));
-        serverCard.setOnClickListener(v -> choose());
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        col.addView(label("Сервер", 13, muted, false), new LinearLayout.LayoutParams(-2, -2));
-        serverName = label("", 17, text, true);
-        serverName.setSingleLine(true);
-        col.addView(serverName, new LinearLayout.LayoutParams(-2, -2));
-        serverCard.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
-        serverChange = label("Сменить", 15, accent, true);
-        serverCard.addView(serverChange, new LinearLayout.LayoutParams(-2, -2));
+        // a button for each connection (the usual server, the bridge…): a tap switches on through that one, a tap on
+        // the one that is on switches it off
+        conns = new LinearLayout(this);
+        conns.setOrientation(LinearLayout.VERTICAL);
         lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.bottomMargin = dp(8);
-        root.addView(serverCard, lp);
+        lp.bottomMargin = dp(2);
+        root.addView(conns, lp);
 
         // which apps go through it: by default only Instagram, Telegram, YouTube… — the rest straight, as without a VPN
         appsCard = new LinearLayout(this);
@@ -195,7 +187,7 @@ public class MainActivity extends Activity implements State.Listener {
         appsCard.setPadding(dp(18), dp(10), dp(18), dp(10));
         appsCard.setBackground(press(round(card, 18, 0), 18));
         appsCard.setOnClickListener(v -> chooseApps());
-        col = new LinearLayout(this);
+        LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.addView(label("Через VPN", 13, muted, false), new LinearLayout.LayoutParams(-2, -2));
         appsName = label("", 15, text, true);
@@ -253,11 +245,10 @@ public class MainActivity extends Activity implements State.Listener {
         boolean has = p != null;
         power.show(State.phase, has);
         aurora.show(State.phase);
-        serverCard.setVisibility(has ? View.VISIBLE : View.GONE);
+        conns.setVisibility(has ? View.VISIBLE : View.GONE);
         appsCard.setVisibility(has ? View.VISIBLE : View.GONE);
         if (has) {
-            serverName.setText(p.name);
-            serverChange.setText(all.size() > 1 ? "Сменить" : "⋯");
+            showConns(all);
             appsName.setText(Apps.summary(this));
         }
         String st, dt;
@@ -467,30 +458,99 @@ public class MainActivity extends Activity implements State.Listener {
                 .show();
     }
 
-    private void choose() {
-        List<Profile> all = Profile.all(this);
-        if (all.isEmpty()) return;
-        String[] names = new String[all.size()];
-        for (int i = 0; i < names.length; i++) names[i] = all.get(i).name;
+    /** The connection buttons: made again only when the list changes, their state lines follow the VPN. */
+    private void showConns(List<Profile> all) {
+        StringBuilder key = new StringBuilder();
+        for (Profile p : all) key.append(p.bridge ? "b|" : "s|").append(p.name).append('\n');
+        if (!key.toString().equals(connsKey)) {
+            connsKey = key.toString();
+            conns.removeAllViews();
+            connRows.clear();
+            connNotes.clear();
+            for (int i = 0; i < all.size(); i++) {
+                Profile p = all.get(i);
+                int at = i;
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(14), dp(12), dp(6), dp(12));
+                row.setOnClickListener(v -> {
+                    v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                    use(at);
+                });
+                row.setOnLongClickListener(v -> {
+                    remove(Profile.all(this), at);
+                    return true;
+                });
+                row.addView(label(p.bridge ? "🌉" : "🌐", 22, text, false), new LinearLayout.LayoutParams(dp(38), -2));
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(LinearLayout.VERTICAL);
+                TextView name = label(p.name, 16, text, true);
+                name.setGravity(Gravity.START);
+                name.setSingleLine(true);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                col.addView(name, new LinearLayout.LayoutParams(-2, -2));
+                TextView note = label("", 13, muted, false);
+                note.setGravity(Gravity.START);
+                col.addView(note, new LinearLayout.LayoutParams(-2, -2));
+                row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+                TextView more = label("⋯", 20, muted, true);
+                more.setPadding(dp(14), dp(6), dp(12), dp(6));
+                more.setOnClickListener(v -> remove(Profile.all(this), at));
+                row.addView(more, new LinearLayout.LayoutParams(-2, -2));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+                lp.bottomMargin = dp(8);
+                conns.addView(row, lp);
+                connRows.add(row);
+                connNotes.add(note);
+            }
+        }
         int cur = Math.max(0, Math.min(Profile.current(this), all.size() - 1));
-        int[] picked = {cur};
-        new AlertDialog.Builder(this)
-                .setTitle("Сервер")
-                .setSingleChoiceItems(names, cur, (d, w) -> picked[0] = w)
-                .setPositiveButton("Готово", (d, w) -> {
-                    if (picked[0] == cur) return;
-                    Profile.select(this, picked[0]);
-                    if (State.phase != State.Phase.OFF) start();
-                    changed();
-                })
-                .setNeutralButton("Удалить", (d, w) -> remove(all, picked[0]))
-                .setNegativeButton("Отмена", null)
-                .show();
+        for (int i = 0; i < connRows.size() && i < all.size(); i++) {
+            boolean chosen = i == cur;
+            String note;
+            int color = muted, edge = 0;
+            if (chosen && State.phase == State.Phase.ON) {
+                note = "● Включено — нажмите, чтобы выключить";
+                color = accent;
+                edge = accent;
+            } else if (chosen && State.phase != State.Phase.OFF) {
+                note = State.phase == State.Phase.CONNECTING ? "Подключаюсь…" : "Переподключаюсь…";
+                color = 0xFFD97706;
+                edge = 0xFFD97706;
+            } else {
+                note = all.get(i).bridge ? "Нажмите — через звонок Телемоста, когда обычный не работает"
+                        : "Нажмите, чтобы включить через этот сервер";
+                if (chosen) edge = dark ? 0xFF3B4556 : 0xFFD1D5DB;
+            }
+            TextView n = connNotes.get(i);
+            n.setText(note);
+            n.setTextColor(color);
+            LinearLayout row = connRows.get(i);
+            Object was = row.getTag();
+            if (was == null || (Integer) was != edge) {  // the frame only when it changes: a tap's ripple is not cut short
+                row.setTag(edge);
+                row.setBackground(press(round(card, 18, edge), 18));
+            }
+        }
+    }
+
+    /** A connection's button: on through it (switching over from another one), or off when it is the one that is on. */
+    private void use(int at) {
+        int cur = Profile.current(this);
+        if (at == cur && State.phase != State.Phase.OFF) {
+            startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
+            return;
+        }
+        Profile.select(this, at);
+        changed();
+        if (State.phase != State.Phase.OFF) start();  // the service closes the old connection and opens this one
+        else connect();
     }
 
     private void remove(List<Profile> all, int i) {
         new AlertDialog.Builder(this)
-                .setMessage("Удалить сервер «" + all.get(i).name + "» из приложения?")
+                .setMessage("Удалить подключение «" + all.get(i).name + "» из приложения?")
                 .setPositiveButton("Удалить", (d, w) -> {
                     int cur = Math.max(0, Math.min(Profile.current(this), all.size() - 1));
                     if (i == cur && State.phase != State.Phase.OFF) startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
