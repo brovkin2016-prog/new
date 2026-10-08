@@ -211,6 +211,16 @@ public class MainActivity extends Activity implements State.Listener {
         fromImage.setPadding(dp(12), dp(14), dp(12), dp(4));
         fromImage.setOnClickListener(v -> pickImage());
         root.addView(fromImage, new LinearLayout.LayoutParams(-2, -2));
+        // which Winger this is, and a check right now (otherwise it looks for a new version every few hours by itself)
+        TextView version = label("Winger " + BuildConfig.VERSION_NAME + " · Проверить обновление", 13, muted, false);
+        version.setPadding(dp(12), dp(10), dp(12), dp(4));
+        version.setOnClickListener(v -> {
+            Toast.makeText(this, "Проверяю обновление…", Toast.LENGTH_SHORT).show();
+            Updater.check(this, true);
+            BridgeSync.run(this, true);
+            Diag.upload(this, true);
+        });
+        root.addView(version, new LinearLayout.LayoutParams(-2, -2));
         setContentView(frame);
         // the screen comes in softly: each part rises into place, one after another
         for (int i = 0; i < root.getChildCount(); i++) {

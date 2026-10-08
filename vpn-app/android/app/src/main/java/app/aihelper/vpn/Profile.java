@@ -98,7 +98,7 @@ final class Profile {
             Uri u = Uri.parse(s);
             if (!"telemost".equals(u.getHost())) return null;
             String join = u.getQueryParameter("link");
-            if (join == null || !join.matches("https://telemost\\.yandex\\.(ru|com)/j/[0-9A-Za-z_-]{6,64}")) return null;
+            if (join == null || !join.matches("https://telemost(\\.360)?\\.yandex\\.(ru|com)/j/[0-9A-Za-z_-]{6,64}")) return null;
             Profile p = new Profile();
             p.bridge = true;
             p.link = s;

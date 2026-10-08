@@ -2,7 +2,6 @@ package app.aihelper.vpn;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -27,9 +26,16 @@ final class BridgeSync {
     static void run(Context ctx, boolean now) {
         Context c = ctx.getApplicationContext();
         SharedPreferences prefs = c.getSharedPreferences("vpn", Context.MODE_PRIVATE);
-        if (busy || (!now && System.currentTimeMillis() - prefs.getLong("bridgeSync", 0) < EVERY_MS)) return;
+        boolean have = false;
+        for (Profile p : Profile.all(c)) have |= p.bridge;
+        // without a bridge yet it looks again soon (the server may have just got it); with one, a few times a day
+        long every = have ? EVERY_MS : 20 * 60_000L;
+        if (busy || (!now && System.currentTimeMillis() - prefs.getLong("bridgeSync", 0) < every)) return;
         String host = Profile.homeHost(c), auth = ownLogin(c, host);
-        if (auth == null) return;
+        if (auth == null) {
+            Diag.i(c, "bridge sync: no own VPN login with the family server's name here");
+            return;
+        }
         busy = true;
         String login = auth;
         new Thread(() -> {
@@ -41,7 +47,9 @@ final class BridgeSync {
                 try (OutputStream o = h.getOutputStream()) {
                     o.write(new JSONObject().put("auth", login).toString().getBytes(StandardCharsets.UTF_8));
                 }
-                if (h.getResponseCode() == 200) {
+                int code = h.getResponseCode();
+                if (code != 200) Diag.i(c, "bridge sync: the server answered " + code);
+                if (code == 200) {
                     JSONArray links = new JSONObject(read(h.getInputStream())).optJSONArray("links");
                     int added = 0;
                     for (int i = 0; links != null && i < links.length(); i++) {
@@ -49,11 +57,11 @@ final class BridgeSync {
                         if (p != null && p.bridge && Profile.keep(c, p)) added++;
                     }
                     prefs.edit().putLong("bridgeSync", System.currentTimeMillis()).apply();
-                    Log.i("AIVPN", "bridge from the server: " + (links == null ? 0 : links.length()) + ", new " + added);
+                    Diag.i(c, "bridge from the server: " + (links == null ? 0 : links.length()) + ", new " + added);
                 }
                 h.disconnect();
             } catch (Exception e) {
-                Log.i("AIVPN", "bridge sync: " + e);
+                Diag.i(c, "bridge sync: " + e);
             } finally {
                 busy = false;
             }
