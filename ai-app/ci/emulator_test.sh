@@ -76,6 +76,27 @@ adb shell input keyevent KEYCODE_BACK
 sleep 3
 adb shell am force-stop $PKG
 
+# the WB Stream sign-in for the quick bridge: WB's own page opens in the app's window, with its «Готово» bar
+adb logcat -c
+adb shell am start -n $PKG/app.aihelper.family.MainActivity --ez test_wb true
+sleep 15
+adb exec-out screencap -p > "$OUT/wb-login.png"
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb shell cat /sdcard/ui.xml > "$OUT/wb-login.xml"
+adb logcat -d -s AIWB:V | tee "$OUT/wb-login.log"
+grep -q "login page opened" "$OUT/wb-login.log" || { echo "the WB sign-in window did not open"; exit 1; }
+grep -q "Готово" "$OUT/wb-login.xml" || { echo "the WB sign-in window has no «Готово»"; exit 1; }
+WBW=$(tr '>' '\n' < "$OUT/wb-login.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Готово|="✕"|Войдите в WB Stream' | head -12 | tr '\n' ' ')
+echo "WB page shows: ${WBW:-nothing yet (the site is outside: only reported)}"
+for _ in 1 2 3 4; do  # Back: through the page's own steps, then the window closes
+  adb shell input keyevent KEYCODE_BACK
+  sleep 2
+  adb logcat -d -s AIWB:V | grep -q "login done" && break
+done
+adb logcat -d -s AIWB:V | grep -q "login done false" || { echo "closing the WB window gave no answer"; exit 1; }
+echo "WB sign-in: window opens, closing answers «not signed in»"
+adb shell am force-stop $PKG
+
 if [ -n "${NEXT_APK:-}" ]; then
   OLD=$(vcode)
   adb push "$NEXT_APK" /data/local/tmp/next.apk

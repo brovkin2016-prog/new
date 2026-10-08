@@ -322,7 +322,7 @@
         scroll.append(card);
       }
       // bridges
-      if (d.bridges.length) {
+      {
         const card = el("div", { class: "card" }, el("h3", { text: "🌉 Мосты" }));
         for (const b of d.bridges) {
           card.append(el("div", { class: "row" }, el("span", { style: "font-size:18px", text: b.ok ? "🟢" : "🔴" }),
@@ -333,6 +333,9 @@
                 act({ op: "bridge_restart", id: b.id }, "🔄 Перезапускаю мост…");
               }
             } })));
+        }
+        if (!d.bridges.some((b) => b.id.startsWith("wb-"))) {
+          card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "⚡ Быстрый мост через WB Stream", onclick: wbBridge }));
         }
         const st = d.selftest;
         card.append(el("div", { style: "font-size:13px;color:var(--muted);margin:8px 0", text: !st ? "Автопроверка моста: ещё не было"
@@ -522,6 +525,45 @@
         else { if (done) done(end); setTimeout(load, 1500); }
       } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
     }
+    // the quick bridge over WB Stream: sign in to WB once (in the app — or the creator's cookies file in a browser),
+    // the server starts the bridge, Winger gets it by itself
+    function wbBridge() {
+      sheet("⚡ Мост через WB Stream", (box, close) => {
+        const go = async (token) => {
+          close();
+          try {
+            const end = await panel({ op: "bridge_wb", token }, (t) => toast(t, 150000));
+            document.querySelectorAll(".toast").forEach((t) => t.remove());
+            if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
+            toast("✅ Мост WB Stream работает — Winger возьмёт его сам", 6000);
+            load();
+          } catch (e) { toast(problem(e)); }
+        };
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: "Мост через видеозвонки WB Stream "
+          + "(Wildberries): его канал данных обычно быстрее Телемоста, а WB в «белых списках». Нужен вход в WB Stream один раз — "
+          + "номер телефона и код из СМС на странице WB. Дальше сервер держит мост сам, а Winger подключается к нему без настроек." }));
+        if (window.AIBridge && window.AIBridge.wbLogin) {
+          box.append(el("button", { class: "btn wide", text: "🔑 Войти в WB Stream", onclick: async () => {
+            const r = await nativeCall("wbLogin");
+            if (!r.ok) { toast("Вход в WB не закончен", 4000); return; }
+            go(r.text);
+          } }));
+        } else {  // a browser: the creator app's cookies file (cookies-wbstream.json) instead of the sign-in
+          const file = el("input", { type: "file", accept: ".json,application/json", style: "display:none" });
+          file.onchange = async () => {
+            try {
+              const js = JSON.parse(await file.files[0].text());
+              const c = (Array.isArray(js) ? js : js.cookies || []).find((x) => x && x.name === "wb_access_token");
+              if (!c || !c.value) { toast("⚠️ В файле нет входа WB (wb_access_token)", 6000); return; }
+              go(c.value);
+            } catch (e) { toast("⚠️ Это не файл cookies-wbstream.json", 5000); }
+          };
+          box.append(file, el("button", { class: "btn wide", text: "📂 Файл cookies-wbstream.json", onclick: () => file.click() }),
+            el("div", { style: "font-size:12px;color:var(--muted);margin-top:8px", text: "Файл — из WhitelistBypass Creator: WBStream → войти → Export Cookies. "
+              + "В приложении на телефоне вход проще: кнопка «Войти в WB Stream»." }));
+        }
+      });
+    }
     function bridgeLink(b) {
       sheet("🔗 " + b.label, (box) => {
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Ссылку вставляют в приложение моста (whitelist-bypass) на этом устройстве." }),
@@ -529,14 +571,19 @@
           el("div", { class: "big-actions" },
             el("button", { class: "btn", text: "📋 Копировать", onclick: () => copyText(b.link) }),
             el("button", { class: "btn line", text: "📤 Поделиться", onclick: () => (navigator.share ? navigator.share({ text: b.link }).catch(() => copyText(b.link)) : copyText(b.link)) })));
-        // a Telemost bridge right inside Winger, with the settings that work best (only the owner sees this)
-        if (/^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(b.link || "")) {
-          const w = "winger-bridge://telemost?link=" + encodeURIComponent(b.link) + "&fps=24&batch=45&reliable=1&dual=0#"
-            + encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
+        // the bridge right inside Winger, with that service's best settings (only the owner sees this)
+        const name = encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
+        const tm = /^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(b.link || "");
+        const wb = b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(b.link || "");
+        if (wb) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Войти в WB заново (если мост перестал работать)", onclick: wbBridge }));
+        if (tm || wb) {
+          const w = tm ? "winger-bridge://telemost?link=" + encodeURIComponent(b.link) + "&fps=24&batch=45&reliable=1&dual=0#" + name
+            : "winger-bridge://wbstream?room=" + encodeURIComponent(b.link) + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name;
           box.append(el("h3", { style: "margin:16px 0 6px", text: "📲 Мост в Winger — только у вас" }),
             el("div", { style: "font-size:14px;color:var(--muted);margin-bottom:10px",
-              text: "В Winger появится сервер «Мост»: звонок Телемоста, Video, VP8 24/45, Reliable (KCP) — настраивать ничего не нужно. "
-                + "При шатдауне выберите его в Winger и нажмите большую кнопку; whitelist-bypass и v2RayTun тогда не нужны (выключите их)." }),
+              text: (tm ? "В Winger появится «Мост»: звонок Телемоста, видео VP8 24/45, надёжная доставка (KCP)"
+                : "В Winger появится «Мост»: WB Stream, сначала быстрый канал данных, если он не пойдёт — видео 24/30 с надёжной доставкой")
+                + " — настраивать ничего не нужно. Winger и так получает его сам; эта кнопка — если нужно сразу." }),
             el("a", { class: "btn wide", href: w, style: "text-decoration:none;text-align:center;display:block", text: "📲 Открыть в Winger" }),
             el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Скопировать ссылку для Winger",
               onclick: () => copyText(w) }));

@@ -50,6 +50,12 @@ final class Bridge {
         act.runOnUiThread(() -> Hosting.login(act, ok -> call(id, ok, ok ? "ok" : "cancel")));
     }
 
+    // the owner's WB Stream account for the quick bridge: signed in once on WB's own page (see WbLogin)
+    @JavascriptInterface
+    public void wbLogin(String id) {
+        act.runOnUiThread(() -> WbLogin.open(act, t -> call(id, t != null, t == null ? "cancel" : t)));
+    }
+
     @JavascriptInterface
     public void hostingBalance(String id) {
         String ua = WebSettings.getDefaultUserAgent(act);

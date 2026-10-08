@@ -167,6 +167,11 @@ public class MainActivity extends Activity {
             Hosting.login(this, ok -> android.util.Log.i("AIHOST", "login done " + ok));
             return;
         }
+        if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_wb", false)) {  // the emulator test only
+            i.removeExtra("test_wb");
+            WbLogin.open(this, t -> android.util.Log.i("AIWB", "login done " + (t != null)));
+            return;
+        }
         if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_install", false)) {  // the emulator test only
             i.removeExtra("test_install");
             Updater.testInstall(this);
