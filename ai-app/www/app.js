@@ -1239,7 +1239,7 @@
       if (data.vless !== null) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.vless ? "🟢" : "🔴") + " Запасной VLESS (TCP 443)",
         el("small", { text: "Когда Hysteria режут, работает он" }))));
       if (data.tg !== null && data.tg !== undefined) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.tg ? "🟢" : "🔴") + " Telegram без VPN",
-        el("small", { text: "Для iPhone и компьютеров: ссылка — в карточке человека и на странице «VPN и Telegram»" }))));
+        el("small", { text: "Для iPhone и компьютеров: ссылка — в карточке человека и в ссылке «VPN и Telegram»" }))));
       scroll.append(head, diskRow(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
         el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на приложение Winger VPN (24 ч)",
           onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }));
@@ -1257,17 +1257,19 @@
     }
     // a temporary link (24 h) for downloading an app or connecting the VPN: copied and sent however the owner likes
     // ---- links that open everywhere in Russia: a folder on the owner's Yandex Disk, deleted after 24 hours ----
+    const diskRows = new Set();  // every «📦 Ссылки» row on screen: all of them change when the Disk is connected
     function diskRow() {
       const row = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "📦 Ссылки: проверяю…" }));
       const fill = (d) => {
         row.innerHTML = "";
         row.append(el("div", { class: "row" },
-          el("div", { class: "grow" }, d.on ? "📦 Ссылки — на Яндекс Диске ✓" : "📦 Ссылки без VPN могут не открыться",
+          el("div", { class: "grow" }, d.on ? "📦 Ссылки — на Яндекс Диске ✓" : "📦 Для ссылок подключите Яндекс Диск",
             el("small", { text: d.on ? `Открываются в любом браузере в России, сами удаляются через 24 ч. Аккаунт: ${d.login || "—"}`
-              : "Подключите Яндекс Диск — ссылки будут открываться везде. Займёт минуту." })),
+              : "Ссылки на 24 часа кладутся на ваш Яндекс Диск — так они открываются в любом браузере. Займёт минуту." })),
           el("button", { class: "btn" + (d.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: d.on ? "⚙️" : "Подключить",
             onclick: () => diskSetup(d, fill) })));
       };
+      diskRows.add((d) => (row.isConnected ? fill(d) : null));
       panel({ op: "disk_get" }).then((d) => (d.t === "done" ? fill(d) : row.remove())).catch(() => row.remove());
       return row;
     }
@@ -1283,6 +1285,7 @@
             if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
             toast(`✅ Подключён: ${end.login || "Яндекс Диск"}` + (end.free_gb !== undefined ? ` · свободно ${end.free_gb} ГБ` : ""), 5000);
             close();
+            diskRows.forEach((f) => f(end));
             if (after) after(end);
           } catch (e) { toast(problem(e)); }
         };
@@ -1306,8 +1309,9 @@
             try {
               const end = await panel({ op: "disk_off" });
               close();
+              diskRows.forEach((f) => f(end));
               if (after) after(end);
-              toast("Отключён: ссылки снова ведут на сервер");
+              toast("Отключён: ссылки не делаются, пока не подключите снова");
             } catch (e) { toast(problem(e)); }
           } }) : "");
       });
@@ -1318,22 +1322,23 @@
       toast("⏳ Готовлю ссылку…", 120000);
       try {
         const end = await panel(body, (t) => toast("⏳ " + t.replace(/^\S+\s/, ""), 120000));
-        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+        if (end.need_disk) {  // no Disk yet: connect it, then the same link is made at once
+          document.querySelectorAll(".toast").forEach((t) => t.remove());
+          diskSetup(end.yadisk || {}, (d) => { if (d.on) setTimeout(() => makeLink(body, title), 300); });
+          return;
+        }
+        if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
         document.querySelectorAll(".toast").forEach((t) => t.remove());
         const until = new Date(end.exp * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
-        const disk = end.via === "disk";
         const msg = end.text || end.url;
-        sheet("🔗 " + title, (box, close) => {
+        sheet("🔗 " + title, (box) => {
           box.append(
-            el("div", { style: "font-size:14px;margin:-6px 0 10px;color:" + (disk ? "var(--muted)" : "var(--danger)"),
-              text: disk ? `На Яндекс Диске: откроется в любом браузере в России, с VPN и без. Удалится ${until}.`
-                : (end.warn || "Ссылка ведёт на сервер за границей: в мобильной сети без VPN может не открыться.") + ` Действует до ${until}.` }),
+            el("div", { style: "font-size:14px;margin:-6px 0 10px;color:var(--muted)",
+              text: `На Яндекс Диске: откроется в любом браузере в России, с VPN и без. Удалится ${until}.` }),
             el("div", { style: "font:14px/1.45 system-ui,sans-serif;white-space:pre-wrap;word-break:break-word;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px;user-select:all", text: msg }),
             el("button", { class: "btn wide", text: "📋 Копировать сообщение", onclick: () => { copyText(msg); toast("✅ Скопировано — отправьте как удобно"); } }),
             el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Только ссылку", onclick: () => { copyText(end.url); toast("✅ Ссылка скопирована"); } }),
-            el("a", { class: "btn line wide", href: end.url, style: "display:block;text-align:center;text-decoration:none;margin-top:8px", text: "👀 Открыть и посмотреть" }),
-            disk ? "" : el("button", { class: "btn soft wide", style: "margin-top:14px", text: "📦 Подключить Яндекс Диск — чтобы открывалось везде",
-              onclick: () => { close(); diskSetup(end.yadisk || {}, null); } }));
+            el("a", { class: "btn line wide", href: end.url, style: "display:block;text-align:center;text-decoration:none;margin-top:8px", text: "👀 Открыть и посмотреть" }));
         });
       } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
     }
