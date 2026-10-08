@@ -1,0 +1,32 @@
+# Publishes a new version of the family server: the installer, encrypted for that server's own key
+# (server/update-key.pub), as the release server-vNN. The server sees it (srv-update check) and the owner installs it
+# from the app with one tap. Nothing readable is published: the installer stays private, only its encrypted form is here.
+name: server
+
+on:
+  push:
+    paths: ["server/release/release.json"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the encrypted server version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          cd server/release
+          V=$(jq -r .version release.json); SHA=$(jq -r .sha256 release.json); FP=$(jq -r .for release.json)
+          [[ "$V" =~ ^[0-9]+$ && "$SHA" =~ ^[0-9a-f]{64}$ && "$FP" =~ ^[0-9a-f]{16}$ ]] || { echo "bad release.json"; exit 1; }
+          # the key it is encrypted for must be the server's key kept in this repository
+          [ "$(openssl pkey -pubin -in ../update-key.pub -outform DER | sha256sum | cut -c1-16)" = "$FP" ] || { echo "not for server/update-key.pub"; exit 1; }
+          { jq -r .notes release.json; printf '\nsha256: %s\nfor: %s\n' "$SHA" "$FP"; } > notes.txt
+          gh release delete "server-v$V" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "server-v$V" installer.enc key.enc --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Сервер v$V" --notes-file notes.txt

@@ -3,6 +3,11 @@
 "use strict";
 (function () {
   const Native = window.AIBridge || null;
+  // a part that is not there (cond ? el(…) : null) is left out, not shown as the word «null»
+  const nativeAppend = Element.prototype.append;
+  Element.prototype.append = function (...parts) {
+    return nativeAppend.apply(this, parts.filter((x) => x !== null && x !== undefined && x !== false));
+  };
   const $ = (s, root) => (root || document).querySelector(s);
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -1365,6 +1370,56 @@
         : Math.floor(sec / 86400) + " д " + Math.round(sec % 86400 / 3600) + " ч";
     }
     const UNIT = { failed: "остановился", inactive: "выключен", activating: "запускается", deactivating: "останавливается" };
+    // ---- new versions of the server: built elsewhere, encrypted for this server, installed by one tap ----
+    function updateCard(u) {
+      const card = el("div", { class: "card" + (u.new ? " bad" : "") }, el("h3", { text: "⬆️ Версия сервера" }));
+      const p = u.progress || {};
+      const running = p.state === "running" && Date.now() / 1000 - (p.at || 0) < 3600;
+      const line = (text, sub) => card.append(el("div", { class: "row" }, el("div", { class: "grow" }, text, sub ? el("small", { text: sub }) : "")));
+      if (!u.ready) {
+        line("Обновления из приложения ещё не включены", "Нужна одна установка вручную — дальше обновления здесь.");
+        return card;
+      }
+      if (running) line(`⏳ Обновляется до v${p.version}…`, "5–10 минут. VPN может переподключиться, приложение — ненадолго потерять связь.");
+      else if (u.new) line(`Доступна v${u.latest} · у вас v${u.current}`, u.notes || "");
+      else line(`v${u.current} — последняя ✓`, u.checked ? "Проверено " + new Date(u.checked * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "");
+      if (!running && p.state === "finished" && p.version && !p.ok) line(`⚠️ Обновление до v${p.version} не прошло`, "Сервер работает на прежней версии. Подробности — в событиях.");
+      if (u.foreign) line("Новая версия собрана не для этого сервера", "Пришлите ключ обновлений тому, кто её собирает (кнопка ниже).");
+      const row = el("div", { class: "big-actions", style: "margin-top:8px" });
+      if (u.new && !running) {
+        row.append(el("button", { class: "btn", text: "⬆️ Обновить", onclick: async () => {
+          if (!(await confirmBox(`Обновить сервер до v${u.latest}? Займёт 5–10 минут, VPN может переподключиться. Если что-то пойдёт не так, останется прежняя версия.`, "Обновить"))) return;
+          try {
+            const end = await panel({ op: "server_update" });
+            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+            toast("⏳ Обновление началось. Когда закончится — придёт уведомление.", 6000);
+            setTimeout(load, 4000);
+          } catch (e) { toast(problem(e)); }
+        } }));
+      }
+      if (!running) {
+        row.append(el("button", { class: "btn line", text: "🔎 Проверить", onclick: async () => {
+          try {
+            const end = await panel({ op: "server_check" }, (t) => toast(t, 30000));
+            document.querySelectorAll(".toast").forEach((t) => t.remove());
+            if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+            const v = end.update || {};
+            toast(v.new ? `⬆️ Доступна v${v.latest}` : v.foreign ? "Новая версия собрана не для этого сервера" : `v${v.current} — последняя`, 4000);
+            load();
+          } catch (e) { toast(problem(e)); }
+        } }));
+      }
+      card.append(row);
+      if (u.key) {
+        card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "🔑 Ключ обновлений", onclick: () => sheet("🔑 Ключ обновлений", (box) => {
+          box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Открытый ключ этого сервера: им шифруются новые версии, "
+            + "чтобы поставить их мог только он. Ключ не секретный — один раз пришлите его тому, кто собирает обновления." }),
+          el("div", { style: "font:11px/1.35 ui-monospace,monospace;word-break:break-all;white-space:pre-wrap;background:var(--card);border-radius:12px;padding:10px;margin-bottom:12px", text: u.key }),
+          el("button", { class: "btn wide", text: "📋 Скопировать ключ", onclick: () => { copyText(u.key); toast("✅ Ключ скопирован — отправьте его"); } }));
+        }) }));
+      }
+      return card;
+    }
     function drawServer(d) {
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
@@ -1389,6 +1444,7 @@
         stat("Нагрузка", `${Math.round(100 * d.load[0] / d.cpus)}%`, `ядер: ${d.cpus} · работает ${dur(d.uptime)}`, 100 * d.load[0] / d.cpus),
         stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
       if (host) drawHosting(host);
+      if (d.update) scroll.append(updateCard(d.update));
       // what takes the memory and the processor: the VPN and the assistant apart
       if (d.services && d.services.length) {
         const mb = (v) => (v === null || v === undefined ? "—" : v >= 1024 ? (v / 1024).toFixed(1) + " ГБ" : v + " МБ");
