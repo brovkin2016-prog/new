@@ -75,6 +75,7 @@ public class MainActivity extends Activity implements State.Listener {
         boolean packaged = packagedProfile();
         build();
         if (packaged) Toast.makeText(this, "Подключение уже внутри — нажмите большую кнопку", Toast.LENGTH_LONG).show();
+        offerTile();
         // a link that opened the app counts once: not again when Android recreates the screen or reopens it from Recents
         if (saved == null && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) handle(getIntent());
     }
@@ -367,12 +368,28 @@ public class MainActivity extends Activity implements State.Listener {
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getDataString() != null) add(i.getDataString());
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_all", false)) Apps.setOnlyChosen(this, false);  // the emulator test only
         if (BuildConfig.DEBUG) VpnSvc.testMapdns = i.getBooleanExtra("test_mapdns", false);  // the emulator test only
+        if (BuildConfig.DEBUG && i.hasExtra("test_back")) VpnSvc.testBackMs = i.getLongExtra("test_back", 0);  // the emulator test only
+        String testRemove = BuildConfig.DEBUG ? i.getStringExtra("test_remove") : null;  // the emulator test only
+        if (testRemove != null) {
+            List<Profile> all = Profile.all(this);
+            for (int k = all.size() - 1; k >= 0; k--) if (all.get(k).name.equals(testRemove)) all.remove(k);
+            Profile.save(this, all);
+            Profile.select(this, 0);
+            changed();
+        }
+        String testSelect = BuildConfig.DEBUG ? i.getStringExtra("test_select") : null;  // the emulator test only
+        if (testSelect != null) {
+            List<Profile> all = Profile.all(this);
+            for (int k = 0; k < all.size(); k++) if (all.get(k).name.equals(testSelect)) Profile.select(this, k);
+            changed();
+        }
         String testApps = BuildConfig.DEBUG ? i.getStringExtra("test_apps") : null;  // the emulator test only
         if (testApps != null) {
             Apps.setOnlyChosen(this, true);
             for (String pkg : testApps.split(",")) Apps.choose(this, pkg.trim(), true);
             appsChanged();
         }
+        if (i.getBooleanExtra("connect", false) && Profile.chosen(this) != null && State.phase == State.Phase.OFF) connect();  // the tile
         String testPick = BuildConfig.DEBUG ? i.getStringExtra("test_pick") : null;  // the emulator test only
         if (testPick != null) pickApps(testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
@@ -418,7 +435,7 @@ public class MainActivity extends Activity implements State.Listener {
         }
         boolean was = State.phase != State.Phase.OFF;
         Profile.add(this, p);
-        Toast.makeText(this, "Добавлен сервер «" + p.name + "»", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, (p.bridge ? "Добавлен мост «" : "Добавлен сервер «") + p.name + "»", Toast.LENGTH_SHORT).show();
         if (was) start();  // it was on: go on with the new server
         changed();
     }
@@ -459,6 +476,21 @@ public class MainActivity extends Activity implements State.Listener {
                 .show();
     }
 
+    /** Once, on Android 13+: «add Winger to the shade?» — then it is switched on and off from there. */
+    private void offerTile() {
+        SharedPreferences prefs = getSharedPreferences("vpn", MODE_PRIVATE);
+        if (Build.VERSION.SDK_INT < 33 || prefs.getBoolean("tileAsked", false) || Profile.chosen(this) == null) return;
+        prefs.edit().putBoolean("tileAsked", true).apply();
+        android.app.StatusBarManager sb = getSystemService(android.app.StatusBarManager.class);
+        if (sb == null) return;
+        try {
+            sb.requestAddTileService(new android.content.ComponentName(this, VpnTile.class), getString(R.string.brand),
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_stat), getMainExecutor(), r -> { });
+        } catch (RuntimeException ignored) {
+            // the phone does not offer it: the tile is still in the shade's editor
+        }
+    }
+
     /** The connection buttons: made again only when the list changes, their state lines follow the VPN. */
     private void showConns(List<Profile> all) {
         StringBuilder key = new StringBuilder();
@@ -497,7 +529,7 @@ public class MainActivity extends Activity implements State.Listener {
                 row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
                 TextView more = label("⋯", 20, muted, true);
                 more.setPadding(dp(14), dp(6), dp(12), dp(6));
-                more.setOnClickListener(v -> remove(Profile.all(this), at));
+                more.setOnClickListener(v -> options(at));
                 row.addView(more, new LinearLayout.LayoutParams(-2, -2));
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
                 lp.bottomMargin = dp(8);
@@ -507,22 +539,28 @@ public class MainActivity extends Activity implements State.Listener {
             }
         }
         int cur = Math.max(0, Math.min(Profile.current(this), all.size() - 1));
+        int act = activeIndex(all);
+        boolean on = State.phase != State.Phase.OFF;
         for (int i = 0; i < connRows.size() && i < all.size(); i++) {
-            boolean chosen = i == cur;
+            Profile p = all.get(i);
             String note;
             int color = muted, edge = 0;
-            if (chosen && State.phase == State.Phase.ON) {
-                note = "● Включено — нажмите, чтобы выключить";
+            if (on && i == act && State.phase == State.Phase.ON) {
+                note = State.auto ? "● Включено само: выбранный не отвечает" : "● Включено — нажмите, чтобы выключить";
                 color = accent;
                 edge = accent;
-            } else if (chosen && State.phase != State.Phase.OFF) {
+            } else if (on && i == act) {
                 note = State.phase == State.Phase.CONNECTING ? "Подключаюсь…" : "Переподключаюсь…";
                 color = 0xFFD97706;
                 edge = 0xFFD97706;
+            } else if (on && i == cur) {
+                note = "Не отвечает — нажмите, чтобы попробовать снова";
+                color = 0xFFD97706;
+                edge = dark ? 0xFF3B4556 : 0xFFD1D5DB;
             } else {
-                note = all.get(i).bridge ? "Нажмите — через звонок Телемоста, когда обычный не работает"
+                note = p.bridge ? "Нажмите — через " + VpnSvc.service(p) + ", когда обычный не работает"
                         : "Нажмите, чтобы включить через этот сервер";
-                if (chosen) edge = dark ? 0xFF3B4556 : 0xFFD1D5DB;
+                if (i == cur) edge = dark ? 0xFF3B4556 : 0xFFD1D5DB;
             }
             TextView n = connNotes.get(i);
             n.setText(note);
@@ -536,10 +574,15 @@ public class MainActivity extends Activity implements State.Listener {
         }
     }
 
-    /** A connection's button: on through it (switching over from another one), or off when it is the one that is on. */
+    /** The row of the connection in use now (the chosen one, or the one Winger moved to by itself). */
+    private int activeIndex(List<Profile> all) {
+        for (int i = 0; i < all.size(); i++) if (all.get(i).link.equals(State.activeLink)) return i;
+        return Math.max(0, Math.min(Profile.current(this), all.size() - 1));
+    }
+
+    /** A connection's button: on through it (switching over from another one), or off when it is the one in use. */
     private void use(int at) {
-        int cur = Profile.current(this);
-        if (at == cur && State.phase != State.Phase.OFF) {
+        if (at == activeIndex(Profile.all(this)) && State.phase != State.Phase.OFF) {
             startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
             return;
         }
@@ -547,6 +590,25 @@ public class MainActivity extends Activity implements State.Listener {
         changed();
         if (State.phase != State.Phase.OFF) start();  // the service closes the old connection and opens this one
         else connect();
+    }
+
+    /** ⋯ on a connection: the automatic choice (for all of them) and removing this one. */
+    private void options(int at) {
+        boolean auto = Apps.autoBridge(this);
+        String[] items = {auto ? "✓ Сам выбирать рабочее подключение" : "Сам выбирать рабочее подключение", "Удалить подключение"};
+        new AlertDialog.Builder(this)
+                .setTitle(Profile.all(this).get(at).name)
+                .setItems(items, (d, w) -> {
+                    if (w == 1) {
+                        remove(Profile.all(this), at);
+                        return;
+                    }
+                    Apps.setAutoBridge(this, !auto);
+                    Toast.makeText(this, !auto ? "Если выбранный не отвечает — Winger сам включит другой (мост) и вернётся, когда тот оживёт"
+                            : "Только выбранное подключение", Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
     }
 
     private void remove(List<Profile> all, int i) {

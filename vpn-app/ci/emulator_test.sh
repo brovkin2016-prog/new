@@ -171,6 +171,60 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (the connection's button)"
 echo "connection buttons: the server's and the bridge's shown, the server's switches on through it"
 
+# the automatic choice: the chosen server does not answer → Winger moves to another one by itself; once the chosen one
+# answers again (a second test server comes up on its port), it goes back to it
+DEAD='hysteria2://family:test-pass-123@10.0.2.2:4999/?sni=vpn.test.local&insecure=1#Запасной'
+adb logcat -c
+adb shell "am start -a android.intent.action.VIEW -d '$DEAD' -n $ACT" >/dev/null
+sleep 2
+adb shell am start -n $ACT --el test_back 20000 --ez test_connect true >/dev/null
+wait_log "auto: «Запасной» не отвечает" 150 || fail "did not move on by itself when the chosen server did not answer"
+wait_log "connected via 10.0.2.2" 60 || fail "the other server did not connect after the automatic move"
+sleep 2
+adb exec-out screencap -p > "$OUT/7-auto.png"
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb shell cat /sdcard/ui.xml | grep -q "Включено само" || fail "the screen does not say it moved by itself"
+sed -e 's/^listen: :4443/listen: :4999/' -e '/^trafficStats:/,$d' /tmp/t/hy.yaml > /tmp/t/hy2.yaml
+( cd /tmp/t && HYSTERIA_LOG_LEVEL=info nohup ./hysteria server -c hy2.yaml > hy2.log 2>&1 & )
+wait_log "auto: «Запасной» answers again" 120 || fail "did not notice the chosen server answering again"
+wait_log "Выбранный сервер снова отвечает" 30 || fail "did not go back to the chosen server"
+for _ in $(seq 1 60); do [ "$(adb logcat -d -s AIVPN:I | grep -c 'connected via 10.0.2.2')" -ge 2 ] && break; sleep 1; done
+[ "$(adb logcat -d -s AIVPN:I | grep -c 'connected via 10.0.2.2')" -ge 2 ] || fail "not connected again through the chosen server"
+grep -q "client connected" /tmp/t/hy2.log || fail "the chosen server saw no connection"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (automatic choice)"
+echo "automatic choice: moved to the other server by itself, went back once the chosen one answered"
+
+# the shade's tile: Winger on and off without opening the app (if this Android's shell can press a tile)
+adb shell am start -n $ACT --es test_select Тест >/dev/null
+sleep 2
+adb shell am force-stop $PKG
+adb logcat -c
+adb shell cmd statusbar add-tile $PKG/.VpnTile >/dev/null 2>&1
+if adb shell cmd statusbar click-tile $PKG/.VpnTile 2>&1 | grep -qiE "unknown|error|exception"; then
+  echo "note: this emulator's shell cannot press a tile"
+else
+  wait_log "connected via" 60 || fail "the tile did not switch the VPN on"
+  adb shell cmd statusbar click-tile $PKG/.VpnTile >/dev/null 2>&1
+  wait_log "stopped" 20 || fail "the tile did not switch the VPN off"
+  echo "tile: on and off from the shade"
+fi
+
+# other call services for the bridge: a WB Stream bridge starts the relay in its own mode with its room and the data
+# channel first (the call itself needs the family server's WB account, as with Telemost)
+WB='winger-bridge://wbstream?room=wbstream%3A%2F%2F0123456789abcdef&mode=dc#МостWB'
+adb logcat -c
+adb shell "am start -n $ACT --es test_bridge '$WB' --ez test_connect true" >/dev/null
+for _ in $(seq 1 40); do adb logcat -d -s AIVPN:V | grep -q "wbstream-joiner: room=" && break; sleep 1; done
+adb logcat -d -s AIVPN:V | grep -E "bridge|relay" | head -12 | tee "$OUT/bridge-wb.log"
+grep -q "bridge: READY" "$OUT/bridge-wb.log" || fail "the WB Stream relay did not start"
+grep -q "wbstream-joiner: room=wbstream://0123456789abcdef" "$OUT/bridge-wb.log" || fail "the WB Stream relay did not take the room"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+sleep 3
+echo "bridge WB Stream: relay started in its mode, room taken"
+adb shell "am start -n $ACT --es test_remove МостWB" >/dev/null; sleep 1
+adb shell am start -n $ACT --es test_remove Запасной >/dev/null; sleep 1
+
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install
 if [ -n "${ICON_APK:-}" ]; then
   adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"

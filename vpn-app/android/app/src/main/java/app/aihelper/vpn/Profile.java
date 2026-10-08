@@ -26,6 +26,8 @@ final class Profile {
     boolean bridge, reliable, dualTrack;
     String joinLink;
     int fps, batch;
+    String platform = "";   // a bridge's call service: telemost, wbstream, dion, bitrix
+    String tunnelMode = ""; // WB Stream and Bitrix: "dc" (a data channel — quicker) or "video"
 
     /** The first hysteria2:// link anywhere in the text (a message, a QR code), or null. */
     static Profile find(String text) {
@@ -92,30 +94,92 @@ final class Profile {
         }
     }
 
-    /** winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F…&fps=24&batch=45&reliable=1&dual=0#name */
+    /**
+     * A bridge through a call service that stays reachable when only «white-listed» services work:
+     *   winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F…&fps=24&batch=45&reliable=1&dual=0#name
+     *   winger-bridge://wbstream?room=wbstream%3A%2F%2F…&mode=dc#name      (WB Stream; dc is quicker, video the fallback)
+     *   winger-bridge://dion?room=dion%3A%2F%2F…#name
+     *   winger-bridge://bitrix?link=https%3A%2F%2F…bitrix24.ru%2Fvideo%2F…&mode=video#name
+     */
     private static Profile parseBridge(String s) {
         try {
             Uri u = Uri.parse(s);
-            if (!"telemost".equals(u.getHost())) return null;
-            String join = u.getQueryParameter("link");
-            if (join == null || !join.matches("https://telemost(\\.360)?\\.yandex\\.(ru|com)/j/[0-9A-Za-z_-]{6,64}")) return null;
+            String plat = u.getHost() == null ? "" : u.getHost().toLowerCase(java.util.Locale.ROOT);
+            String join;
+            String label;
+            switch (plat) {
+                case "telemost":
+                    join = u.getQueryParameter("link");
+                    if (join == null || !join.matches("https://telemost(\\.360)?\\.yandex\\.(ru|com)/j/[0-9A-Za-z_-]{6,64}")) return null;
+                    label = "Мост Телемост";
+                    break;
+                case "wbstream":
+                    join = u.getQueryParameter("room");
+                    if (join == null || !join.matches("(wbstream://|https://stream\\.wb\\.ru/room/)?[0-9A-Za-z_-]{6,64}")) return null;
+                    label = "Мост WB Stream";
+                    break;
+                case "dion":
+                    join = u.getQueryParameter("room");
+                    if (join == null || !join.matches("(dion://|https://dion\\.vc/event/)?[0-9A-Za-z_-]{4,64}")) return null;
+                    label = "Мост DION";
+                    break;
+                case "bitrix":
+                    join = u.getQueryParameter("link");
+                    if (join == null || !join.matches("https://[0-9A-Za-z-]{2,63}\\.bitrix24\\.(ru|by|kz|com)/video/[0-9A-Za-z_-]{2,64}")) return null;
+                    label = "Мост Битрикс24";
+                    break;
+                default:
+                    return null;
+            }
             Profile p = new Profile();
             p.bridge = true;
+            p.platform = plat;
             p.link = s;
             p.joinLink = join;
-            p.host = "telemost.yandex.ru";
+            p.host = plat + ".bridge";
             p.ports = "443";
             p.auth = join;  // the same call is the same bridge: a second copy of the link is not added
             p.fps = number(u.getQueryParameter("fps"), 24, 1, 60);
             p.batch = number(u.getQueryParameter("batch"), 45, 1, 200);
             p.reliable = !"0".equals(u.getQueryParameter("reliable"));
             p.dualTrack = "1".equals(u.getQueryParameter("dual"));
+            String mode = u.getQueryParameter("mode");
+            // only WB Stream and Bitrix have a data channel to choose; WB tries it first, Bitrix the video
+            if (plat.equals("wbstream")) p.tunnelMode = "video".equals(mode) ? "video" : "dc";
+            else if (plat.equals("bitrix")) p.tunnelMode = "dc".equals(mode) ? "dc" : "video";
             String frag = u.getFragment();
-            p.name = frag != null && !frag.trim().isEmpty() ? frag.trim() : "Мост Телемост";
+            p.name = frag != null && !frag.trim().isEmpty() ? frag.trim() : label;
             return p;
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    String platformOrDefault() {
+        return platform.isEmpty() ? "telemost" : platform;
+    }
+
+    /** The relay's mode for this bridge's service. */
+    String relayMode() {
+        return platform.isEmpty() ? "telemost-headless-joiner" : platform + "-headless-joiner";
+    }
+
+    /** What the relay is told on «JOIN:» for this service (the call, the name in it, the tunnel's settings). */
+    String joinParams(String tunnel) throws org.json.JSONException {
+        org.json.JSONObject j = new org.json.JSONObject().put("displayName", "Участник");
+        switch (platform.isEmpty() ? "telemost" : platform) {
+            case "wbstream":
+            case "dion":
+                j.put("roomId", joinLink);
+                break;
+            default:
+                j.put("joinLink", joinLink);
+        }
+        if (!platform.equals("dion")) {
+            j.put("vp8Fps", fps).put("vp8Batch", batch).put("reliable", reliable).put("dualTrack", dualTrack);
+            if (platform.equals("wbstream") || platform.equals("bitrix")) j.put("tunnelMode", tunnel);
+        }
+        return j.toString();
     }
 
     private static int number(String v, int dflt, int min, int max) {
@@ -203,6 +267,10 @@ final class Profile {
         int at = -1;
         for (int i = 0; i < list.size(); i++) {
             Profile o = list.get(i);
+            if (o.bridge || p.bridge) {  // a bridge: one per call service, a new call of it replaces the old one
+                if (o.bridge && p.bridge && o.platformOrDefault().equals(p.platformOrDefault())) at = i;
+                continue;
+            }
             // the same server and the same person (hysteria2://name:key@…): a new key replaces the old one, no dead copy stays
             if (o.host.equals(p.host) && o.ports.equals(p.ports) && (o.auth.equals(p.auth) || sameUser(o.auth, p.auth))) at = i;
         }

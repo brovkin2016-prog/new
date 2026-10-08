@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.json.JSONObject;
 
 import hev.htproxy.TProxyService;
 
@@ -61,7 +60,10 @@ public final class VpnSvc extends VpnService {
     private Process client;
     private volatile String lastError;
     private volatile CountDownLatch connected;
-    private Profile profile;
+    private Profile profile;   // the connection in use
+    private Profile preferred; // the one the person chose; Winger goes back to it when it answers again
+    private String tunnel = "dc";  // WB Stream / Bitrix: the data channel first, the video if it does not carry
+    private long backAt, backWait = BACK_FIRST, returnedAt;
     private File dir;
 
     @Override
@@ -76,7 +78,12 @@ public final class VpnSvc extends VpnService {
             if (State.phase == State.Phase.ON) new Thread(this::ping, "ping").start();
             return START_STICKY;
         }
-        // START, or the system (re)starting us for "always-on VPN"
+        // START, or the system (re)starting us for "always-on VPN"; «use»: the notification's switch to another connection
+        String use = intent == null ? null : intent.getStringExtra("use");
+        if (use != null) {
+            List<Profile> all = Profile.all(this);
+            for (int i = 0; i < all.size(); i++) if (all.get(i).link.equals(use)) Profile.select(this, i);
+        }
         Profile p = Profile.chosen(this);
         if (p == null) {
             stopSelf();
@@ -103,6 +110,11 @@ public final class VpnSvc extends VpnService {
         }
         synchronized (lock) {
             profile = p;
+            preferred = p;
+            tunnel = p.tunnelMode.isEmpty() ? "dc" : p.tunnelMode;
+            backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;
+            State.activeLink = p.link;
+            State.auto = false;
             wanted = true;
             dir = getFilesDir();
             worker = new Thread(this::run, "vpn");
@@ -118,8 +130,11 @@ public final class VpnSvc extends VpnService {
     }
 
     private static final String NET_CHANGED = "Сеть сменилась.";
+    private static final String BACK = "Выбранный сервер снова отвечает.";
+    private static final long BACK_FIRST = 10 * 60_000L, BACK_MAX = 2 * 3600_000L;
     private static final String MAPDNS = "198.18.0.2";
     static volatile boolean testMapdns;  // the emulator test only: the bridge's way with names, tried on the server
+    static volatile long testBackMs;      // the emulator test only: how soon to look whether the chosen server is back
     private volatile boolean netChanged;
     private ConnectivityManager.NetworkCallback netWatch;
 
@@ -179,7 +194,7 @@ public final class VpnSvc extends VpnService {
 
     private void run() {
         int fails = 0;
-        State.set(State.Phase.CONNECTING, profile.bridge ? "Поднимаю мост через звонок Телемоста… до минуты" : "Подключаюсь к серверу…");
+        State.set(State.Phase.CONNECTING, profile.bridge ? "Поднимаю мост через " + service(profile) + "… до минуты" : "Подключаюсь к серверу…");
         if (socksPort == 0) socksPort = freePort();
         while (mine()) {
             Process[] own = {null};
@@ -194,13 +209,23 @@ public final class VpnSvc extends VpnService {
                     break;
                 }
                 fails = 0;
+                if (!profile.bridge && returnedAt > 0 && SystemClock.elapsedRealtime() - returnedAt > 30 * 60_000L) {
+                    backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;  // the chosen server held for a while: the usual wait again
+                }
                 State.set(State.Phase.ON, "");
-                Diag.i(this, "connected via " + profile.host);
+                Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + tunnel + ")" : ""));
                 ping();
                 err = watch(own[0]);
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
             if (!mine()) break;
+            if (BACK.equals(err)) {  // the chosen server answers again: back to it
+                returnedAt = SystemClock.elapsedRealtime();
+                switchTo(preferred, false, "Выбранный сервер снова отвечает — переключаюсь на него…");
+                fails = 0;
+                if (!sleep(300)) break;
+                continue;
+            }
             if (NET_CHANGED.equals(err)) {  // not a failure: straight back on the new network
                 fails = 0;
                 Diag.i(this, "reconnecting on the new network");
@@ -211,6 +236,23 @@ public final class VpnSvc extends VpnService {
             }
             fails++;
             Diag.i(this, "retry " + fails + ": " + err);
+            if (profile.bridge && "dc".equals(tunnel) && fails >= 2 && !profile.tunnelMode.isEmpty()) {
+                tunnel = "video";  // the data channel does not carry here: the call's video does, a little slower
+                fails = 0;
+                Diag.i(this, "bridge: the data channel does not carry, trying the video");
+                continue;
+            }
+            Profile next = fails >= 2 ? nextChoice() : null;
+            if (next != null) {
+                if (returnedAt > 0 && SystemClock.elapsedRealtime() - returnedAt < 10 * 60_000L) {
+                    backWait = Math.min(BACK_MAX, backWait * 2);  // back too soon last time: wait longer before the next try
+                }
+                switchTo(next, true, (next.bridge ? "«" + profile.name + "» не отвечает — включаю мост через " + service(next)
+                        : "«" + profile.name + "» не отвечает — пробую «" + next.name + "»") + "…");
+                fails = 0;
+                if (!sleep(500)) break;
+                continue;
+            }
             State.set(tun == null ? State.Phase.CONNECTING : State.Phase.RETRYING, err + " Пробую снова…");
             update();
             if (!sleep(Math.min(30_000L, 1000L << Math.min(fails, 5)))) break;
@@ -227,8 +269,18 @@ public final class VpnSvc extends VpnService {
             if (!sleep(1000)) return "";
             if (netChanged) {
                 netChanged = false;
+                backAt = 0;  // another network: the chosen server may answer on it, look now
                 // the bridge's call finds its way back by itself; the server's connection is made anew at once
                 if (!profile.bridge) return NET_CHANGED;
+            }
+            Profile chosen = preferred;
+            if (chosen != null && !chosen.bridge && !chosen.link.equals(profile.link) && Apps.autoBridge(this)) {
+                long t = SystemClock.elapsedRealtime();
+                if (backAt == 0 || t >= backAt) {
+                    backAt = t + backWait;
+                    if (probeServer(chosen)) return BACK;
+                    if (!mine()) return "";
+                }
             }
             if (p == null || !alive(p)) return lastError != null ? lastError : "Клиент VPN остановился.";
             long[] s = statsOrNull();
@@ -288,19 +340,9 @@ public final class VpnSvc extends VpnService {
             return "Нет интернета или не найден сервер «" + p.host + "».";
         }
         File cfg = new File(dir, "client.yaml");
-        StringBuilder y = new StringBuilder();
-        y.append("server: ").append(q((host.contains(":") ? "[" + host + "]" : host) + ":" + p.ports)).append('\n');
-        y.append("auth: ").append(q(p.auth)).append('\n');
-        y.append("tls:\n  sni: ").append(q(p.serverName())).append("\n  insecure: ").append(p.insecure).append('\n');
-        if (p.pin != null && !p.pin.isEmpty()) y.append("  pinSHA256: ").append(q(p.pin)).append('\n');
-        if ("salamander".equalsIgnoreCase(p.obfs)) {
-            y.append("obfs:\n  type: salamander\n  salamander:\n    password: ").append(q(p.obfsPassword == null ? "" : p.obfsPassword)).append('\n');
-        }
-        y.append("quic:\n  keepAlivePeriod: 10s\n");
-        y.append("fastOpen: true\n");
-        y.append("socks5:\n  listen: 127.0.0.1:").append(socksPort).append('\n');
+        String y = clientConfig(p, host, socksPort);
         try (FileOutputStream out = new FileOutputStream(cfg)) {
-            out.write(y.toString().getBytes(StandardCharsets.UTF_8));
+            out.write(y.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             return "Не получилось подготовить подключение.";
         }
@@ -333,6 +375,106 @@ public final class VpnSvc extends VpnService {
         }
     }
 
+    /** The Hysteria client's settings for a server, its local SOCKS5 port given. */
+    private static String clientConfig(Profile p, String host, int port) {
+        StringBuilder y = new StringBuilder();
+        y.append("server: ").append(q((host.contains(":") ? "[" + host + "]" : host) + ":" + p.ports)).append('\n');
+        y.append("auth: ").append(q(p.auth)).append('\n');
+        y.append("tls:\n  sni: ").append(q(p.serverName())).append("\n  insecure: ").append(p.insecure).append('\n');
+        if (p.pin != null && !p.pin.isEmpty()) y.append("  pinSHA256: ").append(q(p.pin)).append('\n');
+        if ("salamander".equalsIgnoreCase(p.obfs)) {
+            y.append("obfs:\n  type: salamander\n  salamander:\n    password: ").append(q(p.obfsPassword == null ? "" : p.obfsPassword)).append('\n');
+        }
+        y.append("quic:\n  keepAlivePeriod: 10s\n");
+        y.append("fastOpen: true\n");
+        y.append("socks5:\n  listen: 127.0.0.1:").append(port).append('\n');
+        return y.toString();
+    }
+
+    /**
+     * Does the chosen server answer on this network now? A second, short-lived client tries it — past the VPN, as this
+     * app is never inside its own tunnel — while the bridge keeps carrying everything.
+     */
+    private boolean probeServer(Profile p) {
+        Process proc = null;
+        try {
+            String host = p.host;
+            if (!host.matches("[0-9.]+") && !host.contains(":")) host = InetAddress.getByName(host).getHostAddress();
+            File cfg = new File(dir, "probe.yaml");
+            try (FileOutputStream out = new FileOutputStream(cfg)) {
+                out.write(clientConfig(p, host, freePort()).getBytes(StandardCharsets.UTF_8));
+            }
+            ProcessBuilder pb = new ProcessBuilder(getApplicationInfo().nativeLibraryDir + "/libhysteria.so", "client", "-c",
+                    cfg.getAbsolutePath()).directory(dir).redirectErrorStream(true);
+            pb.environment().put("HYSTERIA_DISABLE_UPDATE_CHECK", "1");
+            pb.environment().put("HYSTERIA_LOG_LEVEL", "info");
+            pb.environment().put("HOME", dir.getAbsolutePath());
+            Process pr = pb.start();
+            proc = pr;
+            CountDownLatch ok = new CountDownLatch(1);
+            new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(pr.getInputStream(), StandardCharsets.UTF_8))) {
+                    for (String line; (line = r.readLine()) != null; ) if (line.contains("connected to server")) ok.countDown();
+                } catch (Exception ignored) {
+                    // the probe ended
+                }
+            }, "probe-log").start();
+            boolean up = ok.await(12, TimeUnit.SECONDS);
+            Diag.i(this, "auto: «" + p.name + "» " + (up ? "answers again" : "still does not answer"));
+            return up;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (proc != null) proc.destroy();
+        }
+    }
+
+    /** The next connection to try when the one in use does not answer: the chosen one, other servers, then bridges. */
+    private Profile nextChoice() {
+        if (!Apps.autoBridge(this) || preferred == null) return null;
+        List<Profile> order = new java.util.ArrayList<>();
+        order.add(preferred);
+        for (Profile x : Profile.all(this)) if (!x.bridge && !x.link.equals(preferred.link)) order.add(x);
+        for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(preferred.link)) order.add(x);
+        if (order.size() < 2) return null;
+        int at = 0;
+        for (int i = 0; i < order.size(); i++) if (order.get(i).link.equals(profile.link)) at = i;
+        return order.get((at + 1) % order.size());
+    }
+
+    /** Moves to another connection: the old one closes (its tunnel too — a bridge's has other settings), this one opens. */
+    private void switchTo(Profile next, boolean byItself, String why) {
+        synchronized (lock) {
+            if (!wanted || worker != Thread.currentThread()) return;
+            profile = next;
+            tunnel = next.tunnelMode.isEmpty() ? "dc" : next.tunnelMode;
+        }
+        stopParts();
+        State.activeLink = next.link;
+        State.auto = byItself && preferred != null && !next.link.equals(preferred.link);
+        backAt = SystemClock.elapsedRealtime() + backWait;
+        Diag.i(this, "auto: " + why);
+        State.set(State.Phase.CONNECTING, why);
+        update();
+    }
+
+    /** «Телемоста», «WB Stream»… for the lines on the screen. */
+    static String service(Profile p) {
+        switch (p.platformOrDefault()) {
+            case "wbstream":
+                return "WB Stream";
+            case "dion":
+                return "DION";
+            case "bitrix":
+                return "Битрикс24";
+            default:
+                return "звонок Телемоста";
+        }
+    }
+
     /**
      * The owner's bridge for days when only «white-listed» services work: the relay of the whitelist-bypass project
      * (MIT, built from vpn-app/bridge) joins the Yandex Telemost call the family server keeps open and carries the
@@ -344,11 +486,9 @@ public final class VpnSvc extends VpnService {
         lastError = null;
         connected = new CountDownLatch(1);
         try {
-            String join = new JSONObject().put("joinLink", p.joinLink).put("displayName", "Участник")
-                    .put("vp8Fps", p.fps).put("vp8Batch", p.batch).put("reliable", p.reliable).put("dualTrack", p.dualTrack)
-                    .toString();
+            String join = p.joinParams(tunnel);
             ProcessBuilder pb = new ProcessBuilder(getApplicationInfo().nativeLibraryDir + "/librelay.so",
-                    "--mode", "telemost-headless-joiner", "--ws-port", String.valueOf(freePort()),
+                    "--mode", p.relayMode(), "--ws-port", String.valueOf(freePort()),
                     "--socks-host", "127.0.0.1", "--socks-port", String.valueOf(socksPort))
                     .directory(dir).redirectErrorStream(true);
             pb.environment().put("HOME", dir.getAbsolutePath());
@@ -366,7 +506,7 @@ public final class VpnSvc extends VpnService {
             if (!up.await(90, TimeUnit.SECONDS)) return lastError != null ? lastError : "Мост не поднялся: звонок не отвечает.";
             if (!alive(proc)) return lastError != null ? lastError : "Мост не поднялся.";
             // being in the call is not enough: the bridge counts only when a request really comes back through it
-            State.set(State.Phase.CONNECTING, "Звонок есть. Проверяю, что через мост идут данные…");
+            State.set(State.Phase.CONNECTING, "Мост в звонке. Проверяю, что через него идут данные…");
             update();
             for (int i = 0; i < 4 && mine() && alive(proc); i++) {
                 int ms = probe(10_000);
@@ -379,11 +519,16 @@ public final class VpnSvc extends VpnService {
             Diag.i(this, "bridge: in the call, but nothing comes back through it (the server's side of the bridge is not there?)");
             Diag.upload(this, true, true);  // the journal goes now, past the bridge
             if (BridgeSync.refreshNow(this)) {
-                Profile fresh = Profile.chosen(this);
-                if (fresh != null && fresh.bridge && !fresh.link.equals(p.link)) {
+                Profile fresh = null;  // this service's bridge as the server has it now
+                for (Profile x : Profile.all(this)) if (x.bridge && x.platformOrDefault().equals(p.platformOrDefault())) fresh = x;
+                if (fresh != null && !fresh.link.equals(p.link)) {
                     synchronized (lock) {
-                        if (worker == Thread.currentThread()) profile = fresh;
+                        if (worker == Thread.currentThread()) {
+                            if (preferred != null && preferred.link.equals(p.link)) preferred = fresh;
+                            profile = fresh;
+                        }
                     }
+                    State.activeLink = fresh.link;
                     Diag.i(this, "bridge: the server gave a new call, trying it");
                     return "Мост на сервере сменил звонок — подключаюсь к новому.";
                 }
@@ -655,7 +800,8 @@ public final class VpnSvc extends VpnService {
         String text;
         switch (State.phase) {
             case ON:
-                text = "Защищено" + (State.pingMs > 0 ? " · отклик " + State.pingMs + " мс" : "");
+                text = "Защищено" + (State.pingMs > 0 ? " · отклик " + State.pingMs + " мс" : "")
+                        + (State.auto ? " · сам перешёл: выбранный не отвечал" : "");
                 break;
             case RETRYING:
                 text = "Переподключаюсь…";
@@ -687,15 +833,30 @@ public final class VpnSvc extends VpnService {
         PendingIntent off = PendingIntent.getService(this, 1, new Intent(this, VpnSvc.class).setAction(STOP),
                 PendingIntent.FLAG_IMMUTABLE);
         if (emblem == null) emblem = BitmapFactory.decodeResource(getResources(), R.drawable.emblem);
-        return b.setSmallIcon(R.drawable.ic_stat)
+        b.setSmallIcon(R.drawable.ic_stat)
                 .setLargeIcon(emblem)
                 .setContentTitle(profile != null ? profile.name : getString(R.string.app_name))
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)
                 .setShowWhen(false)
-                .addAction(new Notification.Action.Builder(null, "Отключить", off).build())
-                .build();
+                .addAction(new Notification.Action.Builder(null, "Отключить", off).build());
+        // one tap to the other kind of connection: to a bridge from the server, to the server from a bridge
+        Profile now = profile, other = null;
+        if (now != null && now.bridge) {  // back to a server: the chosen one when it is one, else the first server
+            if (preferred != null && !preferred.bridge) other = preferred;
+            else for (Profile x : Profile.all(this)) if (!x.bridge) { other = x; break; }
+        } else if (now != null) {
+            for (Profile x : Profile.all(this)) if (x.bridge) { other = x; break; }
+        }
+        if (other != null) {
+            Intent go = new Intent(this, VpnSvc.class).setAction(START).putExtra("use", other.link);
+            PendingIntent sw = Build.VERSION.SDK_INT >= 26
+                    ? PendingIntent.getForegroundService(this, 2, go, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
+                    : PendingIntent.getService(this, 2, go, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            b.addAction(new Notification.Action.Builder(null, other.bridge ? "Через мост" : "Через сервер", sw).build());
+        }
+        return b.build();
     }
 
     // ---------- small helpers ----------

@@ -20,6 +20,8 @@ final class State {
     static volatile long since;            // when it last came ON
     static volatile long down, up;         // bytes through the tunnel since it came on
     static volatile double downRate, upRate;  // bytes per second, smoothed
+    static volatile String activeLink = "";  // the connection in use now (it may be the bridge Winger moved to by itself)
+    static volatile boolean auto;            // in use because the chosen one did not answer
 
     private static final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private static final Handler main = new Handler(Looper.getMainLooper());
@@ -31,6 +33,8 @@ final class State {
         note = why == null ? "" : why;
         if (p == Phase.ON && since == 0) since = System.currentTimeMillis();
         if (p == Phase.OFF) {
+            activeLink = "";
+            auto = false;
             since = 0;
             pingMs = -1;
             down = up = 0;

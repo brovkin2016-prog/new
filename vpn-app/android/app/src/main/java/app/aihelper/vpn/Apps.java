@@ -164,6 +164,15 @@ final class Apps {
         return android.text.TextUtils.join(", ", names.subList(0, 3)) + " и ещё " + (names.size() - 3);
     }
 
+    /** When the chosen server does not answer, Winger moves to a bridge by itself (and back once the server answers). */
+    static boolean autoBridge(Context c) {
+        return prefs(c).getBoolean("autoBridge", true);
+    }
+
+    static void setAutoBridge(Context c, boolean on) {
+        prefs(c).edit().putBoolean("autoBridge", on).apply();
+    }
+
     /** The VPN should come back by itself after a reboot unless the owner of the phone switched it off. */
     static boolean keepOn(Context c) {
         return prefs(c).getBoolean("keepOn", false);
