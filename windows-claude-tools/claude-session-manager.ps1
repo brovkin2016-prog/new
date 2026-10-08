@@ -216,7 +216,7 @@ $txtNotes.Size = New-Object System.Drawing.Size(664,142)
 $txtNotes.Text = $cfg.Notes
 $form.Controls.Add($txtNotes)
 
-$btnSaveNotes = New-Btn "💾  Сохранить примечания" 18 616 300 40 $fontB $false
+$btnSaveNotes = New-Btn "Сохранить примечания" 18 616 300 40 $fontB $false
 $btnSaveNotes.ForeColor = $clrGreen
 Add-Label "Примечания и путь сохраняются автоматически при закрытии." 330 626 352 30 $null $clrGrey | Out-Null
 
@@ -291,6 +291,13 @@ $timer.Add_Tick({
     Sync-Cfg; Update-Status; Set-Busy $false
 })
 
+function Register-UserTask($name, $arg, $triggers, $desc) {
+    $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
+    $pr  = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+    $st  = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName $name -Action $act -Trigger $triggers -Principal $pr -Settings $st -Description $desc -Force -ErrorAction Stop | Out-Null
+}
+
 # --- обработчики ---
 $btnBrowse.Add_Click({
     $fb = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -306,15 +313,23 @@ $btnRestore.Add_Click({
 $btnOpenSess.Add_Click({ if (Test-Path $ClaudeDir) { Start-Process explorer.exe $ClaudeDir } else { Log "Папка $ClaudeDir не найдена" } })
 $btnOpenBak.Add_Click({ if (Test-Path $txtDest.Text) { Start-Process explorer.exe $txtDest.Text } else { Log "Папка бэкапа ещё не создана" } })
 $btnAuto.Add_Click({
+    $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Backup"
+    $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)
+    $t2 = New-ScheduledTaskTrigger -AtLogOn
     try {
-        $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Backup"
-        $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
-        $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)
-        $t2 = New-ScheduledTaskTrigger -AtLogOn
-        Register-ScheduledTask -TaskName "Claude sessions backup" -Action $act -Trigger $t1,$t2 -Description "Автозахват сессий + экспорта Claude" -Force | Out-Null
+        Register-UserTask "ClaudeSessionsBackup" $arg @($t1,$t2) "Автозахват сессий и экспорта Claude"
         Sync-Cfg
-        Log "Автозахват включён: сессии и экспорт чатов собираются каждый час и при входе."
-    } catch { Log ("Не удалось создать задачу: " + $_.Exception.Message) }
+        Log "Автозахват включён (планировщик): сессии и экспорт чатов — каждый час и при входе."
+    } catch {
+        Log "Планировщик отказал ($($_.Exception.Message)). Включаю автозапуск при входе…"
+        try {
+            $startup = [Environment]::GetFolderPath('Startup')
+            $cmd = "@echo off`r`npowershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Backup`r`n"
+            Set-Content -LiteralPath (Join-Path $startup "ClaudeBackup.cmd") -Value $cmd -Encoding OEM
+            Sync-Cfg
+            Log "Готово: бэкап будет выполняться при каждом входе в систему (ежечасно без прав админа нельзя)."
+        } catch { Log ("Не удалось включить автозахват: " + $_.Exception.Message) }
+    }
 })
 $btnJunc.Add_Click({
     $dest = $txtDest.Text
@@ -350,13 +365,12 @@ $btnCollect.Add_Click({
     Sync-Cfg; Update-Status
 })
 $btnRemind.Add_Click({
+    $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Reminder"
+    $tr  = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Monday -At 12:00PM
     try {
-        $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`" -Reminder"
-        $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
-        $tr  = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Monday -At 12:00PM
-        Register-ScheduledTask -TaskName "Claude chat export reminder" -Action $act -Trigger $tr -Description "Напоминание выгрузить чаты Claude" -Force | Out-Null
+        Register-UserTask "ClaudeChatExportReminder" $arg @($tr) "Напоминание выгрузить чаты Claude"
         Log "Напоминание включено: примерно раз в месяц (пн, 12:00) всплывёт подсказка выгрузить чаты."
-    } catch { Log ("Не удалось создать напоминание: " + $_.Exception.Message) }
+    } catch { Log ("Не удалось создать напоминание (нужны права планировщика): " + $_.Exception.Message) }
 })
 $btnSaveNotes.Add_Click({ Sync-Cfg; Log "Примечания сохранены." })
 $form.Add_FormClosing({ Sync-Cfg })
