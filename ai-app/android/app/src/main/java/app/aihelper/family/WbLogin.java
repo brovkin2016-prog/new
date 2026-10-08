@@ -68,10 +68,46 @@ final class WbLogin {
             d.dismiss();
             done.done(got[0]);
         };
+        boolean[] told = {false};
+        w.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
+                // the site is written for new browsers: an old built-in one cannot read it and shows a white page
+                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR && m.message().contains("SyntaxError") && !told[0]) {
+                    told[0] = true;
+                    Log.w("AIWB", "page: " + m.message());
+                    say(info, "Встроенный браузер телефона («Android System WebView») устарел — страница WB не рисуется. "
+                            + "Обновите «Android System WebView» и Chrome в Google Play или RuStore и откройте вход снова.");
+                }
+                return true;
+            }
+        });
         w.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 return false;  // WB's own sign-in steps stay in this window
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                // the site draws itself with its scripts: if after a while there is nothing on it, say why
+                view.postDelayed(() -> {
+                    if (finished[0] || got[0] != null || told[0]) return;
+                    view.evaluateJavascript("(function(){var b=document.body;return b?(b.innerText||'').trim().length+'|'"
+                            + "+document.querySelectorAll('input,button,a').length:'0|0'})()", r -> {
+                        String v = r == null ? "" : r.replace("\"", "");
+                        Log.i("AIWB", "page content " + v);
+                        if (v.isEmpty() || v.startsWith("0|0") || v.equals("null")) {
+                            say(info, "Страница WB пустая — сайт не открылся. Если мобильный интернет работает по «белым "
+                                    + "спискам», попробуйте через Wi‑Fi или обычный VPN, потом откройте вход снова.");
+                        }
+                    });
+                }, 8000);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, android.webkit.WebResourceError err) {
+                if (req.isForMainFrame()) say(info, "WB Stream не открылся: " + err.getDescription() + ". Попробуйте через Wi‑Fi или обычный VPN.");
             }
 
             @Override
@@ -130,6 +166,12 @@ final class WbLogin {
         d.show();
         Log.i("AIWB", "login page opened");
         w.loadUrl(SITE + "/login");
+    }
+
+    private static void say(TextView info, String text) {
+        Log.i("AIWB", "info: " + text);
+        info.setText(text);
+        info.setVisibility(View.VISIBLE);
     }
 
     /** «Bearer …» of a request, when it looks like an access token. */

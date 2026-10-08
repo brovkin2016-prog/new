@@ -79,7 +79,7 @@ adb shell am force-stop $PKG
 # the WB Stream sign-in for the quick bridge: WB's own page opens in the app's window, with its «Готово» bar
 adb logcat -c
 adb shell am start -n $PKG/app.aihelper.family.MainActivity --ez test_wb true
-sleep 15
+sleep 25
 adb exec-out screencap -p > "$OUT/wb-login.png"
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
 adb shell cat /sdcard/ui.xml > "$OUT/wb-login.xml"
@@ -87,7 +87,10 @@ adb logcat -d -s AIWB:V | tee "$OUT/wb-login.log"
 grep -q "login page opened" "$OUT/wb-login.log" || { echo "the WB sign-in window did not open"; exit 1; }
 grep -q "Готово" "$OUT/wb-login.xml" || { echo "the WB sign-in window has no «Готово»"; exit 1; }
 WBW=$(tr '>' '\n' < "$OUT/wb-login.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Готово|="✕"|Войдите в WB Stream' | head -12 | tr '\n' ' ')
-echo "WB page shows: ${WBW:-nothing yet (the site is outside: only reported)}"
+echo "WB page shows: ${WBW:-nothing}"
+# never a white page without a word: WB's page shows, or the window says why (an old built-in browser, no site)
+if grep -qE "устарел|пустая|не открылся" "$OUT/wb-login.xml"; then echo "WB: the window explains why the page is not there"
+elif [ -z "$WBW" ]; then echo "white WB page and no explanation"; exit 1; fi
 for _ in 1 2 3 4; do  # Back: through the page's own steps, then the window closes
   adb shell input keyevent KEYCODE_BACK
   sleep 2
