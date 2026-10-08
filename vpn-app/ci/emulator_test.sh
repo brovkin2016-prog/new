@@ -106,6 +106,20 @@ fi
 if [ -n "${ICON_APK:-}" ]; then
   adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"
   adb shell pm path app.aihelper.vpn | grep -q "base.apk" || fail "the APK with the swapped icon is not installed"
+  # the connection inside the APK becomes the server on the first start, once
+  adb logcat -c
+  adb shell am start -n app.aihelper.vpn/.MainActivity >/dev/null
+  for _ in $(seq 1 20); do adb logcat -d -s AIVPN:I | grep -q "profile from the package" && break; sleep 1; done
+  adb logcat -d -s AIVPN:I | grep "profile from the package: CI Test" || fail "the connection inside the APK was not taken"
+  sleep 2
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+  adb shell cat /sdcard/ui.xml | grep -q 'text="CI Test"' || fail "the server from the APK is not shown"
+  adb exec-out screencap -p > "$OUT/5-packaged.png"
+  adb shell am force-stop app.aihelper.vpn
+  adb shell am start -n app.aihelper.vpn/.MainActivity >/dev/null
+  sleep 4
+  [ "$(adb logcat -d -s AIVPN:I | grep -c "profile from the package")" = 1 ] || fail "the connection inside the APK was added twice"
+  echo "packaged connection: taken once, shown"
   adb shell input keyevent KEYCODE_HOME
   read -r W H < <(adb shell wm size | grep -o "[0-9]*x[0-9]*" | tail -1 | tr x ' ')
   adb shell input swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 5)) 300  # open the list of apps

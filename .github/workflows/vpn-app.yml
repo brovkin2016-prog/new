@@ -68,7 +68,9 @@ jobs:
           mv /tmp/hy-x86_64 app/src/main/jniLibs/x86_64
           # the server's icon swap (tools/owner_icon.py) on this very build, with a test picture and a throwaway key:
           # the emulator test installs the result, so a swapped and re-aligned APK is known to install
-          python3 ../tools/owner_icon.py app/build/outputs/apk/release/app-release-unsigned.apk ../ci/test-icon.png /tmp/icon.apk
+          python3 ../tools/owner_icon.py app/build/outputs/apk/release/app-release-unsigned.apk ../ci/test-icon.png /tmp/icon0.apk
+          # and a person's connection put inside (tools/apk_profile.py), as the server does for «Winger VPN» made for one person
+          python3 ../tools/apk_profile.py /tmp/icon0.apk 'hysteria2://ci-pass@vpn.ci.test:443/?sni=vpn.ci.test#CI%20Test' /tmp/icon.apk
           keytool -genkeypair -keystore /tmp/t.p12 -storetype PKCS12 -alias t -keyalg RSA -keysize 2048 -validity 2 \
             -dname CN=t -storepass testpass -keypass testpass
           "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" sign --ks /tmp/t.p12 \

@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
@@ -15,6 +16,7 @@ import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -29,6 +31,9 @@ import android.widget.Toast;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** One screen: the big button, how the connection is, the server, and adding a server from a QR code or a link. */
@@ -50,7 +55,9 @@ public class MainActivity extends Activity implements State.Listener {
         muted = dark ? 0xFF9CA3AF : 0xFF6B7280;
         card = dark ? 0xE01A2029 : 0xEBFFFFFF;  // cards let the aurora shine through a little
         accent = dark ? 0xFF34D399 : 0xFF0E9F6E;
+        boolean packaged = packagedProfile();
         build();
+        if (packaged) Toast.makeText(this, "Подключение уже внутри — нажмите большую кнопку", Toast.LENGTH_LONG).show();
         // a link that opened the app counts once: not again when Android recreates the screen or reopens it from Recents
         if (saved == null && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) handle(getIntent());
     }
@@ -353,6 +360,29 @@ public class MainActivity extends Activity implements State.Listener {
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_disconnect", false)) {
             startService(new Intent(this, VpnSvc.class).setAction(VpnSvc.STOP));
         }
+    }
+
+    /** A «Winger VPN» made for one person carries their connection (assets/winger-profile.txt, put in by the family
+     *  server before it signs the app): it becomes the server on the first start, so the person only presses the button.
+     *  Once: a server the person removes later does not come back. */
+    private boolean packagedProfile() {
+        String link;
+        try (InputStream in = getAssets().open("winger-profile.txt")) {
+            byte[] b = new byte[4096];
+            int n = 0, r;
+            while (n < b.length && (r = in.read(b, n, b.length - n)) > 0) n += r;
+            link = new String(b, 0, n, StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            return false;  // the usual app: no connection inside
+        }
+        SharedPreferences prefs = getSharedPreferences("vpn", MODE_PRIVATE);
+        if (link.equals(prefs.getString("packagedLink", ""))) return false;
+        Profile p = Profile.find(link);
+        if (p == null) return false;
+        Profile.add(this, p);
+        prefs.edit().putString("packagedLink", link).apply();
+        Log.i("AIVPN", "profile from the package: " + p.name);
+        return true;
     }
 
     private void add(String found) {
