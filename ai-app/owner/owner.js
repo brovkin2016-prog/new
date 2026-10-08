@@ -330,7 +330,29 @@
             el("button", { class: "btn line", text: "✉️ Тест почты", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) })));
         scroll.append(card);
       }
-      scroll.append(trafficCard(), eventsCard(), actionsCard(d));
+      scroll.append(weekCard(), trafficCard(), eventsCard(), actionsCard(d));
+    }
+    // the last 7 days at a glance: who used the VPN how much, what broke and was fixed, backups, the hosting's money
+    function weekCard() {
+      const card = el("div", { class: "card" }, el("h3", { text: "📅 За неделю" }), el("div", { class: "status", text: "…" }));
+      panel({ op: "week" }).then((w) => {
+        if (w.t !== "done") { card.remove(); return; }
+        card.lastChild.remove();
+        const line = (left, right, sub) => card.append(el("div", { class: "row", style: "min-height:34px" },
+          el("div", { class: "grow" }, left, sub ? el("small", { text: sub }) : null), right ? el("b", { text: right }) : null));
+        const partial = w.counted_from && Date.parse(w.counted_from) > w.from * 1000;
+        line("🛡 VPN всего", bytes(w.total), partial ? "считаю с " + new Date(w.counted_from).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "");
+        for (const u of w.traffic.slice(0, 6)) line("· " + u.name, bytes(u.bytes));
+        line(w.alerts ? `⚠️ Сбоев: ${w.alerts}` : "✅ Сбоев не было", w.fixed ? `починилось: ${w.fixed}` : "",
+          w.problems.length ? w.problems[w.problems.length - 1] : "");
+        line(w.backup ? (w.backup.ok ? "💾 Резервная копия" : "⚠️ Резервная копия не получилась") : "💾 Резервных копий не было",
+          w.backup ? when(w.backup.ts) : "", w.backup ? "" : "Сделать — «💾 Резервная копия сейчас» ниже");
+        const h = w.hosting || {};
+        if (h.set) line(h.days_left < 7 ? "💳 Пора пополнить хостинг" : "💳 Хостинг", `≈ ${Math.floor(h.days_left)} дн.`);
+        const u = w.update || {};
+        if (u.current) line("⬆️ Версия сервера", "v" + u.current, u.new ? `есть v${u.latest}` : "последняя");
+      }).catch(() => card.remove());
+      return card;
     }
     function trafficCard() {
       const card = el("div", { class: "card" }, el("h3", { text: "📊 Трафик" }), el("div", { class: "status", text: "…" }));

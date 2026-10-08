@@ -614,6 +614,33 @@
   }
   function refreshTop() { if (S.views[S.tab]) show(S.tab); }
 
+  // ---------- reminders: the phone rings by itself (the app's own alarm); the server only works out when and what ----------
+  const REMIND_ASK = /^\s*(?:пожалуйста,?\s+)?(напомни|напомнить|поставь\s+напоминание)(?![а-яё])/i;
+  function remindSet(r) {
+    if (!(Native && Native.remindAdd)) return "\n\nНапоминание звенит в приложении на телефоне — обновите приложение.";
+    const id = Native.remindAdd(JSON.stringify(r));
+    if (!id) return "\n\n⚠️ Не получилось поставить напоминание на телефоне.";
+    if (Native.askNotify && !store.get("askedNotify", false)) { store.set("askedNotify", true); Native.askNotify(); }
+    return "\n\nТелефон напомнит сам, даже без интернета. Отменить — «☰ Ещё» → «⏰ Напоминания».";
+  }
+  function remindersCard() {
+    const card = el("div", { class: "card" }, el("h3", { text: "⏰ Напоминания" }));
+    let list = [];
+    try { list = JSON.parse(Native.reminders() || "[]"); } catch (e) { /* none */ }
+    if (!list.length) {
+      card.append(el("small", { style: "color:var(--muted)", text: "Пока нет. Напишите или скажите в чате: «Напомни завтра в 9 выпить таблетку» — телефон напомнит сам, даже без интернета." }));
+    }
+    const again = { daily: " · каждый день", weekly: " · каждую неделю", monthly: " · каждый месяц" };
+    for (const r of list) {
+      const at = new Date(r.at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+      card.append(el("div", { class: "row" }, el("div", { class: "grow" }, r.text, el("small", { text: at + (again[r.repeat] || "") })),
+        el("button", { class: "icon-btn", text: "🗑", title: "Удалить", onclick: () => {
+          Native.remindDel(r.id); card.replaceWith(remindersCard()); toast("Напоминание удалено");
+        } })));
+    }
+    return card;
+  }
+
   // ---------- conversation threads (chat and study) ----------
   function context(thread) {
     const out = [];
@@ -736,6 +763,7 @@
         let out;
         if (end.t === "done") {
           if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
+          if (end.remind) end.text = (end.text || "") + remindSet(end.remind);
           out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
             audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name, op: end.op,
             result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null,
@@ -843,6 +871,10 @@
       th.ask(req, mine, im, d);
     }
     th.ask = async (req, mine, im, d) => {
+      if (!im && !d && !req.op && !req.idea && !req.followup && req.text && REMIND_ASK.test(req.text)) {
+        await th.run("/api/remind", { text: req.text }, mine);  // «напомни …»: the phone rings by itself
+        return;
+      }
       const body = Object.assign({ context: context("chat") }, req);
       if (im) body.image = await b64(await shrink(im, 2048, 0.88));
       if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
@@ -1108,6 +1140,7 @@
       scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: translator },
           el("span", { style: "font-size:24px", text: "🗣" }), el("div", { class: "grow" }, "Переводчик", el("small", { text: "Говорите — переведу и озвучу" })), "›")));
+      if (Native && Native.reminders) scroll.append(remindersCard());
       const modeSel = el("select", { onchange: () => setPref({ mode: modeSel.value }) });
       for (const [k, v] of Object.entries(me.modes)) modeSel.append(el("option", { value: k, text: v, selected: k === me.mode }));
       const modelSel = el("select", { onchange: () => setPref({ model: modelSel.value }) });

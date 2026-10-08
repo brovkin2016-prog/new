@@ -137,6 +137,22 @@ final class Bridge {
         AlertJob.schedule(act, token);
     }
 
+    // reminders the person set in the chat: the phone rings by itself (see Reminders)
+    @JavascriptInterface
+    public String remindAdd(String json) {
+        return Reminders.add(act, json);
+    }
+
+    @JavascriptInterface
+    public String reminders() {
+        return Reminders.list(act);
+    }
+
+    @JavascriptInterface
+    public void remindDel(String id) {
+        Reminders.remove(act, id);
+    }
+
     @JavascriptInterface
     public void askNotify() {
         if (Build.VERSION.SDK_INT >= 33) {

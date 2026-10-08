@@ -157,6 +157,11 @@ public class MainActivity extends Activity {
         web.onResume();
         if (assets.takeFresh()) web.reload();
         Intent i = getIntent();
+        if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_remind", false)) {  // the emulator test only
+            i.removeExtra("test_remind");
+            Reminders.add(this, "{\"at\": " + (System.currentTimeMillis() / 1000 + 5) + ", \"text\": \"Тест: выпить таблетку\", \"repeat\": \"none\"}");
+            return;
+        }
         if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_hosting", false)) {  // the emulator test only
             i.removeExtra("test_hosting");
             Hosting.login(this, ok -> android.util.Log.i("AIHOST", "login done " + ok));

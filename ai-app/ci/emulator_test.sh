@@ -44,6 +44,19 @@ grep -q 'AITEST answer: Привет' "$OUT/tcp.log" || { echo "TCP fallback run
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 # Android's «install the update?» answered by a tap — the way a phone gets every update (1.0.115 failed here)
 vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }
+# a reminder: set for 5 s from now, the phone rings by itself (an alarm and a notification), the app in the background
+adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+adb logcat -c
+adb shell am start -n $PKG/app.aihelper.family.MainActivity --ez test_remind true
+sleep 2
+adb shell input keyevent KEYCODE_HOME  # in the background (not force-stopped: that would take its alarms away)
+sleep 12
+adb logcat -d -s AIREM:V | tee "$OUT/remind.log"
+adb shell dumpsys notification --noredact > "$OUT/notifications.txt" 2>/dev/null
+grep -q "ring " "$OUT/remind.log" || { echo "the reminder did not ring"; exit 1; }
+grep -q "Тест: выпить таблетку" "$OUT/notifications.txt" || { echo "the reminder's notification is not there"; exit 1; }
+echo "reminder: rang and shown"
+
 # the owner's HostVDS sign-in: the real site's page must show inside the app (not a white screen), with the bar on top
 adb logcat -c
 adb shell am start -n $PKG/app.aihelper.family.MainActivity --ez test_hosting true
