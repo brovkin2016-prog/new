@@ -210,7 +210,16 @@
         line("Обновления из приложения ещё не включены", "Нужна одна установка вручную — дальше обновления здесь.");
         return card;
       }
-      if (running) line(`⏳ Обновляется до v${p.version}…`, "5–10 минут. VPN может переподключиться, приложение — ненадолго потерять связь.");
+      if (running) {
+        line(`⏳ Обновляется до v${p.version}…`, "5–10 минут. VPN может переподключиться, приложение — ненадолго потерять связь. Экран обновится сам.");
+        // looks again every 20 s while the card is on screen; while the server restarts the app has no answer: try later
+        const tick = () => {
+          if (!card.isConnected) return;
+          if (S.tab !== "vpn" || document.hidden) { setTimeout(tick, 20000); return; }
+          panel({ op: "status" }).then((end) => (end.t === "done" ? load() : setTimeout(tick, 20000))).catch(() => setTimeout(tick, 20000));
+        };
+        setTimeout(tick, 20000);
+      }
       else if (u.new) line(`Доступна v${u.latest} · у вас v${u.current}`, u.notes || "");
       else line(`v${u.current} — последняя ✓`, u.checked ? "Проверено " + new Date(u.checked * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "");
       if (!running && p.state === "finished" && p.version && !p.ok) line(`⚠️ Обновление до v${p.version} не прошло`, "Сервер работает на прежней версии. Подробности — в событиях.");
