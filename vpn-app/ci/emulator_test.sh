@@ -46,10 +46,23 @@ curl -s http://127.0.0.1:7653/traffic && echo
 sleep 3
 adb exec-out screencap -p > "$OUT/3-traffic.png"
 
+# the speed of a connection: the one that is on, through itself
+adb shell am start -n $ACT --es test_speed Тест >/dev/null
+wait_log "speed: «Тест» [0-9]" 40 || fail "no speed for the connection that is on"
+adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1
+adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1 | grep -qE "speed: «Тест» (0\.0[1-9]|0\.[1-9]|[1-9])" || fail "the speed test downloaded nothing"
+adb exec-out screencap -p > "$OUT/3a-speed.png"
+
 adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off"
 sleep 2
 adb exec-out screencap -p > "$OUT/4-off.png"
+
+# and of a connection that is not on: through a short-lived client of its own
+adb logcat -c
+adb shell am start -n $ACT --es test_speed Тест >/dev/null
+wait_log "speed: «Тест» [0-9].*separate test client" 50 || fail "no speed for a connection that is not on"
+adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1
 
 # the bridge's way with names (the tunnel's own DNS answers, the connection carries the name, the far side looks it up):
 # tried with the server here, as CI has no real call

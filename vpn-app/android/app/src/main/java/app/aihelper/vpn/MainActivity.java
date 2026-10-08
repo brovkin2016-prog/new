@@ -377,6 +377,8 @@ public class MainActivity extends Activity implements State.Listener {
             Profile.select(this, 0);
             changed();
         }
+        String testSpeed = BuildConfig.DEBUG ? i.getStringExtra("test_speed") : null;  // the emulator test only
+        if (testSpeed != null) for (Profile p : Profile.all(this)) if (p.name.equals(testSpeed)) speed(p);
         String testSelect = BuildConfig.DEBUG ? i.getStringExtra("test_select") : null;  // the emulator test only
         if (testSelect != null) {
             List<Profile> all = Profile.all(this);
@@ -562,6 +564,8 @@ public class MainActivity extends Activity implements State.Listener {
                         : "Нажмите, чтобы включить через этот сервер";
                 if (i == cur) edge = dark ? 0xFF3B4556 : 0xFFD1D5DB;
             }
+            String sp = Speed.last(this, p);
+            if (sp != null) note += "\n" + sp;
             TextView n = connNotes.get(i);
             n.setText(note);
             n.setTextColor(color);
@@ -592,14 +596,38 @@ public class MainActivity extends Activity implements State.Listener {
         else connect();
     }
 
+    /** The speed of one connection, measured off the screen's thread; the result stays on its button. */
+    private void speed(Profile p) {
+        boolean active = State.phase == State.Phase.ON && p.link.equals(State.activeLink);
+        if (p.bridge && !active) {
+            Toast.makeText(this, "Скорость моста проверяется, когда он включён: включите его кнопкой и проверьте снова",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "⚡ Проверяю скорость «" + p.name + "»… около 10 секунд", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String r = Speed.measure(this, p);
+            runOnUiThread(() -> {
+                connsKey = "";  // the buttons are drawn again with the result
+                changed();
+                Toast.makeText(this, "«" + p.name + "»: " + (r == null ? "не получилось проверить" : r), Toast.LENGTH_LONG).show();
+            });
+        }, "speed").start();
+    }
+
     /** ⋯ on a connection: the automatic choice (for all of them) and removing this one. */
     private void options(int at) {
         boolean auto = Apps.autoBridge(this);
-        String[] items = {auto ? "✓ Сам выбирать рабочее подключение" : "Сам выбирать рабочее подключение", "Удалить подключение"};
+        String[] items = {"⚡ Проверить скорость", auto ? "✓ Сам выбирать рабочее подключение" : "Сам выбирать рабочее подключение",
+                "Удалить подключение"};
         new AlertDialog.Builder(this)
                 .setTitle(Profile.all(this).get(at).name)
                 .setItems(items, (d, w) -> {
-                    if (w == 1) {
+                    if (w == 0) {
+                        speed(Profile.all(this).get(at));
+                        return;
+                    }
+                    if (w == 2) {
                         remove(Profile.all(this), at);
                         return;
                     }

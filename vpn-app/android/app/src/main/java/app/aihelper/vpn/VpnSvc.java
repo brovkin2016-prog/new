@@ -376,7 +376,7 @@ public final class VpnSvc extends VpnService {
     }
 
     /** The Hysteria client's settings for a server, its local SOCKS5 port given. */
-    private static String clientConfig(Profile p, String host, int port) {
+    static String clientConfig(Profile p, String host, int port) {
         StringBuilder y = new StringBuilder();
         y.append("server: ").append(q((host.contains(":") ? "[" + host + "]" : host) + ":" + p.ports)).append('\n');
         y.append("auth: ").append(q(p.auth)).append('\n');
@@ -889,7 +889,7 @@ public final class VpnSvc extends VpnService {
         }
     }
 
-    private static int freePort() {
+    static int freePort() {
         try (ServerSocket s = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             return s.getLocalPort();
         } catch (Exception e) {
