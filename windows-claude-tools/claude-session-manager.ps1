@@ -109,6 +109,14 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# если что-то упадёт при запуске — покажем текст ошибки и запишем в файл рядом
+trap {
+    $msg = ($_ | Out-String) + "`r`n--- где ---`r`n" + $_.ScriptStackTrace
+    try { Set-Content -LiteralPath (Join-Path $ScriptDir "ОШИБКА-запуска.txt") -Value $msg -Encoding UTF8 } catch {}
+    try { [System.Windows.Forms.MessageBox]::Show($msg, "Ошибка запуска программы") } catch {}
+    exit 1
+}
+
 $clrBg    = [System.Drawing.Color]::FromArgb(243,244,249)
 $clrCard  = [System.Drawing.Color]::White
 $clrAcc   = [System.Drawing.Color]::FromArgb(67,56,202)
