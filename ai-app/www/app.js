@@ -1616,7 +1616,7 @@
 
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      scroll.append(diskRow(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
+      scroll.append(diskRow(), maxCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
         el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на ИИ-приложение (24 ч)",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется приложением" }));
@@ -1654,6 +1654,71 @@
       const r = await appOp({ op: "app_add", name: name.replace(/\s+/g, " ").trim().slice(0, 40) }, null);
       if (r) makeLink({ op: "dl_aiapp", id: r.id }, "ИИ-помощник — " + r.name);
     }
+    // ---- the assistant in MAX: the owner connects the family's bot once; people link with a code ----
+    async function maxCode(u) {
+      try {
+        const end = await panel({ op: "max_code", id: u.id });
+        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+        if (!end.on) { toast("Сначала подключите бота MAX: «Приложение» → «💬 Помощник в MAX»", 5000); return; }
+        sheet("💬 MAX — " + u.name, (box) => box.append(
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Отправьте это сообщение человеку как удобно. Код одноразовый." }),
+          el("div", { style: "font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px;user-select:all", text: end.text }),
+          el("button", { class: "btn wide", text: "📋 Копировать сообщение", onclick: () => { copyText(end.text); toast("✅ Скопировано — отправьте как удобно"); } })));
+      } catch (e) { toast(problem(e)); }
+    }
+    function maxCard() {
+      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "💬 MAX: проверяю…" }));
+      const fill = (m) => {
+        card.innerHTML = "";
+        card.append(el("div", { class: "row" },
+          el("div", { class: "grow" }, m.on ? `💬 Помощник в MAX ✓ ${m.bot ? "@" + m.bot : ""}` : "💬 Помощник в MAX",
+            el("small", { text: m.on ? (m.error === "token" ? "⚠️ MAX не принимает токен — подключите заново."
+              : `Подключено людей: ${m.people.length}. Код для человека — в его карточке ниже.`)
+              : "Родные пишут и говорят с помощником прямо в MAX — работает и при «белых списках»." })),
+          el("button", { class: "btn" + (m.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.on ? "⚙️" : "Подключить", onclick: () => maxSetup(m, fill) })));
+      };
+      panel({ op: "max_get" }).then((m) => (m.t === "done" ? fill(m) : card.remove())).catch(() => card.remove());
+      return card;
+    }
+    function maxSetup(m, after) {
+      sheet("💬 Помощник в MAX", (box, close) => {
+        const inp = el("input", { class: "input", placeholder: "Токен бота", autocomplete: "off", spellcheck: "false" });
+        box.append(
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Тот же помощник, что в приложении, но в MAX: вопросы, голосовые, фото, "
+            + "документы, проверка сообщений на мошенников (вам придёт уведомление), напоминания. Без слов о VPN." }),
+          el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
+            el("li", { text: "В MAX для партнёров (нужен подтверждённый профиль ИП или самозанятого) создайте чат-бота." }),
+            el("li", { text: "Скопируйте токен бота и вставьте сюда." }),
+            el("li", { text: "Людям — «💬 Код для помощника в MAX» в их карточке: они отправят код боту и смогут писать." })),
+          m.on ? el("div", { style: "margin-bottom:10px", text: `Сейчас: @${m.bot || "бот"}. Подключены: ${m.people.map((p) => p.name).join(", ") || "пока никто"}` }) : "",
+          inp,
+          el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
+            let t = "";
+            try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
+            if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
+          } }),
+          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить", onclick: async () => {
+            if (!inp.value.trim()) { toast("Сначала вставьте токен"); return; }
+            toast("⏳ Проверяю токен…", 20000);
+            try {
+              const end = await panel({ op: "max_set", token: inp.value.trim() });
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+              toast(`✅ Бот подключён: @${end.bot || end.name}`, 5000);
+              close(); after(end);
+            } catch (e) { toast(problem(e)); }
+          } }),
+          ...(m.people || []).map((p) => el("button", { class: "btn line wide", style: "margin-top:8px", text: `✂️ Отвязать MAX от «${p.name}»`, onclick: async () => {
+            if (!(await confirmBox(`Отвязать MAX от «${p.name}»? Чтобы снова пользоваться, понадобится новый код.`, "Отвязать"))) return;
+            const end = await panel({ op: "max_unlink", max: p.max });
+            close(); after(end); toast("Отвязан");
+          } })),
+          m.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "Отключить бота", onclick: async () => {
+            if (!(await confirmBox("Отключить помощника в MAX? Люди перестанут получать ответы, пока не подключите снова.", "Отключить"))) return;
+            const end = await panel({ op: "max_off" });
+            close(); after(end); toast("Бот отключён");
+          } }) : "");
+      });
+    }
     function person(id) {
       const d = cache.app;
       const u = d && d.users.find((x) => x.id === id);
@@ -1667,7 +1732,8 @@
           text: (u.off ? "Доступ отключён" : !u.seen ? "Ещё не входил(а)" : "Был(а) " + ago(u.seen) + " назад") + ` · телефонов: ${u.devices}` }),
           el("div", { style: "font-size:14px;margin-bottom:6px", text: `Сегодня: вопросов ${t.text || 0}${lim("text")}, картинок ${t.draw || 0}${lim("draw")}, фото ${t.photo || 0}${lim("photo")}` }),
           act(mine ? "🔗 Ссылка: приложение + код для второго телефона (24 ч)" : "🔗 Ссылка: приложение + код входа (24 ч)",
-            () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""));
+            () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""),
+          act("💬 Код для помощника в MAX", () => maxCode(u)));
         if (mine) {
           box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — ссылка выше; если потеряли все телефоны — на экране входа «✉️ Я владелец — прислать код на почту»." }));
           return;
