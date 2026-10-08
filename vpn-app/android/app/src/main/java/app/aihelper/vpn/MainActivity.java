@@ -567,6 +567,7 @@ public class MainActivity extends Activity implements State.Listener {
             String sp = Speed.last(this, p);
             if (sp != null) note += "\n" + sp;
             TextView n = connNotes.get(i);
+            if (!note.contentEquals(n.getText())) Log.i("AIVPN", "button «" + p.name + "»: " + note.replace('\n', ' '));
             n.setText(note);
             n.setTextColor(color);
             LinearLayout row = connRows.get(i);

@@ -195,8 +195,8 @@ wait_log "auto: «Запасной» не отвечает" 150 || fail "did not
 wait_log "connected via 10.0.2.2" 60 || fail "the other server did not connect after the automatic move"
 sleep 2
 adb exec-out screencap -p > "$OUT/7-auto.png"
-adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
-adb shell cat /sdcard/ui.xml | grep -q "Включено само" || fail "the screen does not say it moved by itself"
+# (the screen is read from what it logs: while the VPN is on its button glows, and uiautomator cannot read a moving screen)
+wait_log "button «Тест»: ● Включено само" 15 || fail "the screen does not say it moved by itself"
 sed -e 's/^listen: :4443/listen: :4999/' -e '/^trafficStats:/,$d' /tmp/t/hy.yaml > /tmp/t/hy2.yaml
 ( cd /tmp/t && HYSTERIA_LOG_LEVEL=info nohup ./hysteria server -c hy2.yaml > hy2.log 2>&1 & )
 wait_log "auto: «Запасной» answers again" 120 || fail "did not notice the chosen server answering again"

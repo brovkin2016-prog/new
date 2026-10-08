@@ -55,7 +55,9 @@ jobs:
             mkdir -p "$J/${t#*:}"
             CGO_ENABLED=0 GOOS=linux GOARCH=${t%%:*} GOARM=7 go build -trimpath -ldflags="-s -w" -o "$J/${t#*:}/librelay.so" ./relay
           done
-          go test ./relay/tunnel/ -run Epoch
+          # the fix's own test, by its name (it must really run and pass)
+          go test ./relay/tunnel/ -run '^TestStrayFrameIsNotPeerRestart$' -v | tee /tmp/fix-test.log
+          grep -q -- "--- PASS: TestStrayFrameIsNotPeerRestart" /tmp/fix-test.log
           ls -l "$J"/*/librelay.so
 
       - name: Version

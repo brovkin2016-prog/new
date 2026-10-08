@@ -1,0 +1,53 @@
+# Builds the family server's bridge programs — the whitelist-bypass creators for Telemost, WB Stream, DION and Bitrix24
+# (MIT, v0.4.4 source in vpn-app/bridge with our fix: a stray frame no longer looks like a restarted peer) — for Linux,
+# and publishes them as bridge-bins-N with their SHA-256. The server installer takes a pinned one and checks it.
+name: bridge
+
+on:
+  push:
+    paths: ["vpn-app/bridge/**", ".github/workflows/bridge.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vpn-app/bridge/go.mod
+          cache-dependency-path: vpn-app/bridge/go.sum
+      - name: Test and build
+        working-directory: vpn-app/bridge
+        run: |
+          set -e
+          go test ./relay/tunnel/ -run '^TestStrayFrameIsNotPeerRestart$' -v | tee /tmp/fix-test.log
+          grep -q -- "--- PASS: TestStrayFrameIsNotPeerRestart" /tmp/fix-test.log
+          mkdir -p /tmp/rel
+          for arch in amd64 arm64; do
+            for p in telemost wbstream dion bitrix; do
+              CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" \
+                -o "/tmp/rel/headless-$p-creator-linux-$arch" "./headless/$p"
+            done
+          done
+          # each one starts and knows the flags the server gives it
+          for p in telemost wbstream dion bitrix; do
+            out=$("/tmp/rel/headless-$p-creator-linux-amd64" --help 2>&1 || true)
+            for f in -cookies -resources -write-file; do printf '%s' "$out" | grep -q -- "$f" || { echo "$p: no $f"; exit 1; }; done
+          done
+          cd /tmp/rel && sha256sum headless-* | tee SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "bridge-bins-${{ github.run_number }}" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+            --title "Bridge programs ${{ github.run_number }}" \
+            --notes "whitelist-bypass v0.4.4 creators (MIT) with the stray-frame fix, for the family server (pinned by SHA-256 in its installer)."
