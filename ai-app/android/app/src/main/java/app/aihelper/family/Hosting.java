@@ -97,6 +97,16 @@ final class Hosting {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap icon) {
                 if (inPanel(url)) finish.run();
+                String host = Uri.parse(url == null ? "" : url).getHost();
+                if (host != null && (host.equals("accounts.google.com") || host.endsWith(".accounts.google.com"))) {
+                    // Google does not let anyone sign in inside an app's built-in browser (its page stays white)
+                    view.stopLoading();
+                    if (view.canGoBack()) view.goBack();
+                    else view.loadUrl(SITE + "/login");
+                    say(info, "Вход через Google в приложении невозможен — так решил Google. Войдите по почте: на странице "
+                            + "«Войти по почте» → свой e-mail → введите код из письма. Или задайте пароль в кабинете HostVDS "
+                            + "(с компьютера: Аккаунт → Безопасность) и входите e-mail + пароль.");
+                }
             }
 
             @Override
