@@ -53,7 +53,7 @@ final class Updater {
 
     private Updater() {}
 
-    private static HttpURLConnection open(String url) throws Exception {
+    static HttpURLConnection open(String url) throws Exception {
         int port = VpnSvc.socksPort;
         URL u = new URL(url);
         HttpURLConnection c = (HttpURLConnection) (port > 0

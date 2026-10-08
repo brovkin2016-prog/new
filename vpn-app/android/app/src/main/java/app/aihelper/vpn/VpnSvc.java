@@ -153,13 +153,14 @@ public final class VpnSvc extends VpnService {
                 }
                 fails = 0;
                 State.set(State.Phase.ON, "");
-                Log.i(TAG, "connected via " + profile.host);
+                Diag.i(this, "connected via " + profile.host);
                 ping();
                 err = watch(own[0]);
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
             if (!mine()) break;
             fails++;
+            Diag.i(this, "retry " + fails + ": " + err);
             State.set(tun == null ? State.Phase.CONNECTING : State.Phase.RETRYING, err + " Пробую снова…");
             update();
             if (!sleep(Math.min(30_000L, 1000L << Math.min(fails, 5)))) break;
@@ -194,7 +195,9 @@ public final class VpnSvc extends VpnService {
             if (now - lastPing >= 20_000) {
                 lastPing = now;
                 ping();
-                Log.i(TAG, "traffic down " + State.down + " up " + State.up);
+                Diag.i(this, "traffic down " + State.down + " up " + State.up + ", now " + Math.round(State.downRate / 1024)
+                        + "/" + Math.round(State.upRate / 1024) + " KB/s" + (profile.bridge ? " (bridge)" : ""));
+                Diag.upload(this, false);  // now and then the journal goes to the family server
                 if (!mine()) return "";  // switched off while it was pinging: the screen says «off», not «retrying»
                 TProxyService t = hev;
                 if (t == null || !t.TProxyIsRunning()) {
@@ -268,7 +271,7 @@ public final class VpnSvc extends VpnService {
         } catch (InterruptedException e) {
             return "";
         } catch (Exception e) {
-            Log.w(TAG, "client start", e);
+            Diag.w(this, "client start", e);
             return "Не получилось запустить VPN на этом телефоне.";
         }
     }
@@ -308,7 +311,7 @@ public final class VpnSvc extends VpnService {
         } catch (InterruptedException e) {
             return "";
         } catch (Exception e) {
-            Log.w(TAG, "bridge start", e);
+            Diag.w(this, "bridge start", e);
             return "Не получилось запустить мост на этом телефоне.";
         }
     }
@@ -327,12 +330,12 @@ public final class VpnSvc extends VpnService {
                     } catch (Exception e) {
                         lastError = "Нет интернета: не найден «" + name + "».";
                     }
-                    Log.i(TAG, "bridge: resolve " + name + " -> " + ip);
+                    Diag.i(this, "bridge: resolve " + name + " -> " + ip);
                     w.write(ip + "\n");
                     w.flush();
                 } else if (line.startsWith("STATUS:")) {
                     String st = line.substring(7).trim();
-                    Log.i(TAG, "bridge: " + st);
+                    Diag.i(this, "bridge: " + st);
                     if (st.equals("READY")) {
                         w.write("JOIN:" + join + "\n");
                         w.flush();
@@ -350,7 +353,7 @@ public final class VpnSvc extends VpnService {
                         proc.destroy();  // a new try from the start
                     }
                 } else {
-                    Log.i(TAG, "relay: " + line);
+                    Diag.i(this, "relay: " + line);
                 }
             }
         } catch (Exception ignored) {
@@ -362,7 +365,7 @@ public final class VpnSvc extends VpnService {
     private void read(Process proc, CountDownLatch up) {
         try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
             for (String line; (line = r.readLine()) != null; ) {
-                Log.i(TAG, "hy: " + line);
+                Diag.i(this, "hy: " + line);
                 if (line.contains("connected to server")) up.countDown();
                 else if (line.contains("FATAL") || line.contains("ERROR")) lastError = plain(line);
             }
@@ -417,7 +420,7 @@ public final class VpnSvc extends VpnService {
                     // it is this very package
                 }
             }
-            Log.i(TAG, allowed > 0 ? "through the VPN: " + only : "through the VPN: all apps");
+            Diag.i(this, allowed > 0 ? "through the VPN: " + only : "through the VPN: all apps");
             b.setConfigureIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                     PendingIntent.FLAG_IMMUTABLE));
             if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);
@@ -448,7 +451,7 @@ public final class VpnSvc extends VpnService {
             }
             return true;
         } catch (Exception e) {
-            Log.w(TAG, "tunnel", e);
+            Diag.w(this, "tunnel", e);
             fail("Не получилось включить VPN на этом телефоне.");
             return false;
         }
@@ -477,7 +480,7 @@ public final class VpnSvc extends VpnService {
         }
         State.pingMs = best;
         State.pingAt = System.currentTimeMillis();
-        Log.i(TAG, best > 0 ? "ping " + best + " ms" : "ping failed");
+        Diag.i(this, best > 0 ? "ping " + best + " ms" : "ping failed");
         State.fire();
         update();
     }
@@ -500,7 +503,7 @@ public final class VpnSvc extends VpnService {
         State.set(State.Phase.OFF, why);
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
-        Log.i(TAG, "stopped" + (why != null ? ": " + why : ""));
+        Diag.i(this, "stopped" + (why != null ? ": " + why : ""));
     }
 
     private void stopParts() {

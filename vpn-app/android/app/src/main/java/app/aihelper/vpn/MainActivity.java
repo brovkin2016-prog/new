@@ -75,6 +75,8 @@ public class MainActivity extends Activity implements State.Listener {
         changed();
         avatar.refresh(Profile.chosen(this));
         Updater.check(this, false);
+        BridgeSync.run(this, false);  // the owner's bridge, kept ready (nobody else gets one)
+        Diag.upload(this, false);  // the journal to the family server (it keeps the owner's only)
     }
 
     @Override

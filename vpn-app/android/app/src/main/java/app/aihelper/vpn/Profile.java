@@ -199,18 +199,42 @@ final class Profile {
         return i > 0 && j > 0 && a.substring(0, i).equals(b.substring(0, j));
     }
 
-    static Profile add(Context c, Profile p) {
-        List<Profile> list = all(c);
+    private static int same(List<Profile> list, Profile p) {
         int at = -1;
         for (int i = 0; i < list.size(); i++) {
             Profile o = list.get(i);
             // the same server and the same person (hysteria2://name:key@…): a new key replaces the old one, no dead copy stays
             if (o.host.equals(p.host) && o.ports.equals(p.ports) && (o.auth.equals(p.auth) || sameUser(o.auth, p.auth))) at = i;
         }
+        return at;
+    }
+
+    static synchronized Profile add(Context c, Profile p) {
+        List<Profile> list = all(c);
+        int at = same(list, p);
         if (at >= 0) list.set(at, p);
         else list.add(p);
         save(c, list);
         select(c, at >= 0 ? at : list.size() - 1);
         return p;
+    }
+
+    /** Adds or renews a server without choosing it (the bridge the family server keeps ready for the owner). */
+    static synchronized boolean keep(Context c, Profile p) {
+        List<Profile> list = all(c);
+        int cur = current(c);
+        String chosen = cur >= 0 && cur < list.size() ? list.get(cur).link : null;
+        int at = same(list, p);
+        if (at >= 0 && list.get(at).link.equals(p.link)) return false;
+        if (at >= 0) list.set(at, p);
+        else list.add(p);
+        save(c, list);
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i).link.equals(chosen)) {
+                select(c, i);
+                break;
+            }
+        }
+        return true;
     }
 }

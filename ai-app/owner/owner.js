@@ -330,7 +330,33 @@
             el("button", { class: "btn line", text: "✉️ Тест почты", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) })));
         scroll.append(card);
       }
-      scroll.append(weekCard(), trafficCard(), eventsCard(), actionsCard(d));
+      scroll.append(weekCard(), wingerLogCard(), trafficCard(), eventsCard(), actionsCard(d));
+    }
+    // Winger's journal from the owner's phone: why the bridge works or not, how fast, where the errors are — to copy for Claude
+    function wingerLogCard() {
+      const card = el("div", { class: "card" }, el("h3", { text: "📋 Журнал Winger" }), el("div", { class: "status", text: "…" }));
+      panel({ op: "winger_log" }).then((w) => {
+        card.lastChild.remove();
+        if (w.t !== "done" || !w.at) {
+          card.append(el("small", { style: "color:var(--muted)", text: "Ещё не приходил. Winger присылает его сам раз в полчаса — только с вашего телефона (по вашему VPN)." }));
+          return;
+        }
+        const m = w.summary || {};
+        const row = (left, right, sub) => card.append(el("div", { class: "row", style: "min-height:32px" },
+          el("div", { class: "grow" }, left, sub ? el("small", { text: sub }) : null), right ? el("b", { text: right }) : null));
+        row("Получен " + when(w.at), "", [w.device, w.app ? "Winger " + w.app : ""].filter(Boolean).join(" · "));
+        if (m.bridge_up || m.bridge_lost || m.bridge_errors) row("📞 Мост", `подключался ${m.bridge_up} · рвался ${m.bridge_lost} · ошибок ${m.bridge_errors}`);
+        if (m.ping_avg) row("⏱ Отклик", `${m.ping_avg} мс`, `максимум ${m.ping_max} мс` + (m.ping_failed ? ` · без ответа ${m.ping_failed} раз` : ""));
+        if (m.retries) row("🔁 Переподключений", String(m.retries));
+        if (m.problems && m.problems.length) card.append(el("div", { style: "font:11px ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;background:var(--bg);border-radius:10px;padding:8px;margin:6px 0", text: m.problems.join("\n") }));
+        const text = () => ["Журнал Winger (" + [w.device, w.app ? "Winger " + w.app : ""].filter(Boolean).join(", ") + "), получен " + when(w.at),
+          `Мост: подключался ${m.bridge_up}, рвался ${m.bridge_lost}, ошибок ${m.bridge_errors}; отклик ср. ${m.ping_avg || "—"} мс, макс. ${m.ping_max || "—"}; без ответа ${m.ping_failed}; переподключений ${m.retries}`,
+          "", ...w.lines].join("\n");
+        card.append(el("div", { class: "big-actions", style: "margin-top:8px" },
+          el("button", { class: "btn", text: "📋 Скопировать для Claude", onclick: () => { copyText(text()); toast("Скопировано — вставьте в чат с Claude", 4000); } }),
+          el("button", { class: "btn line", text: "📤 Поделиться", onclick: () => (navigator.share ? navigator.share({ text: text() }).catch(() => copyText(text())) : copyText(text())) })));
+      }).catch(() => card.remove());
+      return card;
     }
     // the last 7 days at a glance: who used the VPN how much, what broke and was fixed, backups, the hosting's money
     function weekCard() {
