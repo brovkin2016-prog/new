@@ -364,8 +364,8 @@
     function actionsCard(d) {
       return el("div", { class: "card" }, el("h3", { text: "⚙️ Сервер" }),
         el("button", { class: "btn line wide", text: "⚡ Скорость сервера", onclick: () => act({ op: "speed" }, null, (r) => toast(`⚡ Скорость сервера: ${r.mbit} Мбит/с`, 6000)) }),
-        el("button", { class: "btn line wide", style: "margin-top:8px", text: "💾 Резервная копия на почту", onclick: async () => {
-          if (await confirmBox("Сделать резервную копию сейчас? Она придёт на почту через минуту-две.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — она придёт на почту");
+        el("button", { class: "btn line wide", style: "margin-top:8px", text: "💾 Резервная копия сейчас", onclick: async () => {
+          if (await confirmBox("Сделать резервную копию сейчас? Через минуту-две она ляжет на Яндекс Диск (папка «Семейный сервер — копии»), а без Диска придёт на почту.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — на Яндекс Диск");
         } }),
         el("button", { class: "btn line wide danger", style: "margin-top:8px", text: "♻️ Перезагрузить сервер", onclick: async () => {
           if (await confirmBox("Перезагрузить сервер? VPN, мосты и помощник пропадут примерно на минуту.", "Перезагрузить")) act({ op: "reboot" }, "♻️ Перезагружаюсь, вернусь через минуту");
