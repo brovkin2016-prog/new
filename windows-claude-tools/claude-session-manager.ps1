@@ -195,16 +195,67 @@ $btnBrowse.Add_Click({
     $fb = New-Object System.Windows.Forms.FolderBrowserDialog
     if ($fb.ShowDialog() -eq "OK") { $txtDest.Text = $fb.SelectedPath }
 })
-$btnBackup.Add_Click({
-    Log "Бэкап…"; $r = Run-Backup $txtDest.Text
-    if ($r -like "OK*") { $cfg.LastBackup = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") }
-    Log $r; Sync-Cfg; Update-Status
+# --- фоновое копирование (чтобы окно не зависало) ---
+$script:proc = $null
+$script:kind = ""
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 400
+
+function Set-Busy($on) {
+    foreach ($b in @($btnBackup,$btnRestore,$btnAuto,$btnJunc)) { $b.Enabled = -not $on }
+    if ($on) { $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor }
+    else     { $form.Cursor = [System.Windows.Forms.Cursors]::Default }
+}
+
+function Start-Copy($kind) {
+    $dest = $txtDest.Text
+    if ([string]::IsNullOrWhiteSpace($dest)) { Log "Сначала укажите папку бэкапа."; return }
+    if ($kind -eq "backup") {
+        if (-not (Test-Path $ProjSrc)) { Log "Нет папки сессий: $ProjSrc"; return }
+        $src = $ProjSrc; $dst = (Join-Path $dest "projects"); $mir = $true
+    } else {
+        $src = (Join-Path $dest "projects"); $dst = $ProjSrc; $mir = $false
+        if (-not (Test-Path $src)) { Log "Бэкап не найден: $src"; return }
+    }
+    New-Item -ItemType Directory -Force -Path $dst | Out-Null
+    $a = @($src, $dst, "/R:1", "/W:1", "/MT:16", "/NFL", "/NDL", "/NP", "/NJH", "/NJS")
+    if ($mir) { $a += "/MIR" } else { $a += "/E" }
+    Set-Busy $true
+    Log ($(if ($kind -eq "backup") { "Бэкап" } else { "Восстановление" }) + "… идёт копирование, окно активно.")
+    $script:kind = $kind
+    $script:proc = Start-Process robocopy -ArgumentList $a -WindowStyle Hidden -PassThru
+    $timer.Start()
+}
+
+$timer.Add_Tick({
+    if ($null -eq $script:proc) { $timer.Stop(); return }
+    if (-not $script:proc.HasExited) { return }
+    $timer.Stop()
+    $code = $script:proc.ExitCode
+    $script:proc = $null
+    $dest = $txtDest.Text
+    try {
+        if ($script:kind -eq "backup") {
+            $s = Join-Path $ClaudeDir "settings.json"
+            if (Test-Path $s) { Copy-Item $s (Join-Path $dest "settings.json") -Force }
+            if ($code -lt 8) { $cfg.LastBackup = (Get-Date -Format "yyyy-MM-dd HH:mm:ss"); Log "OK: бэкап готов -> $dest" }
+            else { Log "robocopy вернул код $code (возможна ошибка)" }
+        } else {
+            $s = Join-Path $dest "settings.json"
+            if (Test-Path $s) { Copy-Item $s (Join-Path $ClaudeDir "settings.json") -Force }
+            if ($code -lt 8) { Log "OK: восстановлено. В папке проекта выполните: claude --resume" }
+            else { Log "robocopy вернул код $code (возможна ошибка)" }
+        }
+    } catch { Log ("Ошибка после копирования: " + $_.Exception.Message) }
+    Sync-Cfg; Update-Status; Set-Busy $false
 })
+
+$btnBackup.Add_Click({ Start-Copy "backup" })
 $btnRestore.Add_Click({
     $ans = [System.Windows.Forms.MessageBox]::Show(
         "Восстановить сессии из`n$($txtDest.Text)`nв ваш профиль? Существующие файлы обновятся, лишние не удалятся.",
         "Восстановление", "YesNo", "Question")
-    if ($ans -eq "Yes") { Log "Восстановление…"; Log (Run-Restore $txtDest.Text); Sync-Cfg; Update-Status }
+    if ($ans -eq "Yes") { Start-Copy "restore" }
 })
 $btnOpenSess.Add_Click({ if (Test-Path $ClaudeDir) { Start-Process explorer.exe $ClaudeDir } else { Log "Папка $ClaudeDir не найдена" } })
 $btnOpenBak.Add_Click({ if (Test-Path $txtDest.Text) { Start-Process explorer.exe $txtDest.Text } else { Log "Папка бэкапа ещё не создана" } })
