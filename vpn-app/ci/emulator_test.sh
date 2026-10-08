@@ -198,7 +198,7 @@ adb exec-out screencap -p > "$OUT/7-auto.png"
 # (the screen is read from what it logs: while the VPN is on its button glows, and uiautomator cannot read a moving screen)
 wait_log "button «Тест»: ● Включено само" 15 || fail "the screen does not say it moved by itself"
 sed -e 's/^listen: :4443/listen: :4999/' -e '/^trafficStats:/,$d' /tmp/t/hy.yaml > /tmp/t/hy2.yaml
-( cd /tmp/t && HYSTERIA_LOG_LEVEL=info nohup ./hysteria server -c hy2.yaml > hy2.log 2>&1 & )
+( cd /tmp/t && HYSTERIA_LOG_LEVEL=info nohup ./hysteria server -c hy2.yaml < /dev/null > hy2.log 2>&1 & )
 wait_log "auto: «Запасной» answers again" 120 || fail "did not notice the chosen server answering again"
 wait_log "Выбранный сервер снова отвечает" 30 || fail "did not go back to the chosen server"
 for _ in $(seq 1 60); do [ "$(adb logcat -d -s AIVPN:I | grep -c 'connected via 10.0.2.2')" -ge 2 ] && break; sleep 1; done
@@ -206,6 +206,7 @@ for _ in $(seq 1 60); do [ "$(adb logcat -d -s AIVPN:I | grep -c 'connected via 
 grep -q "client connected" /tmp/t/hy2.log || fail "the chosen server saw no connection"
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (automatic choice)"
+pkill -f "hysteria server -c hy2.yaml" || true  # the second test server is not needed further (nor left running)
 echo "automatic choice: moved to the other server by itself, went back once the chosen one answered"
 
 # the shade's tile: Winger on and off without opening the app (if this Android's shell can press a tile)
@@ -213,12 +214,12 @@ adb shell am start -n $ACT --es test_select Тест >/dev/null
 sleep 2
 adb shell am force-stop $PKG
 adb logcat -c
-adb shell cmd statusbar add-tile $PKG/.VpnTile >/dev/null 2>&1
-if adb shell cmd statusbar click-tile $PKG/.VpnTile 2>&1 | grep -qiE "unknown|error|exception"; then
+timeout 20 adb shell cmd statusbar add-tile $PKG/.VpnTile >/dev/null 2>&1
+if ! OUTT=$(timeout 20 adb shell cmd statusbar click-tile $PKG/.VpnTile 2>&1) || printf "%s" "$OUTT" | grep -qiE "unknown|error|exception"; then
   echo "note: this emulator's shell cannot press a tile"
 else
   wait_log "connected via" 60 || fail "the tile did not switch the VPN on"
-  adb shell cmd statusbar click-tile $PKG/.VpnTile >/dev/null 2>&1
+  timeout 20 adb shell cmd statusbar click-tile $PKG/.VpnTile >/dev/null 2>&1
   wait_log "stopped" 20 || fail "the tile did not switch the VPN off"
   echo "tile: on and off from the shade"
 fi
