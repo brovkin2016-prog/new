@@ -250,6 +250,17 @@
         } }));
       }
       card.append(row);
+      // new versions go in by themselves at night (checked after, the old one back if anything is wrong)
+      card.append(el("div", { class: "row", style: "margin-top:6px" },
+        el("div", { class: "grow" }, "🌙 Ставить новые версии само ночью",
+          el("small", { text: u.auto ? "Около 4 ч утра. После установки — проверка; если что-то не так, вернётся прежняя версия."
+            : "Выключено: новые версии — только кнопкой «⬆️ Обновить»." })),
+        el("button", { class: "btn" + (u.auto ? " line" : ""), style: "flex:none;padding:8px 14px", text: u.auto ? "Выключить" : "Включить",
+          onclick: async () => {
+            const end = await panel({ op: "server_auto", on: !u.auto }).catch(() => null);
+            if (end && end.t === "done") { toast(end.update && end.update.auto ? "🌙 Новые версии будут ставиться сами ночью" : "Новые версии — только кнопкой"); load(); }
+            else toast("⚠️ " + ((end && end.text) || "не получилось"), 5000);
+          } })));
       if (u.key) {
         card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "🔑 Ключ обновлений", onclick: () => sheet("🔑 Ключ обновлений", (box) => {
           box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Открытый ключ этого сервера: им шифруются новые версии, "
@@ -285,6 +296,7 @@
         stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
       if (host) drawHosting(host);
       if (d.update) scroll.append(updateCard(d.update));
+      scroll.append(diagCard());
       // what takes the memory and the processor: the VPN and the assistant apart
       if (d.services && d.services.length) {
         const mb = (v) => (v === null || v === undefined ? "—" : v >= 1024 ? (v / 1024).toFixed(1) + " ГБ" : v + " МБ");
@@ -331,6 +343,24 @@
         scroll.append(card);
       }
       scroll.append(weekCard(), wingerLogCard(), trafficCard(), eventsCard(), actionsCard(d));
+    }
+    // one tap: the server checks everything a fault hides in (VPN, bridges, MAX, Winger's journal) and copies the report
+    function diagCard() {
+      return el("div", { class: "card" }, el("h3", { text: "🩺 Проверка для Claude" }),
+        el("small", { style: "color:var(--muted);display:block;margin:-4px 0 10px", text: "Сервер сам проверит VPN, мосты, MAX и журнал Winger "
+          + "и скопирует отчёт — вставьте его в чат с Claude. Адресов и ключей в отчёте нет." }),
+        el("button", { class: "btn wide", text: "🩺 Проверить и скопировать", onclick: async () => {
+          try {
+            const end = await panel({ op: "diag" }, (t) => toast(t, 60000));
+            document.querySelectorAll(".toast").forEach((t) => t.remove());
+            if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+            copyText(end.text);
+            sheet("🩺 Проверка для Claude", (box) => box.append(
+              el("div", { style: "font:11px/1.35 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card);border-radius:12px;padding:10px;margin-bottom:12px;max-height:50vh;overflow:auto", text: end.text }),
+              el("button", { class: "btn wide", text: "📋 Скопировать ещё раз", onclick: () => { copyText(end.text); toast("✅ Скопировано — вставьте в чат с Claude"); } })));
+            toast("✅ Отчёт скопирован — вставьте в чат с Claude", 5000);
+          } catch (e) { toast(problem(e)); }
+        } }));
     }
     // Winger's journal from the owner's phone: why the bridge works or not, how fast, where the errors are — to copy for Claude
     function wingerLogCard() {
