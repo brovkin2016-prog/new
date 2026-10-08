@@ -142,12 +142,18 @@ final class Profile {
     }
 
     /** Adds the link (or refreshes it when the same server and login are already there) and makes it the current one. */
+    private static boolean sameUser(String a, String b) {
+        int i = a.indexOf(':'), j = b.indexOf(':');
+        return i > 0 && j > 0 && a.substring(0, i).equals(b.substring(0, j));
+    }
+
     static Profile add(Context c, Profile p) {
         List<Profile> list = all(c);
         int at = -1;
         for (int i = 0; i < list.size(); i++) {
             Profile o = list.get(i);
-            if (o.host.equals(p.host) && o.auth.equals(p.auth) && o.ports.equals(p.ports)) at = i;
+            // the same server and the same person (hysteria2://name:key@…): a new key replaces the old one, no dead copy stays
+            if (o.host.equals(p.host) && o.ports.equals(p.ports) && (o.auth.equals(p.auth) || sameUser(o.auth, p.auth))) at = i;
         }
         if (at >= 0) list.set(at, p);
         else list.add(p);

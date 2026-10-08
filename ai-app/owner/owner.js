@@ -83,7 +83,8 @@
         list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
           el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
           el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
-            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "") })),
+            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "")
+              + (u.until ? " · ⏰ гость до " + when(u.until) : "") })),
           u.owner ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delVpn(u.name); } }),
           "›"));
       }
@@ -589,14 +590,51 @@
       const name = await ask("Имя для VPN", "Латиницей, например mama или ivan_phone");
       if (!name) return;
       if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) { toast("Только латиница, цифры, «_» и «-», до 32 знаков", 4000); return; }
+      const days = await pickDays("Надолго ли VPN для «" + name + "»?");
+      if (days === null) return;
       S.busy.vpn = true;
       toast("⏳ Добавляю «" + name + "»…", 20000);
       try {
-        const end = await panel({ op: "add", name });
+        const end = await panel({ op: "add", name, days });
         if (end.t !== "done") toast("⚠️ " + end.text, 5000);
         else { toast("✅ Выдан VPN: " + name); await load(); card(name, end); }
       } catch (e) { toast(problem(e)); }
       S.busy.vpn = false;
+    }
+    // a guest's VPN goes by itself after these days; 0 — for good
+    function pickDays(title, current) {
+      return new Promise((resolve) => {
+        sheet(title, (box, close) => {
+          const list = el("div", { class: "list" });
+          for (const [d, label] of [[0, "Бессрочно"], [1, "Гость на 1 день"], [3, "Гость на 3 дня"], [7, "Гость на неделю"], [30, "Гость на месяц"]]) {
+            list.append(el("button", { onclick: () => { close(); resolve(d); } }, el("span", { class: "ic", text: d ? "⏰" : "♾️" }),
+              el("span", { text: label + (current === d ? " ✓" : "") })));
+          }
+          box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
+            text: "Гостевой доступ выключится сам — удалять не нужно. Срок можно поменять потом в карточке человека." }), list);
+        });
+      });
+    }
+    async function rekey(u) {
+      if (!(await confirmBox(`Новый ключ для «${u.name}»? Старое подключение сразу перестанет работать (например, если телефон потерян или ссылка ушла не тому). Потом отправьте человеку новую ссылку.`, "Сменить ключ"))) return;
+      toast("⏳ Меняю ключ…", 20000);
+      try {
+        const end = await panel({ op: "rekey", name: u.name });
+        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+        toast("✅ Ключ новый. Отправьте человеку новую ссылку — кнопка в карточке.", 6000);
+        card(u.name, end);
+      } catch (e) { toast(problem(e)); }
+    }
+    async function guestDays(u) {
+      const days = await pickDays("Срок VPN для «" + u.name + "»", u.until ? -1 : 0);
+      if (days === null) return;
+      try {
+        const end = await panel({ op: "guest", name: u.name, days });
+        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+        toast(days ? `✅ ${u.name}: гость до ${when(end.until)}` : `✅ ${u.name}: бессрочно`, 4000);
+        await load();
+        card(u.name, end);
+      } catch (e) { toast(problem(e)); }
     }
     async function card(name, have) {
       let u = have;
@@ -609,7 +647,8 @@
       }
       sheet("👤 " + u.name + (u.owner ? " 👑" : ""), (box, close) => {
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
-          text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` }));
+          text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}`
+            + (u.until ? ` · ⏰ гость до ${when(u.until)}, потом выключится сам` : "") }));
         const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"], ["vless", "VLESS", "запасной, когда режут UDP"],
           ["tg", "Telegram", "Telegram без VPN: iPhone, компьютер, любой телефон (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
@@ -639,6 +678,9 @@
           box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "📲 Winger с подключением + Telegram — ссылка (24 ч)",
             onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); } }));
         }
+        box.append(el("div", { class: "big-actions", style: "margin-top:8px" },
+          el("button", { class: "btn line", text: "🔄 Новый ключ", onclick: () => { close(); rekey(u); } }),
+          u.owner ? null : el("button", { class: "btn line", text: u.until ? "⏰ Срок" : "⏰ Сделать гостем", onclick: () => { close(); guestDays(u); } })));
         if (!u.owner) {
           box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
         }

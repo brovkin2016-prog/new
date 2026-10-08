@@ -44,6 +44,22 @@ grep -q 'AITEST answer: Привет' "$OUT/tcp.log" || { echo "TCP fallback run
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 # Android's «install the update?» answered by a tap — the way a phone gets every update (1.0.115 failed here)
 vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }
+# the owner's HostVDS sign-in: the real site's page must show inside the app (not a white screen), with the bar on top
+adb logcat -c
+adb shell am start -n $PKG/app.aihelper.family.MainActivity --ez test_hosting true
+sleep 20
+adb exec-out screencap -p > "$OUT/hosting.png"
+adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+adb shell cat /sdcard/ui.xml > "$OUT/hosting.xml"
+adb logcat -d -s AIHOST:V | tee "$OUT/hosting.log"
+grep -q "Ссылка из письма" "$OUT/hosting.xml" || { echo "the HostVDS sign-in window did not open"; exit 1; }
+# what the page itself shows (the site is outside: only reported, a site down is not this app's fault)
+WORDS=$(tr '>' '\n' < "$OUT/hosting.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Ссылка из письма|Я вошёл|="✕"' | head -15 | tr '\n' ' ')
+echo "hosting page shows: ${WORDS:-NOTHING (white screen?)}"
+adb shell input keyevent KEYCODE_BACK
+sleep 3
+adb shell am force-stop $PKG
+
 if [ -n "${NEXT_APK:-}" ]; then
   OLD=$(vcode)
   adb push "$NEXT_APK" /data/local/tmp/next.apk

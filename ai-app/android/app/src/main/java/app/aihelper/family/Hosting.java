@@ -2,15 +2,27 @@ package app.aihelper.family;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Message;
+import android.util.Log;
+import android.view.KeyEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -23,6 +35,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The owner's hosting account (HostVDS). The owner signs in once on the hosting's own page inside the app, like in a
@@ -39,18 +53,34 @@ final class Hosting {
         void done(boolean ok);
     }
 
-    /** The hosting's sign-in page; done(true) once it has let the owner into the control panel. */
+    /** The hosting's sign-in page; done(true) once the owner is in (the session works), done(false) if not. */
     static void login(Activity a, Done done) {
         Dialog d = new Dialog(a, android.R.style.Theme_DeviceDefault_NoActionBar);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        WebView w = new WebView(a);
-        WebSettings s = w.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
+        FrameLayout frame = new FrameLayout(a);
+        WebView w = page(a);
+        frame.addView(w, new FrameLayout.LayoutParams(-1, -1));
         boolean[] finished = {false};
-        w.setWebViewClient(new WebViewClient() {
+        Runnable finish = () -> {
+            if (finished[0]) return;
+            finished[0] = true;
+            CookieManager.getInstance().flush();
+            d.dismiss();
+            done.done(true);
+        };
+        String ua = w.getSettings().getUserAgentString();
+        // not sure whether the owner got in (closed by «✕» or Back, or «Я вошёл»): the site's own API says
+        java.util.function.Consumer<Boolean> check = (closing) -> new Thread(() -> {
+            CookieManager.getInstance().flush();
+            boolean ok = signedIn(ua);
+            a.runOnUiThread(() -> {
+                if (finished[0]) return;
+                if (ok) finish.run();
+                else if (closing) { finished[0] = true; d.dismiss(); done.done(false); }
+                else Toast.makeText(a, "Вход ещё не закончен — завершите его на странице HostVDS", Toast.LENGTH_LONG).show();
+            });
+        }, "hosting-check").start();
+        WebViewClient client = new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 return false;  // sign-in with Google, Yandex and the like stays in this window too
@@ -58,25 +88,119 @@ final class Hosting {
 
             @Override
             public void onPageStarted(WebView view, String url, Bitmap icon) {
-                Uri u = Uri.parse(url);
-                String path = u.getPath() == null ? "" : u.getPath();
-                if (!finished[0] && "hostvds.com".equals(u.getHost()) && path.startsWith("/control")) {
-                    finished[0] = true;
-                    CookieManager.getInstance().flush();
-                    d.dismiss();
-                    done.done(true);
-                }
+                if (inPanel(url)) finish.run();
+            }
+
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
+                if (inPanel(url)) finish.run();  // the site is an app in the page: after signing in only the address changes
+            }
+        };
+        w.setWebViewClient(client);
+        // pop-up windows (sign-in with Google and the like) open over the page and close back to it
+        w.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
+                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) Log.w("AIHOST", "page: " + m.message());
+                return true;
+            }
+
+            @Override
+            public boolean onCreateWindow(WebView view, boolean dialog, boolean gesture, Message msg) {
+                WebView pop = page(a);
+                pop.setWebViewClient(client);
+                pop.setWebChromeClient(new WebChromeClient() {
+                    @Override
+                    public void onCloseWindow(WebView window) {
+                        frame.removeView(window);
+                        window.destroy();
+                    }
+                });
+                frame.addView(pop, new FrameLayout.LayoutParams(-1, -1));
+                ((WebView.WebViewTransport) msg.obj).setWebView(pop);
+                msg.sendToTarget();
+                return true;
             }
         });
-        d.setOnCancelListener(x -> {
-            if (!finished[0]) {
-                finished[0] = true;
-                done.done(false);
-            }
+        // a bar on top: a sign-in link from HostVDS's e-mail opens in the phone's browser, so it can be pasted here
+        LinearLayout bar = new LinearLayout(a);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(12, 12, 12, 12);
+        Button paste = button(a, "📋 Ссылка из письма"), ready = button(a, "✅ Я вошёл"), close = button(a, "✕");
+        paste.setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) a.getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = cm == null ? null : cm.getPrimaryClip();
+            CharSequence t = clip != null && clip.getItemCount() > 0 ? clip.getItemAt(0).coerceToText(a) : null;
+            Matcher m = MAIL_LINK.matcher(t == null ? "" : t);
+            if (m.find()) w.loadUrl(m.group());
+            else Toast.makeText(a, "Скопируйте ссылку для входа из письма HostVDS (долгое нажатие на кнопку в письме → «Копировать ссылку») и нажмите ещё раз",
+                    Toast.LENGTH_LONG).show();
         });
-        d.setContentView(w, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        ready.setOnClickListener(v -> check.accept(false));
+        close.setOnClickListener(v -> check.accept(true));
+        d.setOnKeyListener((dlg, key, ev) -> {
+            if (key != KeyEvent.KEYCODE_BACK || ev.getAction() != KeyEvent.ACTION_UP) return key == KeyEvent.KEYCODE_BACK;
+            if (frame.getChildCount() > 1) {  // a pop-up on top: close it first
+                View top = frame.getChildAt(frame.getChildCount() - 1);
+                frame.removeView(top);
+                ((WebView) top).destroy();
+            } else if (w.canGoBack()) w.goBack();
+            else check.accept(true);
+            return true;
+        });
+        bar.addView(paste, new LinearLayout.LayoutParams(0, -2, 1.4f));
+        bar.addView(ready, new LinearLayout.LayoutParams(0, -2, 1f));
+        bar.addView(close, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout root = new LinearLayout(a);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFFFFFFFF);
+        root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1f));
+        d.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (d.getWindow() != null) d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         d.show();
+        Log.i("AIHOST", "login page opened");
         w.loadUrl(SITE + "/login");
+    }
+
+    private static final Pattern MAIL_LINK = Pattern.compile("https://(?:www\\.)?hostvds\\.com/[^\\s\"'<>]+");
+
+    private static boolean inPanel(String url) {
+        Uri u = Uri.parse(url == null ? "" : url);
+        String path = u.getPath() == null ? "" : u.getPath();
+        return ("hostvds.com".equals(u.getHost()) || "www.hostvds.com".equals(u.getHost())) && path.startsWith("/control");
+    }
+
+    /** The page as in the phone's browser: Google and some others refuse sign-in in an app's web view («wv»). */
+    private static WebView page(Activity a) {
+        WebView w = new WebView(a);
+        WebSettings s = w.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setSupportMultipleWindows(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll(" Version/[0-9.]+", ""));
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
+        return w;
+    }
+
+    private static Button button(Activity a, String text) {
+        Button b = new Button(a);
+        b.setText(text);
+        b.setAllCaps(false);
+        return b;
+    }
+
+    /** Whether the session in the cookies lets us into the account. Blocking. */
+    static boolean signedIn(String ua) {
+        try {
+            if (customer(ua) != null) return true;
+            refresh(ua);
+            return customer(ua) != null;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Forgets the session: the next check asks to sign in again. */
