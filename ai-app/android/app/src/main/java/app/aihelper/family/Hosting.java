@@ -7,7 +7,6 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
-import android.os.Message;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -22,6 +21,7 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -55,12 +55,20 @@ final class Hosting {
 
     /** The hosting's sign-in page; done(true) once the owner is in (the session works), done(false) if not. */
     static void login(Activity a, Done done) {
-        Dialog d = new Dialog(a, android.R.style.Theme_DeviceDefault_NoActionBar);
+        Dialog d = new Dialog(a, android.R.style.Theme_DeviceDefault_Light_NoActionBar);  // the site is light: no dark mode over it
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         FrameLayout frame = new FrameLayout(a);
         WebView w = page(a);
         frame.addView(w, new FrameLayout.LayoutParams(-1, -1));
         boolean[] finished = {false}, told = {false};
+        String[] lastError = {""};
+        // a line under the bar: what is going on when the page stays empty, so it can be told and fixed
+        TextView info = new TextView(a);
+        info.setPadding(24, 8, 24, 8);
+        info.setTextSize(13);
+        info.setTextColor(0xFF374151);
+        info.setBackgroundColor(0xFFFFF7E6);
+        info.setText("Открываю сайт HostVDS… · " + browser());
         Runnable finish = () -> {
             if (finished[0]) return;
             finished[0] = true;
@@ -92,6 +100,36 @@ final class Hosting {
             }
 
             @Override
+            public void onPageFinished(WebView view, String url) {
+                // the site draws itself with its scripts: if after a while there is nothing on it, say why
+                view.postDelayed(() -> {
+                    if (finished[0]) return;
+                    view.evaluateJavascript("(function(){var b=document.body;if(!b)return '0|0';"
+                            + "return (b.innerText||'').trim().length+'|'+document.querySelectorAll('input,button,a').length})()", r -> {
+                        String v = r == null ? "" : r.replace("\"", "");
+                        boolean empty = v.isEmpty() || v.startsWith("0|0") || v.equals("null");
+                        Log.i("AIHOST", "page content " + v);
+                        if (empty) say(info, "Страница пустая — сайт не нарисовался. "
+                                + (lastError[0].isEmpty() ? "" : "Ошибка страницы: " + lastError[0] + ". ") + browser()
+                                + ". Можно ввести баланс вручную; пришлите этот текст тому, кто настраивал.");
+                        else info.setVisibility(View.GONE);
+                    });
+                }, 7000);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, android.webkit.WebResourceError err) {
+                if (!req.isForMainFrame()) return;
+                say(info, "Сайт HostVDS не открылся: " + err.getDescription() + " (" + err.getErrorCode() + "). Если мобильный "
+                        + "интернет работает по «белым спискам» — попробуйте через Wi‑Fi или включите Winger для всех приложений.");
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest req, android.webkit.WebResourceResponse res) {
+                if (req.isForMainFrame()) say(info, "HostVDS ответил ошибкой " + res.getStatusCode() + ". Попробуйте позже.");
+            }
+
+            @Override
             public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
                 if (inPanel(url)) finish.run();  // the site is an app in the page: after signing in only the address changes
             }
@@ -110,12 +148,12 @@ final class Hosting {
             }
         };
         w.setWebViewClient(client);
-        // pop-up windows (sign-in with Google and the like) open over the page and close back to it
         w.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
                 if (m.messageLevel() != android.webkit.ConsoleMessage.MessageLevel.ERROR) return true;
                 Log.w("AIHOST", "page: " + m.message());
+                if (lastError[0].isEmpty()) lastError[0] = m.message().length() > 120 ? m.message().substring(0, 120) : m.message();
                 // the site is written for new browsers: an old built-in one cannot read it and shows a white page
                 if (m.message().contains("SyntaxError") && !told[0] && !finished[0]) {
                     told[0] = true;
@@ -124,22 +162,6 @@ final class Hosting {
                 return true;
             }
 
-            @Override
-            public boolean onCreateWindow(WebView view, boolean dialog, boolean gesture, Message msg) {
-                WebView pop = page(a);
-                pop.setWebViewClient(client);
-                pop.setWebChromeClient(new WebChromeClient() {
-                    @Override
-                    public void onCloseWindow(WebView window) {
-                        frame.removeView(window);
-                        window.destroy();
-                    }
-                });
-                frame.addView(pop, new FrameLayout.LayoutParams(-1, -1));
-                ((WebView.WebViewTransport) msg.obj).setWebView(pop);
-                msg.sendToTarget();
-                return true;
-            }
         });
         // a bar on top: a sign-in link from HostVDS's e-mail opens in the phone's browser, so it can be pasted here
         LinearLayout bar = new LinearLayout(a);
@@ -174,6 +196,7 @@ final class Hosting {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFFFFFFFF);
         root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(info, new LinearLayout.LayoutParams(-1, -2));
         root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1f));
         d.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         if (d.getWindow() != null) d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -215,18 +238,34 @@ final class Hosting {
         return ("hostvds.com".equals(u.getHost()) || "www.hostvds.com".equals(u.getHost())) && path.startsWith("/control");
     }
 
-    /** The page as in the phone's browser: Google and some others refuse sign-in in an app's web view («wv»). */
+    /** The page as the site expects it: light (a phone's dark mode would turn an empty page black), one window. */
+    @SuppressWarnings("deprecation")
     private static WebView page(Activity a) {
         WebView w = new WebView(a);
+        w.setBackgroundColor(0xFFFFFFFF);
         WebSettings s = w.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setSupportMultipleWindows(true);
-        s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll(" Version/[0-9.]+", ""));
+        if (android.os.Build.VERSION.SDK_INT >= 33) s.setAlgorithmicDarkeningAllowed(false);
+        else if (android.os.Build.VERSION.SDK_INT >= 29) s.setForceDark(WebSettings.FORCE_DARK_OFF);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
         return w;
+    }
+
+    /** The phone's built-in browser and its version, for the line under the bar. */
+    private static String browser() {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.content.pm.PackageInfo p = WebView.getCurrentWebViewPackage();
+            if (p != null) return "встроенный браузер " + p.versionName;
+        }
+        return "Android " + android.os.Build.VERSION.RELEASE;
+    }
+
+    private static void say(TextView info, String text) {
+        Log.i("AIHOST", "info: " + text);
+        info.setText(text);
+        info.setVisibility(View.VISIBLE);
     }
 
     private static Button button(Activity a, String text) {
