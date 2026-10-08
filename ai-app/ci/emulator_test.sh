@@ -41,4 +41,33 @@ if grep -q 'via h3' "$OUT/quic.log"; then echo "QUIC: HTTP/3 ✓"
 elif [ $SYSCA = yes ]; then echo "QUIC run went over TCP although the CA is a system one"; exit 1
 else echo "QUIC not verified: the test CA could not be made a system one (answers came over TCP 8443)"; fi
 grep -q 'AITEST answer: Привет' "$OUT/tcp.log" || { echo "TCP fallback run failed"; exit 1; }
+# a real update of the app over itself: the next build (version + 1) through the app's own installer, then
+# Android's «install the update?» answered by a tap — the way a phone gets every update (1.0.115 failed here)
+vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }
+if [ -n "${NEXT_APK:-}" ]; then
+  OLD=$(vcode)
+  adb push "$NEXT_APK" /data/local/tmp/next.apk
+  adb shell "cat /data/local/tmp/next.apk | run-as $PKG sh -c 'mkdir -p cache/update && cat > cache/update/test.apk'"
+  adb shell appops set $PKG REQUEST_INSTALL_PACKAGES allow
+  adb logcat -c
+  adb shell am start -n $PKG/app.aihelper.family.MainActivity --ez test_install true
+  NEW=
+  for _ in $(seq 1 30); do
+    sleep 2
+    NEW=$(vcode)
+    [ "${NEW:-0}" -gt "${OLD:-0}" ] && break
+    if adb logcat -d -s AIUPD:V | grep -E "install: |install status [1-7] "; then echo "the update did not install"; exit 1; fi
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    B=$(adb shell cat /sdcard/ui.xml | tr '>' '\n' | grep -E 'resource-id="android:id/button1"|text="(Update|Install|UPDATE|INSTALL|Обновить|Установить)"' \
+      | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 | tr -c '0-9' ' ')
+    if [ -n "$B" ]; then
+      read -r X1 Y1 X2 Y2 <<< "$B"
+      adb shell input tap $(((X1 + X2) / 2)) $(((Y1 + Y2) / 2))
+    fi
+  done
+  adb exec-out screencap -p > "$OUT/update.png"
+  adb logcat -d -s AIUPD:V > "$OUT/update.log"
+  echo "update: version $OLD -> $NEW"
+  [ "${NEW:-0}" -gt "${OLD:-0}" ] || { echo "the update did not install (still version $NEW)"; exit 1; }
+fi
 echo "EMULATOR OK"

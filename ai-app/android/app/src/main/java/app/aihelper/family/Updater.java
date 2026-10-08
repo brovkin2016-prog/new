@@ -15,6 +15,7 @@ import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.Log;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -294,6 +295,12 @@ final class Updater {
     }
 
     /** Through the system's package installer: the answer comes back with its status and reason. */
+    /** The emulator test only: installs the newer build it put into the cache, the same way as a real update. */
+    static void testInstall(Activity a) {
+        current = new WeakReference<>(a);
+        install(a, new File(a.getCacheDir(), "update/test.apk"));
+    }
+
     private static void install(Activity a, File apk) {
         Context app = a.getApplicationContext();
         new Thread(() -> {
@@ -333,6 +340,7 @@ final class Updater {
             }
             return null;
         } catch (Exception e) {
+            Log.w("AIUPD", "install: " + e);
             if (id >= 0) {
                 try {
                     pi.abandonSession(id);  // not left half-written in the phone's installer
@@ -353,6 +361,7 @@ final class Updater {
             @Override
             public void onReceive(Context c, Intent i) {
                 int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+                Log.i("AIUPD", "install status " + status + " " + i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
                 if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                     @SuppressWarnings("deprecation")
                     Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);

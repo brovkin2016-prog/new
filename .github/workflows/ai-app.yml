@@ -88,9 +88,13 @@ jobs:
 
       - name: Debug APK for the emulator
         working-directory: ai-app/android
-        run: >
-          gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
-          -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE
+        run: |
+          # first the next version (code + 1): the test updates the app over itself with it, as a real update does
+          gradle --no-daemon assembleDebug -PversionCode=$(( ${{ steps.v.outputs.code }} + 1 )) -PcronetVersion=${{ steps.v.outputs.cronet }} \
+            -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE
+          cp app/build/outputs/apk/debug/app-debug.apk /tmp/next-debug.apk
+          gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }} \
+            -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE
 
       - name: Enable KVM
         run: |
@@ -102,6 +106,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         env:
           APK: ${{ github.workspace }}/ai-app/android/app/build/outputs/apk/debug/app-debug.apk
+          NEXT_APK: /tmp/next-debug.apk
           OUT: /tmp/out
           CA: /tmp/t/ca.pem
         with:

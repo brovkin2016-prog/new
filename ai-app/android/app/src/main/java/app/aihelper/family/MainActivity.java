@@ -146,10 +146,22 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         web.onResume();
         if (assets.takeFresh()) web.reload();
+        Intent i = getIntent();
+        if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_install", false)) {  // the emulator test only
+            i.removeExtra("test_install");
+            Updater.testInstall(this);
+            return;
+        }
         Updater.check(this, false);
     }
 
