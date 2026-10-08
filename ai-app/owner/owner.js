@@ -337,6 +337,11 @@
         if (!d.bridges.some((b) => b.id.startsWith("wb-"))) {
           card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "⚡ Быстрый мост через WB Stream", onclick: wbBridge }));
         }
+        const more = [["dion", "DION"], ["bitrix", "Битрикс24"]].filter(([p]) => !d.bridges.some((b) => b.id.startsWith(p + "-")));
+        if (more.length) {
+          card.append(el("div", { class: "big-actions", style: "margin-top:8px" },
+            ...more.map(([p, n]) => el("button", { class: "btn line", text: "➕ Мост " + n, onclick: () => acctBridge(p) }))));
+        }
         const st = d.selftest;
         card.append(el("div", { style: "font-size:13px;color:var(--muted);margin:8px 0", text: !st ? "Автопроверка моста: ещё не было"
           : st.ok ? `Проверка ${when(st.ts)}: ✓ ${st.mbit} Мбит/с, выход ${st.ip}` : `Проверка ${when(st.ts)}: ✗ ${st.err}` }),
@@ -564,6 +569,32 @@
         }
       });
     }
+    // a bridge over DION or Bitrix24: an account made there once (e-mail and password); the server signs in itself
+    function acctBridge(platform) {
+      const bx = platform === "bitrix", name = bx ? "Битрикс24" : "DION";
+      sheet("➕ Мост " + name, (box, close) => {
+        const email = el("input", { class: "input", type: "email", placeholder: "Почта аккаунта", autocomplete: "off" });
+        const pass = el("input", { class: "input", type: "password", placeholder: "Пароль", autocomplete: "off", style: "margin-top:8px" });
+        const portal = bx ? el("input", { class: "input", placeholder: "https://b24-xxxxxx.bitrix24.ru", autocomplete: "off", style: "margin-top:8px" }) : null;
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: bx
+          ? "Нужен свой бесплатный портал Битрикс24 — заведите его на сайте bitrix24.ru на почту НЕ Gmail (mail.ru, yandex.ru): "
+            + "с Gmail звонки не создаются. Адрес портала — из адресной строки после входа. Сервер сам входит и держит мост."
+          : "Нужен аккаунт DION — бесплатная регистрация на dion.vc по почте. Сервер сам входит этой почтой и паролем и держит мост." }),
+          email, pass, ...(portal ? [portal] : []),
+          el("button", { class: "btn wide", style: "margin-top:12px", text: "🌉 Поднять мост " + name, onclick: async () => {
+            const body = { op: "bridge_acct", platform, email: email.value.trim(), password: pass.value, portal: portal ? portal.value.trim() : "" };
+            if (!body.email || !body.password || (bx && !body.portal)) { toast("Заполните все поля", 3000); return; }
+            close();
+            try {
+              const end = await panel(body, (t) => toast(t, 150000));
+              document.querySelectorAll(".toast").forEach((t) => t.remove());
+              if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
+              toast(`✅ Мост ${name} работает — Winger возьмёт его сам`, 6000);
+              load();
+            } catch (e) { toast(problem(e)); }
+          } }));
+      });
+    }
     function bridgeLink(b) {
       sheet("🔗 " + b.label, (box) => {
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Ссылку вставляют в приложение моста (whitelist-bypass) на этом устройстве." }),
@@ -575,14 +606,22 @@
         const name = encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
         const tm = /^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(b.link || "");
         const wb = b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(b.link || "");
+        const dn = b.id.startsWith("dion-") && /^dion:\/\/[0-9A-Za-z_-]{4,64}$/.test(b.link || "");
+        const bx = b.id.startsWith("bitrix-") && /^https:\/\/[0-9A-Za-z-]{2,63}\.bitrix24\.(ru|by|kz|com)\/video\/[0-9A-Za-z_-]{2,64}$/.test(b.link || "");
         if (wb) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Войти в WB заново (если мост перестал работать)", onclick: wbBridge }));
-        if (tm || wb) {
-          const w = tm ? "winger-bridge://telemost?link=" + encodeURIComponent(b.link) + "&fps=24&batch=45&reliable=1&dual=0#" + name
-            : "winger-bridge://wbstream?room=" + encodeURIComponent(b.link) + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name;
+        if (dn || bx) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Сменить почту или пароль", onclick: () => acctBridge(dn ? "dion" : "bitrix") }));
+        if (tm || wb || dn || bx) {
+          const enc = encodeURIComponent(b.link);
+          const w = tm ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
+            : wb ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
+            : dn ? "winger-bridge://dion?room=" + enc + "#" + name
+            : "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name;
           box.append(el("h3", { style: "margin:16px 0 6px", text: "📲 Мост в Winger — только у вас" }),
             el("div", { style: "font-size:14px;color:var(--muted);margin-bottom:10px",
               text: (tm ? "В Winger появится «Мост»: звонок Телемоста, видео VP8 24/45, надёжная доставка (KCP)"
-                : "В Winger появится «Мост»: WB Stream, сначала быстрый канал данных, если он не пойдёт — видео 24/30 с надёжной доставкой")
+                : dn ? "В Winger появится «Мост»: DION, видео с его собственными настройками"
+                : (wb ? "В Winger появится «Мост»: WB Stream" : "В Winger появится «Мост»: Битрикс24")
+                  + ", сначала быстрый канал данных, если он не пойдёт — видео 24/30 с надёжной доставкой")
                 + " — настраивать ничего не нужно. Winger и так получает его сам; эта кнопка — если нужно сразу." }),
             el("a", { class: "btn wide", href: w, style: "text-decoration:none;text-align:center;display:block", text: "📲 Открыть в Winger" }),
             el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Скопировать ссылку для Winger",

@@ -122,9 +122,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          trap 'echo "::error::Publish: $BASH_COMMAND failed"' ERR
           CODE=${{ steps.v.outputs.code }}
           APK=ai-app/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          [ -f "$APK" ] || exit 1
+          [ -f "$APK" ] || { echo "::error::Publish: no release APK at $APK"; exit 1; }
           mkdir -p /tmp/rel && cp "$APK" /tmp/rel/ai-app-$CODE-unsigned.apk
           SHA=$(sha256sum /tmp/rel/ai-app-$CODE-unsigned.apk | cut -d' ' -f1)
           printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "cronet": "%s", "commit": "%s"}\n' \
@@ -132,6 +133,7 @@ jobs:
           cp /tmp/out/*.png /tmp/out/*.log /tmp/rel/ 2>/dev/null || true
           cp /tmp/t/hy.log /tmp/rel/hysteria.log 2>/dev/null || true
           cp /tmp/t/stub.log /tmp/rel/stub.log 2>/dev/null || true
+          find /tmp/rel -type f -size 0 -delete  # an empty file cannot be a release asset
           STATE="${{ job.status }}"
           gh release create "ai-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
             --title "ИИ-помощник 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key."
