@@ -137,6 +137,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Emulator test
+        timeout-minutes: 40  # a hung check ends here; Publish still keeps progress.txt and what was taken
         uses: reactivecircus/android-emulator-runner@v2
         env:
           APK: ${{ github.workspace }}/vpn-app/android/app/build/outputs/apk/debug/app-debug.apk

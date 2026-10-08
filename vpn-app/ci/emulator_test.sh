@@ -6,6 +6,7 @@ mkdir -p "$OUT"
 PKG=app.aihelper.vpn.debug
 ACT=$PKG/app.aihelper.vpn.MainActivity
 LINK='hysteria2://family:test-pass-123@10.0.2.2:4443/?sni=vpn.test.local&insecure=1#Тест'
+step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }  # what the test was doing, kept with the release
 fail() { echo "FAIL: $*"; echo "::error::$*"; adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"; adb exec-out screencap -p > "$OUT/fail.png"; exit 1; }
 wait_log() {  # text, seconds
   for _ in $(seq 1 "$2"); do adb logcat -d -s AIVPN:V | grep -q "$1" && return 0; sleep 1; done
@@ -26,6 +27,7 @@ sleep 2
 adb exec-out screencap -p > "$OUT/2-on.png"
 
 # the phone's own traffic through the tunnel: a web page (TCP) and a plain DNS question over UDP
+step "the phone's own traffic through the tunnel: a web page (TCP) and a plain DNS question over"
 # (Android itself asks DNS over TLS, i.e. TCP 853, so UDP is checked on purpose)
 # stdin stays open a few seconds: toybox nc may quit on its EOF before the answer has come
 page() { adb shell "( printf 'GET / HTTP/1.0\r\nHost: example.com\r\n\r\n'; sleep 6 ) | toybox nc -w 15 example.com 80 | head -1"; }
@@ -47,6 +49,7 @@ sleep 3
 adb exec-out screencap -p > "$OUT/3-traffic.png"
 
 # the speed of a connection: the one that is on, through itself
+step "the speed of a connection: the one that is on, through itself"
 adb shell am start -n $ACT --es test_speed Тест >/dev/null
 wait_log "speed: «Тест» [0-9]" 40 || fail "no speed for the connection that is on"
 adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1
@@ -59,12 +62,14 @@ sleep 2
 adb exec-out screencap -p > "$OUT/4-off.png"
 
 # and of a connection that is not on: through a short-lived client of its own
+step "and of a connection that is not on: through a short-lived client of its own"
 adb logcat -c
 adb shell am start -n $ACT --es test_speed Тест >/dev/null
 wait_log "speed: «Тест» [0-9].*separate test client" 50 || fail "no speed for a connection that is not on"
 adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1
 
 # the bridge's way with names (the tunnel's own DNS answers, the connection carries the name, the far side looks it up):
+step "the bridge's way with names (the tunnel's own DNS answers, the connection carries the name"
 # tried with the server here, as CI has no real call
 adb logcat -c
 adb shell am start -n $ACT --ez test_all true --ez test_mapdns true --ez test_connect true
@@ -82,10 +87,12 @@ adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"
 grep -c "hy:" "$OUT/logcat.txt"
 
 # only the chosen apps through the VPN: Chrome (on this emulator, not ticked by default) is chosen; the app must see
+step "only the chosen apps through the VPN: Chrome (on this emulator, not ticked by default) is "
 # it (Android 11+ hides other apps unless the manifest names them), and the shell's own traffic must then go straight
 adb logcat -c
 adb shell am start -n $ACT --es test_apps com.android.chrome --ez test_connect true
 # (YouTube on this emulator image is ticked by default too: the list must name Chrome, and YouTube shows the app sees them)
+step "(YouTube on this emulator image is ticked by default too: the list must name Chrome, and Y"
 wait_log "through the VPN: \[.*com\.android\.chrome" 60 || fail "the chosen app did not reach the VPN (is it visible to the app?)"
 wait_log "connected via" 60 || fail "no connection with only the chosen apps"
 sleep 2
@@ -100,6 +107,7 @@ adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off (only the chosen apps)"
 
 # any app on the phone can be ticked, not only the known ones: the picker lists them (search «sett» → Settings), and a
+step "any app on the phone can be ticked, not only the known ones: the picker lists them (search"
 # ticked one (Settings) reaches the VPN
 adb logcat -c
 adb shell am start -n $ACT --es test_pick sett
@@ -120,6 +128,7 @@ wait_log "stopped" 20 || fail "did not switch off (an app outside the known list
 echo "any app: the picker lists the phone's apps, Settings ticked goes through the VPN"
 
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
+step "a real update of the app over itself: the next build (version + 1) through the app's own i"
 # Android's «install the update?» answered by a tap — the way a phone gets every update
 vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }
 if [ -n "${NEXT_APK:-}" ]; then
@@ -149,6 +158,7 @@ if [ -n "${NEXT_APK:-}" ]; then
 fi
 
 # the owner's bridge: a winger-bridge:// link starts the whitelist-bypass relay instead of Hysteria; it must take the
+step "the owner's bridge: a winger-bridge:// link starts the whitelist-bypass relay instead of H"
 # call's settings and ask the app for Telemost's address (the call itself needs the family server's Yandex account,
 # so here a made-up call is refused by Telemost — the point is that everything up to the call works)
 BRIDGE='winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234&fps=24&batch=45&reliable=1#Мост CI'
@@ -166,6 +176,7 @@ sleep 3
 echo "bridge: relay started, settings taken, addresses answered"
 
 # a button for each connection: the server's and the bridge's are on the screen; a tap on the server's switches on
+step "a button for each connection: the server's and the bridge's are on the screen; a tap on th"
 # through the server
 adb logcat -c
 adb shell am start -n $ACT >/dev/null
@@ -185,6 +196,7 @@ wait_log "stopped" 20 || fail "did not switch off (the connection's button)"
 echo "connection buttons: the server's and the bridge's shown, the server's switches on through it"
 
 # the automatic choice: the chosen server does not answer → Winger moves to another one by itself; once the chosen one
+step "the automatic choice: the chosen server does not answer → Winger moves to another one by i"
 # answers again (a second test server comes up on its port), it goes back to it
 DEAD='hysteria2://family:test-pass-123@10.0.2.2:4999/?sni=vpn.test.local&insecure=1#Запасной'
 adb logcat -c
@@ -196,6 +208,7 @@ wait_log "connected via 10.0.2.2" 60 || fail "the other server did not connect a
 sleep 2
 adb exec-out screencap -p > "$OUT/7-auto.png"
 # (the screen is read from what it logs: while the VPN is on its button glows, and uiautomator cannot read a moving screen)
+step "(the screen is read from what it logs: while the VPN is on its button glows, and uiautomat"
 wait_log "button «Тест»: ● Включено само" 15 || fail "the screen does not say it moved by itself"
 sed -e 's/^listen: :4443/listen: :4999/' -e '/^trafficStats:/,$d' /tmp/t/hy.yaml > /tmp/t/hy2.yaml
 ( cd /tmp/t && HYSTERIA_LOG_LEVEL=info nohup ./hysteria server -c hy2.yaml < /dev/null > hy2.log 2>&1 & )
@@ -210,6 +223,7 @@ pkill -f "hysteria server -c hy2.yaml" || true  # the second test server is not 
 echo "automatic choice: moved to the other server by itself, went back once the chosen one answered"
 
 # the shade's tile: Winger on and off without opening the app (if this Android's shell can press a tile)
+step "the shade's tile: Winger on and off without opening the app (if this Android's shell can p"
 adb shell am start -n $ACT --es test_select Тест >/dev/null
 sleep 2
 adb shell am force-stop $PKG
@@ -225,6 +239,7 @@ else
 fi
 
 # other call services for the bridge: a WB Stream bridge starts the relay in its own mode with its room and the data
+step "other call services for the bridge: a WB Stream bridge starts the relay in its own mode wi"
 # channel first (the call itself needs the family server's WB account, as with Telemost)
 WB='winger-bridge://wbstream?room=wbstream%3A%2F%2F0123456789abcdef&mode=dc#МостWB'
 adb logcat -c
@@ -240,6 +255,7 @@ adb shell "am start -n $ACT --es test_remove МостWB" >/dev/null; sleep 1
 adb shell am start -n $ACT --es test_remove Запасной >/dev/null; sleep 1
 
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install
+step "the release build as the family server makes it: the icon picture swapped, re-aligned, sig"
 if [ -n "${ICON_APK:-}" ]; then
   adb install -r "$ICON_APK" || fail "the APK with the swapped icon did not install"
   adb shell pm path app.aihelper.vpn | grep -q "base.apk" || fail "the APK with the swapped icon is not installed"
