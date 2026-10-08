@@ -1142,32 +1142,11 @@
   }
 
   // ---------- the owner's «Управление» tab: the server, VPN access and the app's people ----------
-  const UNLOCK_MS = 3 * 60 * 1000;
-  let unlockedAt = 0, unlocking = null;
-  function unlockPhone() {  // the phone's fingerprint or PIN; true, false, or "old" for an app without it
-    if (Date.now() - unlockedAt < UNLOCK_MS || !Native) return Promise.resolve(true);
-    if (!Native.unlock) return Promise.resolve("old");
-    if (!unlocking) {  // one prompt at a time, however many times the tab is shown meanwhile
-      unlocking = new Promise((resolve) => {
-        window.__aiUnlock = (how) => {
-          window.__aiUnlock = null;
-          unlocking = null;
-          if (how !== "no") unlockedAt = Date.now();
-          resolve(how !== "no");
-        };
-        Native.unlock("Управление сервером");
-      });
-    }
-    return unlocking;
-  }
   function bytes(n) {
     n = +n || 0;
     for (const u of ["Б", "КБ", "МБ", "ГБ"]) { if (n < 1024) return (u === "Б" ? n : n.toFixed(1)) + " " + u; n /= 1024; }
     return n.toFixed(1) + " ТБ";
   }
-  document.addEventListener("visibilitychange", () => {  // back from the background with the lock expired: ask again
-    if (!document.hidden && !unlocking && S.tab === "vpn" && S.views.vpn && Date.now() - unlockedAt >= UNLOCK_MS) S.views.vpn.onShow();
-  });
   function ago(ts) {
     const s = Math.max(0, Date.now() / 1000 - ts);
     return s < 3600 ? Math.max(1, Math.round(s / 60)) + " мин" : s < 86400 ? Math.round(s / 3600) + " ч" : Math.round(s / 86400) + " дн.";
@@ -1197,20 +1176,7 @@
     const OPS = { server: "status", vpn: "users", app: "app_list" };
     let data = null;
     const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
-    function locked(text, button, action) {
-      scroll.innerHTML = "";
-      scroll.append(el("div", { class: "empty" }, el("div", { class: "emoji", text: "🔒" }), el("h2", { text: "Управление" }),
-        el("p", { text }), button ? el("button", { class: "btn", text: button, onclick: action }) : null));
-    }
-    async function enter() {
-      locked("Подтвердите, что это вы: отпечатком или PIN телефона.", "Открыть", enter);
-      const ok = await unlockPhone();
-      if (ok === "old") {
-        locked("Для этого раздела нужна новая версия приложения: вход в него — по отпечатку или PIN телефона.", "Обновить приложение",
-          () => Native.checkUpdate(true));
-        return;
-      }
-      if (!ok) { locked("Подтвердите, что это вы: отпечатком или PIN телефона.", "Открыть", enter); return; }
+    function enter() {  // only the owner has this tab, on the owner's own phone: it opens at once, no fingerprint
       open = true;
       load();
     }
@@ -1817,7 +1783,7 @@
     return { root, peek, redraw: () => open && draw(),
       sub: () => ({ server: "состояние, мосты, события", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется приложением" })[part],
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
-      onShow: () => (open && Date.now() - unlockedAt < UNLOCK_MS ? load() : (open = false, enter())) };
+      onShow: () => (open ? load() : enter()) };
   }
 
   // the translator: a full screen of its own
