@@ -80,7 +80,7 @@ jobs:
           mkdir -p win-app/bin
           (cd vpn-app/bridge && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ../../win-app/bin/winger-relay.exe ./relay)
           cd win-app
-          go run github.com/tc-hib/go-winres@v0.3.3 simply --icon winger.png --manifest gui \
+          go run github.com/tc-hib/go-winres@v0.3.3 simply --icon winger.ico --manifest gui \
             --product-name "Winger VPN" --file-description "Winger VPN" --product-version "1.0.${{ steps.v.outputs.code }}"
           V="-X main.versionName=1.0.${{ steps.v.outputs.code }} -X main.versionCodeStr=${{ steps.v.outputs.code }}"
           CGO_ENABLED=0 go build -trimpath -tags "$TAGS" -ldflags "-checklinkname=0 -s -w $V -H windowsgui" -o winger.exe .
