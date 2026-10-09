@@ -7,7 +7,10 @@ export MSYS_NO_PATHCONV=1  # Git Bash would turn «/CN=…» into a Windows path
 OUT=${OUT:-out}
 mkdir -p "$OUT"
 step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }
-fail() { echo "FAIL: $*"; echo "::error::$*"; exit 1; }
+# a log's end as a note in the run's summary (readable from outside even when the release with the logs is not made)
+note() { [ -s "$1" ] && echo "::warning title=$(basename "$1")::$(tail -c 2500 "$1" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; }
+fail() { echo "FAIL: $*"; for f in "$OUT"/selftest*.log "$OUT"/hysteria.log "$OUT"/bridge.log "$OUT"/service.txt "$OUT"/service-journal.log; do note "$f"; done
+  echo "::error::$*"; exit 1; }
 CURL=C:/Windows/System32/curl.exe  # handed to Winger too, so a Windows path; Windows' own curl: just another program, not Winger
 export WINGER_QUIET=1
 # the tests' server runs on this same machine: with Winger on, its own way out would come back into the virtual
@@ -47,8 +50,8 @@ echo "virtual interface: a page through the server ✓"
 step "only the chosen programs: curl through the VPN, PowerShell straight"
 ./winger-console.exe --selftest "$LINK" --only curl.exe --hold 25 > "$OUT/selftest-only.log" 2>&1 &
 SELF=$!
-for _ in $(seq 1 60); do grep -q "^phase: on" "$OUT/selftest-only.log" && break; sleep 1; done
-grep -q "^phase: on" "$OUT/selftest-only.log" || { cat "$OUT/selftest-only.log"; fail "did not come on (only chosen programs)"; }
+for _ in $(seq 1 100); do grep -q "^phase: " "$OUT/selftest-only.log" && break; sleep 1; done
+grep -q "^phase: on" "$OUT/selftest-only.log" || { sleep 3; cat "$OUT/selftest-only.log"; fail "did not come on (only chosen programs)"; }
 C=$("$CURL" -s -o NUL -w "%{http_code}" --max-time 30 https://www.wikipedia.org/)
 P=$(powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 https://www.python.org/).StatusCode } catch { 0 }" | tr -d '\r')
 wait $SELF

@@ -126,5 +126,15 @@ jobs:
           cp out/* rel/ 2>/dev/null || true
           find rel -type f -size 0 -delete
           STATE="${{ job.status }}"
-          gh release create "win-app-$CODE" rel/* --prerelease --target "$GITHUB_SHA" \
-            --title "Winger для Windows 1.0.$CODE" --notes "Build $CODE (tests: $STATE)."
+          ls -la rel
+          # gh's own words go into the run's summary: the job's log cannot be read from outside
+          for try in 1 2; do
+            if R=$(gh release create "win-app-$CODE" rel/* --prerelease --target "$GITHUB_SHA" \
+                 --title "Winger для Windows 1.0.$CODE" --notes "Build $CODE (tests: $STATE)." 2>&1); then
+              echo "$R"; exit 0
+            fi
+            echo "::warning::Publish, try $try: $(echo "$R" | tail -4 | tr '\n' ' ')"
+            gh release delete "win-app-$CODE" --yes --cleanup-tag 2>/dev/null || true
+            sleep 30
+          done
+          echo "::error::Publish: the release was not created (gh's words above)"; exit 1
