@@ -9,7 +9,7 @@ mkdir -p "$OUT"
 step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }
 # a log's end as a note in the run's summary (readable from outside even when the release with the logs is not made)
 note() { [ -s "$1" ] && echo "::warning title=$(basename "$1")::$(tail -c 2500 "$1" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; }
-fail() { echo "FAIL: $*"; for f in "$OUT"/selftest*.log "$OUT"/hysteria.log "$OUT"/bridge.log "$OUT"/service.txt "$OUT"/service-journal.log; do note "$f"; done
+fail() { echo "FAIL: $*"; for f in "$OUT"/network.txt "$OUT"/selftest*.log "$OUT"/hysteria.log "$OUT"/bridge.log "$OUT"/service.txt "$OUT"/service-journal.log; do note "$f"; done
   echo "::error::$*"; exit 1; }
 CURL=C:/Windows/System32/curl.exe  # handed to Winger too, so a Windows path; Windows' own curl: just another program, not Winger
 export WINGER_QUIET=1
@@ -37,6 +37,11 @@ sleep 3
 grep -q "server up and running" "$OUT/hysteria.log" || { cat "$OUT/hysteria.log"; fail "the test server did not start"; }
 IP=$(powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -notmatch 'Loopback' -and \$_.IPAddress -notmatch '^169\.' } | Select-Object -First 1).IPAddress" | tr -d '\r')
 echo "server at $IP"
+for hp in "8.8.8.8 853" "1.1.1.1 443" "1.1.1.1 53"; do  # what this machine's own network lets out (for reading a failure)
+  set -- $hp
+  echo "$1:$2 $(powershell -NoProfile -Command "(Test-NetConnection $1 -Port $2 -WarningAction SilentlyContinue).TcpTestSucceeded" | tr -d '\r')" >> "$OUT/network.txt"
+done
+cat "$OUT/network.txt"
 LINK="hysteria2://family:test-pass-123@$IP:4443/?sni=vpn.test.local&insecure=1#CI"
 
 step "the virtual interface: another program's page goes through the server, by its name"

@@ -68,10 +68,10 @@ func Config(o EngineOptions) map[string]any {
 	only := len(o.OnlyApps) > 0
 	// names: for all programs the far side looks them up (a made-up address here, the name goes with the connection —
 	// quick, and nothing the provider's DNS would spoil); with chosen programs only, the others need real addresses:
-	// then names are asked through the connection
+	// then names are asked through the connection (plain DNS to 1.1.1.1 over it, as on the phone)
 	dns := map[string]any{
 		"servers": []any{
-			map[string]any{"tag": "remote", "type": "tls", "server": "8.8.8.8", "detour": "proxy"},
+			map[string]any{"tag": "remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"},
 			map[string]any{"tag": "local", "type": "local"},
 			map[string]any{"tag": "fake", "type": "fakeip", "inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18"},
 		},
