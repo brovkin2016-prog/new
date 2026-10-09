@@ -152,7 +152,10 @@ public final class VpnSvc extends VpnService {
             public void onAvailable(Network n) {
                 if (last != null && !last.equals(n)) {
                     netChanged = true;
-                    Diag.i(VpnSvc.this, "network changed");
+                    android.net.NetworkCapabilities c = cm.getNetworkCapabilities(n);
+                    String kind = c == null ? "?" : c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ? "Wi-Fi"
+                            : c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) ? "mobile" : "other";
+                    Diag.i(VpnSvc.this, "network changed → " + kind);
                 }
                 last = n;
             }
@@ -270,8 +273,17 @@ public final class VpnSvc extends VpnService {
             if (netChanged) {
                 netChanged = false;
                 backAt = 0;  // another network: the chosen server may answer on it, look now
-                // the bridge's call finds its way back by itself; the server's connection is made anew at once
-                if (!profile.bridge) return NET_CHANGED;
+                // a phone may flip between Wi-Fi and mobile data, or its network may blink, without the connection
+                // breaking (the server takes it from the new address): it is made anew only when nothing comes back
+                // through it; the bridge's call finds its way back by itself
+                if (!profile.bridge) {
+                    if (!sleep(2000)) return "";
+                    int ms = probe(6000);
+                    if (ms == 0 && mine()) ms = probe(6000);
+                    if (!mine()) return "";
+                    if (ms == 0) return NET_CHANGED;
+                    Diag.i(this, "network changed, the connection holds (" + ms + " ms)");
+                }
             }
             Profile chosen = preferred;
             if (chosen != null && !chosen.bridge && !chosen.link.equals(profile.link) && Apps.autoBridge(this)) {

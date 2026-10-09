@@ -56,6 +56,21 @@ adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1
 adb logcat -d -s AIVPN:I | grep "speed: «Тест»" | tail -1 | grep -qE "speed: «Тест» (0\.0[1-9]|0\.[1-9]|[1-9])" || fail "the speed test downloaded nothing"
 adb exec-out screencap -p > "$OUT/3a-speed.png"
 
+# the phone moves between networks (Wi-Fi off and on again): the VPN must stay on — made anew only if the
+# connection really broke — and not go round and round reconnecting
+step "network changes: Wi-Fi off and on, the VPN stays on"
+adb logcat -c
+adb shell svc wifi disable; sleep 12
+adb shell svc wifi enable; sleep 15
+adb logcat -d -s AIVPN:I | grep -E "network changed|connection holds|reconnecting on the new network|connected via|retry" | tee "$OUT/netchange.log"
+grep -q "network changed" "$OUT/netchange.log" || echo "note: this emulator did not report a network change"
+for _ in 1 2 3; do R=$(page); echo "$R" | grep -q "HTTP/1" && break; sleep 3; done
+echo "after the network changes: $R"
+echo "$R" | grep -q "HTTP/1" || fail "no page through the VPN after the network changed"
+[ "$(grep -c "reconnecting on the new network" "$OUT/netchange.log")" -le 2 ] || fail "the VPN went round reconnecting after the network changed"
+grep -q "retry" "$OUT/netchange.log" && fail "a network change counted as a failure (retry)"
+echo "network change: the VPN stayed on ($(grep -c 'connection holds' "$OUT/netchange.log") held, $(grep -c 'reconnecting on the new network' "$OUT/netchange.log") made anew)"
+
 adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off"
 sleep 2
