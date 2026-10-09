@@ -43,14 +43,20 @@ jobs:
             -addext 'subjectAltName=DNS:vpn.test.local' -keyout key.pem -out cert.pem
           gh release download "$HY_VERSION" --repo apernet/hysteria --pattern hysteria-linux-amd64 --output hysteria && chmod +x hysteria
           printf 'listen: 127.0.0.1:4443\ntls:\n  cert: /tmp/t/cert.pem\n  key: /tmp/t/key.pem\nauth:\n  type: userpass\n  userpass:\n    family: "test-pass-123"\n' > hy.yaml
-          nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
-          mkdir -p /tmp/wd
-          WINGER_DATA=/tmp/wd nohup /tmp/winger --serve --no-tun > /tmp/out/serve.log 2>&1 &
-          sleep 3
+          HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
           cd "$GITHUB_WORKSPACE/win-app/ci"
           npm init -y >/dev/null && npm install --silent playwright@1.49.1 && npx playwright install --with-deps chromium >/dev/null
-          WDATA=/tmp/wd OUT=/tmp/out WLINK='hysteria2://family:test-pass-123@127.0.0.1:4443/?sni=vpn.test.local&insecure=1#%D0%A2%D0%B5%D1%81%D1%82' node ui_test.js
-          DARK=1 WDATA=/tmp/wd OUT=/tmp/out WLINK='hysteria2://family:test-pass-123@127.0.0.1:4443/?sni=vpn.test.local&insecure=1#%D0%A2%D0%B5%D1%81%D1%82' node ui_test.js
+          LINK='hysteria2://family:test-pass-123@127.0.0.1:4443/?sni=vpn.test.local&insecure=1#%D0%A2%D0%B5%D1%81%D1%82'
+          for theme in light dark; do  # each run with fresh data, as a new computer
+            rm -rf /tmp/wd && mkdir -p /tmp/wd
+            WINGER_DATA=/tmp/wd /tmp/winger --serve --no-tun > /tmp/out/serve-$theme.log 2>&1 &
+            P=$!
+            sleep 3
+            DARK=$([ $theme = dark ] && echo 1) WDATA=/tmp/wd OUT=/tmp/out WLINK="$LINK" node ui_test.js
+            kill $P; wait $P 2>/dev/null || true
+          done
+          # the window's own check went through the server (not straight past it)
+          grep -qE 'reqAddr.*(cloudflare|gstatic)' /tmp/t/hy.log || { echo "::error::Winger's own check did not go through the server"; exit 1; }
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Logs as a release (the job's own log cannot be read from outside)

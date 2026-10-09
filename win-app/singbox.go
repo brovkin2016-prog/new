@@ -82,11 +82,13 @@ func Config(o EngineOptions) map[string]any {
 	if !only {
 		dns["rules"] = []any{map[string]any{"query_type": []string{"A", "AAAA"}, "server": "fake"}}
 	}
+	// the local port goes through the connection first of all: this program's own checks come in by it, and must not be
+	// taken for this program's own traffic (which goes straight)
 	rules := []any{
 		map[string]any{"action": "sniff"},
+		map[string]any{"inbound": []string{"probe-in"}, "outbound": "proxy"},
 		map[string]any{"process_name": o.Own, "outbound": "direct"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
-		map[string]any{"inbound": []string{"probe-in"}, "outbound": "proxy"},
 		map[string]any{"ip_is_private": true, "outbound": "direct"},
 	}
 	final := "proxy"
@@ -95,7 +97,7 @@ func Config(o EngineOptions) map[string]any {
 		final = "direct"
 	}
 	if len(o.Own) == 0 {
-		rules = append(rules[:1], rules[2:]...)
+		rules = append(rules[:2], rules[3:]...)
 	}
 	logOpts := map[string]any{"level": "warn", "timestamp": true}
 	if o.LogFile != "" {

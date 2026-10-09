@@ -3,6 +3,7 @@
 # interface on — other programs' pages must go through the server (by name), only the chosen ones when so set; the
 # bridge's program starts and asks for names; the installed service is driven by the window's API, then removed.
 set -x
+export MSYS_NO_PATHCONV=1  # Git Bash would turn «/CN=…» into a Windows path
 OUT=${OUT:-out}
 mkdir -p "$OUT"
 step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }
@@ -24,8 +25,10 @@ auth:
     family: "test-pass-123"
 EOT
 netsh advfirewall firewall add rule name=hy-test dir=in action=allow protocol=UDP localport=4443 >/dev/null
+[ -s cert.pem ] || fail "no test certificate"
 HYSTERIA_LOG_LEVEL=debug ./hysteria.exe server -c hy.yaml > "$OUT/hysteria.log" 2>&1 &
 sleep 3
+grep -q "server up and running" "$OUT/hysteria.log" || { cat "$OUT/hysteria.log"; fail "the test server did not start"; }
 IP=$(powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -notmatch 'Loopback' -and \$_.IPAddress -notmatch '^169\.' } | Select-Object -First 1).IPAddress" | tr -d '\r')
 echo "server at $IP"
 LINK="hysteria2://family:test-pass-123@$IP:4443/?sni=vpn.test.local&insecure=1#CI"
@@ -34,6 +37,7 @@ step "the virtual interface: another program's page goes through the server, by 
 ./winger-console.exe --selftest "$LINK" -- "$CURL" -s -o NUL -w "%{http_code}" --max-time 30 https://www.example.com/ > "$OUT/selftest.log" 2>&1
 cat "$OUT/selftest.log"
 grep -q "check: 200" "$OUT/selftest.log" || fail "no page came through the VPN"
+grep -qE 'reqAddr.*(cloudflare|gstatic)' "$OUT/hysteria.log" || fail "Winger's own check did not go through the server"
 grep -q 'reqAddr.*example\.com' "$OUT/hysteria.log" || fail "the server did not carry the page by its name"
 echo "virtual interface: a page through the server ✓"
 

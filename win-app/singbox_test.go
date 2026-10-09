@@ -24,6 +24,21 @@ func TestConfigs(t *testing.T) {
 	if ports := px["server_ports"].([]string); len(ports) != 2 || ports[0] != "20000:30000" || ports[1] != "40000:40000" || px["password"] != "me:pw" {
 		t.Fatalf("%v", px)
 	}
+	// this program's own checks come in by the local port: through the connection, before «own traffic goes straight»
+	rules := Config(cases["server, all programs"])["route"].(map[string]any)["rules"].([]any)
+	probe, ownAt := -1, -1
+	for i, r := range rules {
+		m := r.(map[string]any)
+		if in, ok := m["inbound"].([]string); ok && in[0] == "probe-in" {
+			probe = i
+		}
+		if _, ok := m["process_name"]; ok && ownAt < 0 {
+			ownAt = i
+		}
+	}
+	if probe < 0 || ownAt < 0 || probe > ownAt {
+		t.Fatalf("the local port's rule must come before this program's own: %d, %d", probe, ownAt)
+	}
 	if Config(cases["server, chosen programs"])["route"].(map[string]any)["final"] != "direct" ||
 		Config(cases["server, all programs"])["route"].(map[string]any)["final"] != "proxy" {
 		t.Fatal("final")
