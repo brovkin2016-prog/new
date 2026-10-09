@@ -142,6 +142,38 @@ adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off (an app outside the known list)"
 echo "any app: the picker lists the phone's apps, Settings ticked goes through the VPN"
 
+# on a bridge the AI helper goes through it whatever is ticked (the phone's own way to the family server is most likely
+step "on a bridge the AI helper goes through it whatever is ticked"
+# shut then); another app stands in for it here, and the bridge's way is tried on the server, as above
+AI=$(for p in com.android.contacts com.android.camera2 com.android.documentsui com.android.dialer com.android.calendar; do
+  adb shell pm path $p 2>/dev/null | grep -q package: && { echo $p; break; }; done)
+[ -n "$AI" ] || fail "no app on this emulator to stand in for the AI helper"
+adb logcat -c
+adb shell am start -n $ACT --es test_ai $AI --ez test_mapdns true --ez test_connect true >/dev/null
+wait_log "through the VPN: \[.*$AI" 60 || fail "the AI helper did not go through the bridge's way"
+wait_log "the AI helper goes through the bridge too" 5 || fail "the AI helper's way through the bridge is not in the journal"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (the AI helper's way)"
+adb logcat -c
+adb shell am start -n $ACT --ez test_connect true >/dev/null
+wait_log "through the VPN: \[" 60 || fail "no tunnel through the server after the bridge's way"
+adb logcat -d -s AIVPN:V | grep "through the VPN: \[" | tail -1 | grep -q "$AI" && fail "the AI helper went through the server although not ticked"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (after the AI helper's way)"
+echo "AI helper ($AI standing in): through the bridge's way, not through the server unless ticked"
+
+# the journal with a check of the way to the server, copied for a chat when the server is out of reach
+step "the journal with a check of the way to the server, copied for a chat"
+adb logcat -c
+adb shell am start -n $ACT --es test_ai $AI --ez test_journal true >/dev/null
+wait_log "report: Winger" 40 || fail "the journal's report did not come"
+adb logcat -d -s AIVPN:V | grep "report: Winger" | tail -1 | tee "$OUT/report.log"
+grep -q "ИИ-помощник: установлен" "$OUT/report.log" || fail "the report does not see the AI helper"
+grep -qE "сеть телефона: (Wi-Fi|мобильная|другая)" "$OUT/report.log" || fail "the report does not name the phone's network"
+grep -qE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|hysteria2://" "$OUT/report.log" && fail "the report shows an address or a link"
+adb shell am start -n $ACT --es test_ai app.aihelper.family >/dev/null
+echo "journal report: $(cut -c1-300 "$OUT/report.log")"
+
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 step "a real update of the app over itself: the next build (version + 1) through the app's own i"
 # Android's «install the update?» answered by a tap — the way a phone gets every update

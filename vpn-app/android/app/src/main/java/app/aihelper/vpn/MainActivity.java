@@ -228,6 +228,11 @@ public class MainActivity extends Activity implements State.Listener {
             Diag.upload(this, true);
         });
         root.addView(version, new LinearLayout.LayoutParams(-2, -2));
+        // when the family server is out of reach the journal cannot go to it: copied here, it goes into a chat
+        TextView journal = label("📋 Скопировать журнал и проверку связи", 13, muted, false);
+        journal.setPadding(dp(12), dp(6), dp(12), dp(4));
+        journal.setOnClickListener(v -> copyJournal());
+        root.addView(journal, new LinearLayout.LayoutParams(-2, -2));
         setContentView(frame);
         // the screen comes in softly: each part rises into place, one after another
         for (int i = 0; i < root.getChildCount(); i++) {
@@ -369,6 +374,10 @@ public class MainActivity extends Activity implements State.Listener {
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_all", false)) Apps.setOnlyChosen(this, false);  // the emulator test only
         if (BuildConfig.DEBUG) VpnSvc.testMapdns = i.getBooleanExtra("test_mapdns", false);  // the emulator test only
         if (BuildConfig.DEBUG && i.hasExtra("test_back")) VpnSvc.testBackMs = i.getLongExtra("test_back", 0);  // the emulator test only
+        if (BuildConfig.DEBUG && i.hasExtra("test_ai")) Apps.aiHelper = i.getStringExtra("test_ai");  // the emulator test only
+        if (BuildConfig.DEBUG && i.getBooleanExtra("test_journal", false)) {  // the emulator test only
+            new Thread(() -> Diag.i(this, "report: " + Diag.report(this).split("\n--- ")[0].replace('\n', '|')), "journal-test").start();
+        }
         String testRemove = BuildConfig.DEBUG ? i.getStringExtra("test_remove") : null;  // the emulator test only
         if (testRemove != null) {
             List<Profile> all = Profile.all(this);
@@ -440,6 +449,19 @@ public class MainActivity extends Activity implements State.Listener {
         Toast.makeText(this, (p.bridge ? "Добавлен мост «" : "Добавлен сервер «") + p.name + "»", Toast.LENGTH_SHORT).show();
         if (was) start();  // it was on: go on with the new server
         changed();
+    }
+
+    private void copyJournal() {
+        Toast.makeText(this, "Проверяю связь с сервером…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String report = Diag.report(this);
+            Diag.i(this, "journal copied (" + report.length() + " chars)");
+            runOnUiThread(() -> {
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(android.content.ClipData.newPlainText("Winger", report));
+                Toast.makeText(this, "Скопировано — вставьте в чат. Ключей и адресов в нём нет", Toast.LENGTH_LONG).show();
+            });
+        }, "journal-copy").start();
     }
 
     private void scan() {

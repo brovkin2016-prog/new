@@ -41,6 +41,21 @@ if grep -q 'via h3' "$OUT/quic.log"; then echo "QUIC: HTTP/3 ✓"
 elif [ $SYSCA = yes ]; then echo "QUIC run went over TCP although the CA is a system one"; exit 1
 else echo "QUIC not verified: the test CA could not be made a system one (answers came over TCP 8443)"; fi
 grep -q 'AITEST answer: Привет' "$OUT/tcp.log" || { echo "TCP fallback run failed"; exit 1; }
+# no way to the server at all (UDP 443 dropped, TCP 8443 refused): the app, still signed in, must say what broke on the
+# way, not only that there is no connection (the debug self-test logs the screen's text when there is no chat)
+sudo iptables -I INPUT -p udp --dport 443 -j DROP
+sudo iptables -I INPUT -p tcp --dport 8443 -j REJECT --reject-with tcp-reset
+adb logcat -c
+adb shell am start -n $PKG/app.aihelper.family.MainActivity
+sleep 36
+adb exec-out screencap -p > "$OUT/nonet.png"
+adb logcat -d -s AITEST AINet AIWebConsole > "$OUT/nonet.log"
+adb shell am force-stop $PKG
+sudo iptables -D INPUT -p tcp --dport 8443 -j REJECT --reject-with tcp-reset
+sudo iptables -D INPUT -p udp --dport 443 -j DROP
+grep -E "AITEST|failed" "$OUT/nonet.log" | head -5
+grep -q "Нет связи с сервером: " "$OUT/nonet.log" || { echo "no server: the app did not say what broke on the way"; exit 1; }
+echo "no server: the app says why"
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 # Android's «install the update?» answered by a tap — the way a phone gets every update (1.0.115 failed here)
 vcode() { adb shell dumpsys package $PKG | grep -o "versionCode=[0-9]*" | head -1 | tr -dc '0-9'; }

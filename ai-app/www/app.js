@@ -129,12 +129,35 @@
     if (!last) throw new Error("net");
     return last;
   }
+  // what broke on the way to the server, from the phone's network stack, in plain words
+  function netWhy(m) {
+    m = String(m || "");
+    const words = [
+      [/timeout|TIMED_OUT/, "сервер не ответил вовремя"],
+      [/NAME_NOT_RESOLVED|NAME_RESOLUTION/, "имя сервера не находится"],
+      [/INTERNET_DISCONNECTED/, "на телефоне нет интернета"],
+      [/NETWORK_CHANGED/, "сеть телефона сменилась"],
+      [/CONNECTION_RESET|CONNECTION_CLOSED|CONNECTION_ABORTED|EMPTY_RESPONSE/, "связь обрывается по дороге к серверу"],
+      [/CONNECTION_REFUSED/, "сервер не принимает соединение"],
+      [/ADDRESS_UNREACHABLE|NETWORK_ACCESS_DENIED|PROXY|TUNNEL/, "сервер недоступен из этой сети"],
+      [/CERT|SSL|QUIC_HANDSHAKE/, "сеть вмешивается в защищённое соединение"],
+    ];
+    for (const [re, t] of words) if (re.test(m)) return t;
+    const code = m.match(/net::ERR_[A-Z0-9_]+/);
+    return code ? code[0] : "";
+  }
   function problem(e) {
     if (e instanceof HttpError) {
       if (e.status === 401) { setTimeout(() => logout(e.message), 50); return e.message; }
       return e.message;
     }
-    return "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.";
+    const why = netWhy(e && e.message);
+    let s = "Нет связи с сервером" + (why ? ": " + why : "") + ". Проверьте интернет и попробуйте ещё раз.";
+    // only the owner has bridges in Winger; through one the helper reaches the server where the network lets few sites
+    if ((S.me && S.me.panel) || store.get("wasOwner", false)) {
+      s += " Если открываются только отдельные сайты — включите в Winger мост: помощник пойдёт через него сам.";
+    }
+    return s;
   }
 
   // ---------- storage: messages of each thread ----------

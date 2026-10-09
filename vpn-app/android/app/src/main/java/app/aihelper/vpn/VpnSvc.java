@@ -31,6 +31,7 @@ import java.net.Proxy;
 import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -644,17 +645,26 @@ public final class VpnSvc extends VpnService {
                 // no IPv6 on this phone
             }
             List<String> only = Apps.through(this);  // only Instagram, Telegram… — or null: everything
+            // on a bridge the phone's own way to the family server is most likely shut as well (a mobile network open
+            // only to a list of sites): the AI helper, which talks to that server alone, goes through the bridge too
+            if (only != null && mapped && !only.contains(Apps.aiHelper)) {
+                only = new ArrayList<>(only);
+                only.add(Apps.aiHelper);
+            }
             int allowed = 0;
+            boolean ai = false;
             if (only != null) {
                 for (String pkg : only) {
                     try {
                         b.addAllowedApplication(pkg);
                         allowed++;
+                        ai |= pkg.equals(Apps.aiHelper);
                     } catch (PackageManager.NameNotFoundException ignored) {
-                        // removed meanwhile
+                        // removed meanwhile (or the AI helper is not on this phone)
                     }
                 }
             }
+            if (ai && mapped) Diag.i(this, "the AI helper goes through the bridge too");
             if (allowed == 0) {
                 try {
                     b.addDisallowedApplication(getPackageName());  // everything but this app (its own client goes straight)

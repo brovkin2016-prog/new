@@ -44,6 +44,9 @@ final class Apps {
         OFF_BY_DEFAULT.add("com.android.chrome");
     }
 
+    /** The family's AI helper: on a bridge it goes through it whatever is ticked (the emulator test puts another app here). */
+    static volatile String aiHelper = "app.aihelper.family";
+
     private Apps() {}
 
     private static SharedPreferences prefs(Context c) {

@@ -15,6 +15,7 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -80,6 +81,83 @@ final class Diag {
             return out;
         } catch (Exception e) {
             return new byte[0];
+        }
+    }
+
+    /**
+     * The journal's newest part with a check of the ways to the family server right now, to be pasted into a chat when
+     * the server itself is out of reach (then the journal cannot be sent to it). Runs the checks: not on the main thread.
+     */
+    static String report(Context ctx) {
+        Context c = ctx.getApplicationContext();
+        StringBuilder s = new StringBuilder("Winger ");
+        try {
+            s.append(c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName);
+        } catch (Exception ignored) {
+            s.append('?');
+        }
+        s.append(", ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE);
+        s.append("\nсеть телефона: ").append(network(c));
+        Profile on = State.activeLink.isEmpty() ? null : Profile.parse(State.activeLink);
+        s.append("\nVPN: ").append(State.phase).append(on == null ? "" : on.bridge ? ", мост " + on.platformOrDefault() : ", сервер")
+                .append(State.auto ? " (выбран сам)" : "").append(State.note.isEmpty() ? "" : " — " + State.note);
+        try {
+            c.getPackageManager().getPackageInfo(Apps.aiHelper, 0);
+            List<String> through = Apps.through(c);
+            s.append("\nИИ-помощник: установлен, ").append(State.phase == State.Phase.OFF ? "идёт напрямую (VPN выключен)"
+                    : through == null || through.contains(Apps.aiHelper) || (on != null && on.bridge) ? "идёт через VPN" : "идёт напрямую");
+        } catch (Exception e) {
+            s.append("\nИИ-помощник: не установлен");
+        }
+        String host = Profile.homeHost(c);
+        if (host == null) {
+            s.append("\nсемейный сервер: нет его ссылки");
+        } else {
+            String name = host.contains(":") ? host.substring(0, host.indexOf(':')) : host;
+            try {
+                long t = System.currentTimeMillis();
+                int n = java.net.InetAddress.getAllByName(name).length;
+                s.append("\nимя сервера: находится (").append(n).append(" адр., ").append(System.currentTimeMillis() - t).append(" мс)");
+            } catch (Exception e) {
+                s.append("\nимя сервера: НЕ находится — ").append(e.getClass().getSimpleName());
+            }
+            String url = "https://" + host + ":8443/app/version.json";
+            s.append("\nсервер напрямую (TCP 8443, как ИИ-помощник): ").append(reach(url, true, name));
+            if (VpnSvc.socksPort > 0) s.append("\nсервер через включённое подключение: ").append(reach(url, false, name));
+        }
+        File f = new File(c.getFilesDir(), "diag.log");
+        s.append("\n--- журнал ---\n").append(f.exists() ? new String(tailBytes(f, 12 * 1024), StandardCharsets.UTF_8) : "(пуст)\n");
+        return mask(s.toString());
+    }
+
+    private static String reach(String url, boolean direct, String name) {
+        long t = System.currentTimeMillis();
+        try {
+            HttpURLConnection h = Updater.open(url, direct);
+            h.setConnectTimeout(10_000);
+            h.setReadTimeout(10_000);
+            int code = h.getResponseCode();
+            h.disconnect();
+            return (code == 200 ? "отвечает" : "ответ " + code) + " за " + (System.currentTimeMillis() - t) + " мс";
+        } catch (Exception e) {
+            return "НЕ отвечает за " + (System.currentTimeMillis() - t) / 1000 + " с — " + String.valueOf(e).replace(name, "сервер");
+        }
+    }
+
+    private static String network(Context c) {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+            for (android.net.Network n : cm.getAllNetworks()) {
+                android.net.NetworkCapabilities k = cm.getNetworkCapabilities(n);
+                if (k == null || k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                        || !k.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
+                if (k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) return "Wi-Fi";
+                if (k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) return "мобильная";
+                return "другая";
+            }
+            return "нет";
+        } catch (Exception e) {
+            return "?";
         }
     }
 
