@@ -147,18 +147,27 @@ final class Diag {
     private static String network(Context c) {
         try {
             android.net.ConnectivityManager cm = (android.net.ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+            // the phone's default network first (this app is never inside its own VPN, so it is the real one): with
+            // Wi-Fi on, mobile data is often up as well and would be named wrongly
+            android.net.Network active = cm.getActiveNetwork();
+            String kind = kind(active == null ? null : cm.getNetworkCapabilities(active));
+            if (kind != null) return kind;
             for (android.net.Network n : cm.getAllNetworks()) {
-                android.net.NetworkCapabilities k = cm.getNetworkCapabilities(n);
-                if (k == null || k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
-                        || !k.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
-                if (k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) return "Wi-Fi";
-                if (k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) return "мобильная";
-                return "другая";
+                kind = kind(cm.getNetworkCapabilities(n));
+                if (kind != null) return kind;
             }
             return "нет";
         } catch (Exception e) {
             return "?";
         }
+    }
+
+    private static String kind(android.net.NetworkCapabilities k) {
+        if (k == null || k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                || !k.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) return null;
+        if (k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) return "Wi-Fi";
+        if (k.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) return "мобильная";
+        return "другая";
     }
 
     /** Sends the newest part of the journal to the family server (at most every half hour, unless now). */

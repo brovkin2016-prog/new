@@ -178,7 +178,7 @@ adb shell am start -n $ACT --es test_ai $AI --ez test_journal true >/dev/null
 wait_since "report: Winger" 40 || fail "the journal's report did not come"
 since | grep "report: Winger" | tail -1 | tee "$OUT/report.log"
 grep -q "ИИ-помощник: установлен" "$OUT/report.log" || fail "the report does not see the AI helper"
-grep -qE "сеть телефона: (Wi-Fi|мобильная|другая)" "$OUT/report.log" || fail "the report does not name the phone's network"
+grep -q "сеть телефона: Wi-Fi" "$OUT/report.log" || fail "the report does not name the phone's network (Wi-Fi here)"
 grep -qE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|hysteria2://" "$OUT/report.log" && fail "the report shows an address or a link"
 adb shell am start -n $ACT --es test_ai app.aihelper.family >/dev/null
 echo "journal report: $(cut -c1-300 "$OUT/report.log")"
