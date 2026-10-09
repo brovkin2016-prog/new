@@ -84,7 +84,7 @@
           el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
           el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
             el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "")
-              + (u.until ? " · ⏰ гость до " + when(u.until) : "") })),
+              + (u.until ? " · ⏰ гость до " + when(u.until) : "") + (u.bridge ? " · 🌉 мост" : "") })),
           u.owner ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delVpn(u.name); } }),
           "›"));
       }
@@ -365,17 +365,30 @@
       if (missing.length) card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "➕ Добавить мост", onclick: () => addBridge(d, missing) }));
       return card;
     }
+    // a bridge of the server as a Winger link, with its service's best settings ("" when its call is not there)
+    function wingerLink(b) {
+      const link = b.link || "", enc = encodeURIComponent(link);
+      const short = b.label.replace(/^\S+\s/, "");  // «Телефон · Телемост»; a person's «Мама · Телемост» — their Winger needs no name
+      const name = encodeURIComponent("Мост · " + (b.label.startsWith("👤") ? short.replace(/^[^·]+· /, "") : short));
+      const kind = bridgeKind(b);
+      return kind === "tm" ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
+        : kind === "wb" ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
+        : kind === "dion" ? "winger-bridge://dion?room=" + enc + "#" + name
+        : kind === "bitrix" ? "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name : "";
+    }
+    function bridgeKind(b) {
+      const link = b.link || "";
+      if (/^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(link)) return "tm";
+      if (b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(link)) return "wb";
+      if (b.id.startsWith("dion-") && /^dion:\/\/[0-9A-Za-z_-]{4,64}$/.test(link)) return "dion";
+      if (b.id.startsWith("bitrix-") && /^https:\/\/[0-9A-Za-z-]{2,63}\.bitrix24\.(ru|by|kz|com)\/video\/[0-9A-Za-z_-]{2,64}$/.test(link)) return "bitrix";
+      return "";
+    }
     function bridgeSheet(b) {
       // what this bridge's service needs again when it stops (a new WB sign-in, another password), and Winger's link
-      const link = b.link || "", enc = encodeURIComponent(link), name = encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
-      const tm = /^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(link);
-      const wb = b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(link);
-      const dn = b.id.startsWith("dion-") && /^dion:\/\/[0-9A-Za-z_-]{4,64}$/.test(link);
-      const bx = b.id.startsWith("bitrix-") && /^https:\/\/[0-9A-Za-z-]{2,63}\.bitrix24\.(ru|by|kz|com)\/video\/[0-9A-Za-z_-]{2,64}$/.test(link);
-      const w = tm ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
-        : wb ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
-        : dn ? "winger-bridge://dion?room=" + enc + "#" + name
-        : bx ? "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name : "";
+      const link = b.link || "", kind = bridgeKind(b), w = wingerLink(b);
+      const person = b.label.startsWith("👤");  // a person's own bridge: a copy of the owner's, nothing to sign in to
+      const wb = kind === "wb" && !person, dn = kind === "dion", bx = kind === "bitrix";
       sheet((b.ok ? "🟢 " : "🔴 ") + b.label, (box, close) => {
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: b.ok
           ? "Работает " + dur(b.since) + ". Winger подключается к нему сам, когда сервер напрямую недоступен."
@@ -890,6 +903,23 @@
           box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "📲 Winger с подключением + Telegram — ссылка (24 ч)",
             onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); } }));
         }
+        if (!u.owner) {
+          const mine = u.bridges || [], has = mine.length > 0;
+          const links = mine.map(wingerLink).filter(Boolean);
+          box.append(el("div", { class: "row", style: "margin-top:12px" },
+            el("div", { class: "grow" }, "🌉 Мост" + (has ? ": " + mine.map((b) => (b.ok ? "🟢 " : "🔴 ") + b.label.replace(/^.*· /, "")).join(", ") : ""),
+              el("small", { text: has ? "Свой звонок для Winger этого человека: Winger берёт его сам и включает, когда сервер не отвечает."
+                : u.can_bridge ? "Свой звонок для Winger этого человека — на дни, когда мобильный интернет пускает только отдельные сайты."
+                : "Сначала нужен ваш мост Телемоста: мост человека — его копия." })),
+            el("button", { class: "btn" + (has ? " line" : ""), style: "flex:none;padding:8px 14px", text: has ? "Убрать" : "Выдать",
+              disabled: !has && !u.can_bridge, onclick: () => { close(); userBridge(u, !has); } })));
+          if (links.length) {
+            // when the person's phone cannot reach the server at all, Winger cannot fetch it: the link goes by messenger
+            const msg = `Мост для Winger (${u.name}):\n${links.join("\n")}\n\nСкопируйте всё сообщение, откройте Winger и нажмите «Вставить ссылку».`;
+            box.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📤 Отправить мост человеку",
+              onclick: () => (navigator.share ? navigator.share({ text: msg }).catch(() => copyText(msg)) : copyText(msg)) }));
+          }
+        }
         box.append(el("div", { class: "big-actions", style: "margin-top:8px" },
           el("button", { class: "btn line", text: "🔄 Новый ключ", onclick: () => { close(); rekey(u); } }),
           u.owner ? null : el("button", { class: "btn line", text: u.until ? "⏰ Срок" : "⏰ Сделать гостем", onclick: () => { close(); guestDays(u); } })));
@@ -897,6 +927,17 @@
           box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
         }
       });
+    }
+    async function userBridge(u, on) {
+      if (!on && !(await confirmBox(`Убрать мост у «${u.name}»? Его звонок закроется, Winger этого человека останется без моста.`, "Убрать"))) return;
+      try {
+        const end = await panel({ op: "user_bridge", name: u.name, on }, (t) => toast(t, 170000));
+        document.querySelectorAll(".toast").forEach((t) => t.remove());
+        if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
+        toast(on ? `✅ Мост для «${u.name}» готов — Winger этого человека возьмёт его сам (до 20 минут)` : `Мост у «${u.name}» убран`, 6000);
+        load();
+        card(u.name, end);
+      } catch (e) { toast(problem(e)); }
     }
     // unread events for the tab's badge, without opening the tab (and without the fingerprint question)
     async function peek() {

@@ -13,9 +13,10 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 
 /**
- * The owner's bridge kept ready in Winger, with nothing to set up: Winger shows the family server the VPN login it
- * already has, and the server answers with the owner's Telemost bridge (the call and its settings) only when that login
- * is the owner's own — anybody else gets nothing. Fetched while the internet is normal, so it is there on a shutdown day.
+ * Bridges kept ready in Winger, with nothing to set up: Winger shows the family server the VPN login it already has, and
+ * the server answers with the bridges meant for it (each call with its settings) — the owner's own login gets the
+ * owner's, a person's own login the ones the owner gave that person, anybody else nothing. Fetched while the internet is
+ * normal, so they are there on a shutdown day.
  */
 final class BridgeSync {
     private static final long EVERY_MS = 3600_000L;
