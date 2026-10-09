@@ -57,14 +57,25 @@ step "only the chosen programs: curl through the VPN, PowerShell straight"
 SELF=$!
 for _ in $(seq 1 100); do grep -q "^phase: " "$OUT/selftest-only.log" && break; sleep 1; done
 grep -q "^phase: on" "$OUT/selftest-only.log" || { sleep 3; cat "$OUT/selftest-only.log"; fail "did not come on (only chosen programs)"; }
-C=$("$CURL" -s -o NUL -w "%{http_code}" --max-time 30 https://www.wikipedia.org/)
-P=$(powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 https://www.python.org/).StatusCode } catch { 0 }" | tr -d '\r')
+# with chosen programs only, names are real addresses (no made-up ones) and the server is given the address: compare those
+C=$("$CURL" -s -o NUL -w "%{http_code} %{remote_ip}" --max-time 30 https://www.wikipedia.org/)
+CIP=${C#* }; C=${C%% *}
+cat > ps-check.ps1 <<'EOT'
+$ips = [System.Net.Dns]::GetHostAddresses('www.python.org') | ForEach-Object { $_.IPAddressToString }
+try { $c = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 https://www.python.org/).StatusCode } catch { $c = 0 }
+"$c " + ($ips -join ' ')
+EOT
+P=$(powershell -NoProfile -ExecutionPolicy Bypass -File ps-check.ps1 | tr -d '\r')
+PIPS=${P#* }; P=${P%% *}
 wait $SELF
 cat "$OUT/selftest-only.log"
-echo "curl: $C, powershell: $P"
+echo "curl: $C via $CIP, powershell: $P ($PIPS)"
 [ "$C" = 200 ] || fail "the chosen program got no page"
 [ "$P" = 200 ] || fail "a program not chosen got no page (it must go straight)"
-grep -q 'reqAddr.*wikipedia\.org' "$OUT/hysteria.log" || fail "the chosen program did not go through the server"
+[ -n "$CIP" ] && grep -qF "\"reqAddr\": \"$CIP:443\"" "$OUT/hysteria.log" || fail "the chosen program did not go through the server"
+for ip in $PIPS; do
+  grep -qF "\"reqAddr\": \"$ip:443\"" "$OUT/hysteria.log" && fail "a program not chosen went through the server"
+done
 grep -q 'reqAddr.*python\.org' "$OUT/hysteria.log" && fail "a program not chosen went through the server"
 echo "only chosen programs ✓"
 
