@@ -8,7 +8,7 @@ OUT=${OUT:-out}
 mkdir -p "$OUT"
 step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }
 fail() { echo "FAIL: $*"; echo "::error::$*"; exit 1; }
-CURL=/c/Windows/System32/curl.exe  # Windows' own curl: just another program, not Winger
+CURL=C:/Windows/System32/curl.exe  # handed to Winger too, so a Windows path; Windows' own curl: just another program, not Winger
 export WINGER_QUIET=1
 # the tests' server runs on this same machine: with Winger on, its own way out would come back into the virtual
 # interface (a loop no real laptop has — there the server is far away), so it goes straight
