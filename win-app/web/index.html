@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Winger</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main id="app">
+  <header>
+    <img src="icon.svg" alt="" class="logo">
+    <div><h1>Winger</h1><small id="sub">VPN семьи</small></div>
+  </header>
+  <section class="hero">
+    <button id="power" class="power" aria-label="Включить или выключить VPN"><span>⏻</span></button>
+    <div id="state" class="state">Выключено</div>
+    <div id="note" class="note"></div>
+  </section>
+  <section class="card">
+    <h2>Подключения</h2>
+    <div id="conns"></div>
+    <button id="add" class="btn soft wide">➕ Добавить: вставить ссылку</button>
+  </section>
+  <section class="card">
+    <h2>Какие программы через VPN</h2>
+    <div class="seg" id="mode">
+      <button data-only="0">Все программы</button>
+      <button data-only="1">Только выбранные</button>
+    </div>
+    <div id="apps" class="apps"></div>
+  </section>
+  <section class="card">
+    <label class="row switch"><span class="grow">Сам выбирать рабочее подключение<small>Если сервер не отвечает — мост, потом обратно</small></span>
+      <input type="checkbox" id="auto"></label>
+  </section>
+  <footer>
+    <button id="ver" class="link">Winger · Проверить обновление</button>
+    <button id="journal" class="link">📋 Скопировать журнал и проверку связи</button>
+  </footer>
+</main>
+<div id="sheet" class="sheet-bg" hidden><div class="sheet" role="dialog"><div id="sheet-body"></div></div></div>
+<div id="toast" class="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

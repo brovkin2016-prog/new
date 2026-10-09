@@ -1,0 +1,112 @@
+# Builds «Winger» for Windows: the app (Go, sing-box inside as a library), the bridge's program (vpn-app/bridge), tests it
+# on a Windows machine against a real hysteria server (other programs' pages must go through the virtual interface, the
+# installed service must be driven by its window's API) and its window in a browser; publishes winger.exe as a release:
+# the family server hands it out and the installed ones update themselves from it.
+name: win-app
+
+on:
+  push:
+    paths: ["win-app/**", "vpn-app/bridge/**", ".github/workflows/win-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: win-app-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HY_VERSION: app/v2.13.0
+  TAGS: with_gvisor,with_quic,badlinkname,tfogo_checklinkname0
+
+jobs:
+  window:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: win-app/go.mod
+          cache-dependency-path: win-app/go.sum
+      - name: Unit tests and the window against a real hysteria server
+        run: |
+          set -e
+          cd win-app
+          go test -tags "$TAGS" -ldflags=-checklinkname=0 ./...
+          go build -tags "$TAGS" -ldflags "-checklinkname=0 -X main.versionName=1.0.ci" -o /tmp/winger .
+          mkdir -p /tmp/t && cd /tmp/t
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj '/CN=vpn.test.local' \
+            -addext 'subjectAltName=DNS:vpn.test.local' -keyout key.pem -out cert.pem
+          gh release download "$HY_VERSION" --repo apernet/hysteria --pattern hysteria-linux-amd64 --output hysteria && chmod +x hysteria
+          printf 'listen: 127.0.0.1:4443\ntls:\n  cert: /tmp/t/cert.pem\n  key: /tmp/t/key.pem\nauth:\n  type: userpass\n  userpass:\n    family: "test-pass-123"\n' > hy.yaml
+          nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
+          mkdir -p /tmp/wd /tmp/out
+          WINGER_DATA=/tmp/wd nohup /tmp/winger --serve --no-tun > /tmp/out/serve.log 2>&1 &
+          sleep 3
+          cd "$GITHUB_WORKSPACE/win-app/ci"
+          npm init -y >/dev/null && npm install --silent playwright@1.49.1 && npx playwright install --with-deps chromium >/dev/null
+          WDATA=/tmp/wd OUT=/tmp/out WLINK='hysteria2://family:test-pass-123@127.0.0.1:4443/?sni=vpn.test.local&insecure=1#%D0%A2%D0%B5%D1%81%D1%82' node ui_test.js
+          DARK=1 WDATA=/tmp/wd OUT=/tmp/out WLINK='hysteria2://family:test-pass-123@127.0.0.1:4443/?sni=vpn.test.local&insecure=1#%D0%A2%D0%B5%D1%81%D1%82' node ui_test.js
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window
+          path: /tmp/out
+
+  windows:
+    needs: window
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: win-app/go.mod
+          cache-dependency-path: |
+            win-app/go.sum
+            vpn-app/bridge/go.sum
+      - id: v
+        run: echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+      - name: Build (the bridge's program, the app with its icon)
+        run: |
+          set -e
+          mkdir -p win-app/bin
+          (cd vpn-app/bridge && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ../../win-app/bin/winger-relay.exe ./relay)
+          cd win-app
+          go run github.com/tc-hib/go-winres@v0.3.3 simply --icon winger.png --manifest gui \
+            --product-name "Winger VPN" --file-description "Winger VPN" --product-version "1.0.${{ steps.v.outputs.code }}"
+          V="-X main.versionName=1.0.${{ steps.v.outputs.code }} -X main.versionCodeStr=${{ steps.v.outputs.code }}"
+          CGO_ENABLED=0 go build -trimpath -tags "$TAGS" -ldflags "-checklinkname=0 -s -w $V -H windowsgui" -o winger.exe .
+          CGO_ENABLED=0 go build -trimpath -tags "$TAGS" -ldflags "-checklinkname=0 -s -w $V" -o winger-console.exe .
+          ls -la *.exe
+      - name: Test on Windows
+        timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd win-app
+          gh release download "$HY_VERSION" --repo apernet/hysteria --pattern hysteria-windows-amd64.exe --output hysteria.exe
+          OUT="$GITHUB_WORKSPACE/out" bash ci/windows_test.sh
+      - name: Publish
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          trap 'echo "::error::Publish: $BASH_COMMAND failed"' ERR
+          CODE=${{ steps.v.outputs.code }}
+          [ -f win-app/winger.exe ] || { echo "::error::Publish: no winger.exe"; exit 1; }
+          mkdir -p rel && cp win-app/winger.exe rel/winger-$CODE.exe
+          SHA=$(sha256sum rel/winger-$CODE.exe | cut -d' ' -f1)
+          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "commit": "%s"}\n' "$CODE" "$CODE" "$SHA" "$GITHUB_SHA" > rel/win-app-$CODE.json
+          cp out/* rel/ 2>/dev/null || true
+          find rel -type f -size 0 -delete
+          STATE="${{ job.status }}"
+          gh release create "win-app-$CODE" rel/* --prerelease --target "$GITHUB_SHA" \
+            --title "Winger для Windows 1.0.$CODE" --notes "Build $CODE (tests: $STATE)."
