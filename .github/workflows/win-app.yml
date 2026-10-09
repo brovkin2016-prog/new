@@ -33,6 +33,8 @@ jobs:
       - name: Unit tests and the window against a real hysteria server
         run: |
           set -e
+          mkdir -p /tmp/out
+          exec > >(tee -a /tmp/out/window.log) 2>&1
           cd win-app
           go test -tags "$TAGS" -ldflags=-checklinkname=0 ./...
           go build -tags "$TAGS" -ldflags "-checklinkname=0 -X main.versionName=1.0.ci" -o /tmp/winger .
@@ -42,7 +44,7 @@ jobs:
           gh release download "$HY_VERSION" --repo apernet/hysteria --pattern hysteria-linux-amd64 --output hysteria && chmod +x hysteria
           printf 'listen: 127.0.0.1:4443\ntls:\n  cert: /tmp/t/cert.pem\n  key: /tmp/t/key.pem\nauth:\n  type: userpass\n  userpass:\n    family: "test-pass-123"\n' > hy.yaml
           nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
-          mkdir -p /tmp/wd /tmp/out
+          mkdir -p /tmp/wd
           WINGER_DATA=/tmp/wd nohup /tmp/winger --serve --no-tun > /tmp/out/serve.log 2>&1 &
           sleep 3
           cd "$GITHUB_WORKSPACE/win-app/ci"
@@ -51,14 +53,18 @@ jobs:
           DARK=1 WDATA=/tmp/wd OUT=/tmp/out WLINK='hysteria2://family:test-pass-123@127.0.0.1:4443/?sni=vpn.test.local&insecure=1#%D0%A2%D0%B5%D1%81%D1%82' node ui_test.js
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: window
-          path: /tmp/out
+      - name: Logs as a release (the job's own log cannot be read from outside)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp /tmp/t/hy.log /tmp/out/hysteria.log 2>/dev/null || true
+          cp /tmp/wd/journal.log /tmp/out/journal.log 2>/dev/null || true
+          find /tmp/out -type f -size 0 -delete
+          gh release create "win-app-window-${{ github.run_number }}" /tmp/out/* --prerelease --target "$GITHUB_SHA" \
+            --title "Winger для Windows: окно, проверка ${{ github.run_number }}" --notes "Логи проверки окна (не прошла)."
 
   windows:
-    needs: window
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -77,6 +83,8 @@ jobs:
       - name: Build (the bridge's program, the app with its icon)
         run: |
           set -e
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          exec > >(tee -a "$GITHUB_WORKSPACE/out/build.log") 2>&1
           mkdir -p win-app/bin
           (cd vpn-app/bridge && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ../../win-app/bin/winger-relay.exe ./relay)
           cd win-app
@@ -91,9 +99,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
           cd win-app
           gh release download "$HY_VERSION" --repo apernet/hysteria --pattern hysteria-windows-amd64.exe --output hysteria.exe
-          OUT="$GITHUB_WORKSPACE/out" bash ci/windows_test.sh
+          OUT="$GITHUB_WORKSPACE/out" bash ci/windows_test.sh 2>&1 | tee "$GITHUB_WORKSPACE/out/windows.log"
+          exit "${PIPESTATUS[0]}"
       - name: Publish
         if: always()
         env:
@@ -101,10 +111,12 @@ jobs:
         run: |
           trap 'echo "::error::Publish: $BASH_COMMAND failed"' ERR
           CODE=${{ steps.v.outputs.code }}
-          [ -f win-app/winger.exe ] || { echo "::error::Publish: no winger.exe"; exit 1; }
-          mkdir -p rel && cp win-app/winger.exe rel/winger-$CODE.exe
-          SHA=$(sha256sum rel/winger-$CODE.exe | cut -d' ' -f1)
-          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "commit": "%s"}\n' "$CODE" "$CODE" "$SHA" "$GITHUB_SHA" > rel/win-app-$CODE.json
+          mkdir -p rel
+          if [ -f win-app/winger.exe ]; then
+            cp win-app/winger.exe rel/winger-$CODE.exe
+            SHA=$(sha256sum rel/winger-$CODE.exe | cut -d' ' -f1)
+            printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "commit": "%s"}\n' "$CODE" "$CODE" "$SHA" "$GITHUB_SHA" > rel/win-app-$CODE.json
+          fi
           cp out/* rel/ 2>/dev/null || true
           find rel -type f -size 0 -delete
           STATE="${{ job.status }}"
