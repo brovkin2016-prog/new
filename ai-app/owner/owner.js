@@ -202,7 +202,10 @@
     }
     const UNIT = { failed: "остановился", inactive: "выключен", activating: "запускается", deactivating: "останавливается" };
     // ---- new versions of the server: built elsewhere, encrypted for this server, installed by one tap ----
-    function updateCard(u) {
+    // part: "top" — the version and its buttons (on top when it needs the owner), "extras" — the night switch and the key
+    // (under «Подробнее»), "all" — both (under «Подробнее» when nothing waits)
+    function updateCard(u, part) {
+      if (part === "extras") return updateExtras(u, el("div", { class: "card" }, el("h3", { text: "⬆️ Обновления сервера" })));
       const card = el("div", { class: "card" + (u.new ? " bad" : "") }, el("h3", { text: "⬆️ Версия сервера" }));
       const p = u.progress || {};
       const running = p.state === "running" && Date.now() / 1000 - (p.at || 0) < 3600;
@@ -250,8 +253,11 @@
         } }));
       }
       card.append(row);
+      return part === "all" ? updateExtras(u, card) : u.foreign ? updateExtras(u, card, true) : card;
+    }
+    function updateExtras(u, card, keyOnly) {
       // new versions go in by themselves at night (checked after, the old one back if anything is wrong)
-      card.append(el("div", { class: "row", style: "margin-top:6px" },
+      if (!keyOnly) card.append(el("div", { class: "row", style: "margin-top:6px" },
         el("div", { class: "grow" }, "🌙 Ставить новые версии само ночью",
           el("small", { text: u.auto ? "Около 4 ч утра. После установки — проверка; если что-то не так, вернётся прежняя версия."
             : "Выключено: новые версии — только кнопкой «⬆️ Обновить»." })),
@@ -286,6 +292,20 @@
         el("div", { class: "emoji", text: bad.length ? "⚠️" : "✅" }),
         el("div", { class: "grow" }, el("b", { text: bad.length ? "Есть проблемы" : "Всё работает" }),
           el("small", { text: bad.length ? bad.join(" · ") : `${d.host} · ${d.ip}` + (d.online !== null ? ` · в сети: ${d.online}` : "") }))));
+      // on top only what needs the owner: money running out, a new version, the bridges, the report for Claude;
+      // everything else waits under «Подробнее»
+      const u = d.update, p = (u && u.progress) || {};
+      const urgentHost = host && host.set && host.days_left < 7;
+      const urgentUpdate = u && (!u.ready || u.new || u.foreign || p.state === "running" || (p.state === "finished" && p.version && !p.ok));
+      const seen = store.get("alertsSeen", 0), fresh = (cache.alerts || []).some((x) => x.ts > seen && x.kind !== "log");
+      if (urgentHost) drawHosting(host);
+      if (urgentUpdate) scroll.append(updateCard(u, "top"));
+      if (fresh) scroll.append(eventsCard());
+      scroll.append(bridgesCard(d), diagCard());
+      const more = store.get("serverMore", false);
+      scroll.append(el("button", { class: "btn line wide", style: "margin:0 0 12px", text: more ? "▲ Скрыть подробности" : "▼ Подробнее: память, трафик, журнал, копии",
+        onclick: () => { store.set("serverMore", !more); draw(); } }));
+      if (!more) return;
       const brOk = d.bridges.length - brBad.length;
       scroll.append(el("div", { class: "stats" },
         stat("VPN", d.vpn.ok ? "работает" : "не работает", d.vpn.ok && d.vpn.since ? dur(d.vpn.since) + " без перерыва" : UNIT[d.vpn.state] || d.vpn.state, undefined, !d.vpn.ok),
@@ -294,9 +314,8 @@
         stat("Диск", `${Math.round(100 * d.disk[0] / d.disk[1])}%`, `${d.disk[0]} из ${d.disk[1]} ГБ`, 100 * d.disk[0] / d.disk[1]),
         stat("Нагрузка", `${Math.round(100 * d.load[0] / d.cpus)}%`, `ядер: ${d.cpus} · работает ${dur(d.uptime)}`, 100 * d.load[0] / d.cpus),
         stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
-      if (host) drawHosting(host);
-      if (d.update) scroll.append(updateCard(d.update));
-      scroll.append(diagCard());
+      if (host && !urgentHost) drawHosting(host);
+      if (u && u.ready) scroll.append(updateCard(u, urgentUpdate ? "extras" : "all"));
       // what takes the memory and the processor: the VPN and the assistant apart
       if (d.services && d.services.length) {
         const mb = (v) => (v === null || v === undefined ? "—" : v >= 1024 ? (v / 1024).toFixed(1) + " ГБ" : v + " МБ");
@@ -321,36 +340,67 @@
           text: `Процессор — доля одного ядра за последнюю секунду (ядер: ${d.cpus}). Помощнику больше всего памяти нужно, пока он обрабатывает фото и голос.` }));
         scroll.append(card);
       }
-      // bridges
-      {
-        const card = el("div", { class: "card" }, el("h3", { text: "🌉 Мосты" }));
-        for (const b of d.bridges) {
-          card.append(el("div", { class: "row" }, el("span", { style: "font-size:18px", text: b.ok ? "🟢" : "🔴" }),
-            el("div", { class: "grow" }, b.label, el("small", { text: (b.ok ? "работает " + dur(b.since) : UNIT[b.state] || b.state) + (+b.restarts ? ` · перезапусков: ${b.restarts}` : "") })),
-            b.link ? el("button", { class: "icon-btn", title: "Ссылка", text: "🔗", onclick: () => bridgeLink(b) }) : null,
-            el("button", { class: "icon-btn", title: "Перезапустить", text: "🔄", onclick: async () => {
-              if (await confirmBox(`Перезапустить «${b.label}»? Ссылка останется прежней.`, "Перезапустить")) {
-                act({ op: "bridge_restart", id: b.id }, "🔄 Перезапускаю мост…");
-              }
-            } })));
-        }
-        if (!d.bridges.some((b) => b.id.startsWith("wb-"))) {
-          card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "⚡ Быстрый мост через WB Stream", onclick: wbBridge }));
-        }
-        const more = [["dion", "DION"], ["bitrix", "Битрикс24"]].filter(([p]) => !d.bridges.some((b) => b.id.startsWith(p + "-")));
-        if (more.length) {
-          card.append(el("div", { class: "big-actions", style: "margin-top:8px" },
-            ...more.map(([p, n]) => el("button", { class: "btn line", text: "➕ Мост " + n, onclick: () => acctBridge(p) }))));
-        }
-        const st = d.selftest;
-        card.append(el("div", { style: "font-size:13px;color:var(--muted);margin:8px 0", text: !st ? "Автопроверка моста: ещё не было"
-          : st.ok ? `Проверка ${when(st.ts)}: ✓ ${st.mbit} Мбит/с, выход ${st.ip}` : `Проверка ${when(st.ts)}: ✗ ${st.err}` }),
-          el("div", { class: "big-actions" },
-            el("button", { class: "btn line", text: "🧪 Проверить", onclick: () => act({ op: "bridge_test" }, null, (r) => toast(r.selftest && r.selftest.ok ? `✓ Мост работает: ${r.selftest.mbit} Мбит/с` : "✗ Проверка не прошла", 5000)) }),
-            el("button", { class: "btn line", text: "✉️ Тест почты", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) })));
-        scroll.append(card);
+      scroll.append(weekCard(), wingerLogCard(), trafficCard());
+      if (!fresh) scroll.append(eventsCard());
+      scroll.append(actionsCard(d));
+    }
+    // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
+    const BRIDGES = [
+      ["wb", "⚡ WB Stream", "Самый быстрый. Нужен только ваш номер телефона: код придёт по СМС от WB."],
+      ["dion", "DION", "Нужна бесплатная учётная запись на dion.vc (почта и пароль)."],
+      ["bitrix", "Битрикс24", "Нужен свой бесплатный портал на bitrix24.ru (почта не Gmail)."],
+    ];
+    function bridgesCard(d) {
+      const card = el("div", { class: "card" }, el("h3", { text: "🌉 Мосты" }),
+        el("small", { style: "color:var(--muted);display:block;margin:-4px 0 6px", text: "Выручают, когда мобильный интернет пускает только отдельные сайты. "
+          + "Winger получает мосты сам — в нём ничего настраивать не нужно." }));
+      for (const b of d.bridges) {
+        card.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => bridgeSheet(b) },
+          el("span", { style: "font-size:18px", text: b.ok ? "🟢" : "🔴" }),
+          el("div", { class: "grow" }, b.label, el("small", { text: (b.ok ? "работает " + dur(b.since) : UNIT[b.state] || b.state) + (+b.restarts ? ` · перезапусков: ${b.restarts}` : "") })),
+          "›"));
       }
-      scroll.append(weekCard(), wingerLogCard(), trafficCard(), eventsCard(), actionsCard(d));
+      if (!d.bridges.length) card.append(el("div", { class: "row" }, el("div", { class: "grow", text: "Мостов пока нет" })));
+      const missing = BRIDGES.filter(([p]) => !d.bridges.some((b) => b.id.startsWith(p + "-")));
+      if (missing.length) card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "➕ Добавить мост", onclick: () => addBridge(d, missing) }));
+      return card;
+    }
+    function bridgeSheet(b) {
+      // what this bridge's service needs again when it stops (a new WB sign-in, another password), and Winger's link
+      const link = b.link || "", enc = encodeURIComponent(link), name = encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
+      const tm = /^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(link);
+      const wb = b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(link);
+      const dn = b.id.startsWith("dion-") && /^dion:\/\/[0-9A-Za-z_-]{4,64}$/.test(link);
+      const bx = b.id.startsWith("bitrix-") && /^https:\/\/[0-9A-Za-z-]{2,63}\.bitrix24\.(ru|by|kz|com)\/video\/[0-9A-Za-z_-]{2,64}$/.test(link);
+      const w = tm ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
+        : wb ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
+        : dn ? "winger-bridge://dion?room=" + enc + "#" + name
+        : bx ? "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name : "";
+      sheet((b.ok ? "🟢 " : "🔴 ") + b.label, (box, close) => {
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: b.ok
+          ? "Работает " + dur(b.since) + ". Winger подключается к нему сам, когда сервер напрямую недоступен."
+          : "Сейчас не работает (" + (UNIT[b.state] || b.state) + "). Сначала — перезапуск" + (wb ? "; не помог — войдите в WB заново." : dn || bx ? "; не помог — проверьте почту и пароль." : ".") }),
+          el("button", { class: "btn wide", text: "🔄 Перезапустить", onclick: () => { close(); act({ op: "bridge_restart", id: b.id }, "🔄 Перезапускаю мост…"); } }));
+        if (wb) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Войти в WB заново", onclick: () => { close(); wbBridge(); } }));
+        if (dn || bx) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Сменить почту или пароль", onclick: () => { close(); acctBridge(dn ? "dion" : "bitrix"); } }));
+        if (w) {
+          box.append(el("a", { class: "btn line wide", href: w, style: "text-decoration:none;text-align:center;display:block;margin-top:8px", text: "📲 Добавить в Winger сейчас" }),
+            el("div", { style: "font-size:12px;color:var(--muted);margin:4px 2px 0", text: "Не обязательно: Winger сам получает мосты в течение часа." }));
+        }
+        if (link) box.append(el("button", { class: "btn soft wide", style: "margin-top:12px", text: "📋 Ссылка звонка — для другого устройства",
+          onclick: () => { copyText(link); toast("✅ Ссылка скопирована"); } }));
+      });
+    }
+    function addBridge(d, missing) {
+      sheet("➕ Новый мост", (box, close) => {
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: d.bridges.length
+          ? "Обычно хватает одного моста. Ещё один пригодится, если имеющийся медленный или перестал подключаться."
+          : "Выберите, через какой сервис поднять мост. Достаточно одного." }));
+        for (const [p, name, need] of missing) {
+          box.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => { close(); p === "wb" ? wbBridge() : acctBridge(p); } },
+            el("div", { class: "grow" }, el("b", { text: name }), el("small", { text: need })), "›"));
+        }
+      });
     }
     // one tap: the server checks everything a fault hides in (VPN, bridges, MAX, Winger's journal) and copies the report
     function diagCard() {
@@ -449,8 +499,13 @@
       return card;
     }
     function actionsCard(d) {
+      const st = d.selftest;
       return el("div", { class: "card" }, el("h3", { text: "⚙️ Сервер" }),
         el("button", { class: "btn line wide", text: "⚡ Скорость сервера", onclick: () => act({ op: "speed" }, null, (r) => toast(`⚡ Скорость сервера: ${r.mbit} Мбит/с`, 6000)) }),
+        el("button", { class: "btn line wide", style: "margin-top:8px", text: "🧪 Проверить мост", onclick: () => act({ op: "bridge_test" }, null, (r) => toast(r.selftest && r.selftest.ok ? `✓ Мост работает: ${r.selftest.mbit} Мбит/с` : "✗ Проверка не прошла", 5000)) }),
+        el("div", { style: "font-size:13px;color:var(--muted);margin:4px 2px 0", text: !st ? "Автопроверка моста: ещё не было"
+          : st.ok ? `Последняя проверка ${when(st.ts)}: ✓ ${st.mbit} Мбит/с` : `Последняя проверка ${when(st.ts)}: ✗ ${st.err}` }),
+        el("button", { class: "btn line wide", style: "margin-top:8px", text: "✉️ Проверить почту для оповещений", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) }),
         el("button", { class: "btn line wide", style: "margin-top:8px", text: "💾 Резервная копия сейчас", onclick: async () => {
           if (await confirmBox("Сделать резервную копию сейчас? Через минуту-две она ляжет на Яндекс Диск (папка «Семейный сервер — копии»), а без Диска придёт на почту.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — на Яндекс Диск");
         } }),
@@ -544,11 +599,15 @@
             load();
           } catch (e) { toast(problem(e)); }
         };
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: "Мост через видеозвонки WB Stream "
-          + "(Wildberries): его канал данных обычно быстрее Телемоста, а WB в «белых списках». Нужен вход в WB Stream один раз — "
-          + "номер телефона и код из СМС на странице WB. Дальше сервер держит мост сам, а Winger подключается к нему без настроек." }));
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Мост через видеозвонки WB Stream (Wildberries). "
+          + "Нужен один раз войти в WB Stream — дальше сервер держит мост сам." }));
         if (window.AIBridge && window.AIBridge.wbLogin) {
-          box.append(el("button", { class: "btn wide", text: "🔑 Войти в WB Stream", onclick: async () => {
+          box.append(el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
+            el("li", { text: "Нажмите «Войти в WB Stream» — откроется страница WB." }),
+            el("li", { text: "Введите свой номер телефона и код из СМС — как при входе в Wildberries." }),
+            el("li", { text: "Окно закроется само. Через 1–2 минуты мост заработает." }),
+            el("li", { text: "Всё: Winger получит мост сам, в нём появится ещё одна кнопка моста." })),
+          el("button", { class: "btn wide", text: "🔑 Войти в WB Stream", onclick: async () => {
             const r = await nativeCall("wbLogin");
             if (!r.ok) { toast("Вход в WB не закончен", 4000); return; }
             go(r.text);
@@ -595,41 +654,6 @@
           } }));
       });
     }
-    function bridgeLink(b) {
-      sheet("🔗 " + b.label, (box) => {
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Ссылку вставляют в приложение моста (whitelist-bypass) на этом устройстве." }),
-          el("div", { style: "font:12px ui-monospace,monospace;word-break:break-all;background:var(--card);border-radius:10px;padding:10px;margin-bottom:10px", text: b.link }),
-          el("div", { class: "big-actions" },
-            el("button", { class: "btn", text: "📋 Копировать", onclick: () => copyText(b.link) }),
-            el("button", { class: "btn line", text: "📤 Поделиться", onclick: () => (navigator.share ? navigator.share({ text: b.link }).catch(() => copyText(b.link)) : copyText(b.link)) })));
-        // the bridge right inside Winger, with that service's best settings (only the owner sees this)
-        const name = encodeURIComponent("Мост · " + b.label.replace(/^\S+\s/, ""));
-        const tm = /^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(b.link || "");
-        const wb = b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(b.link || "");
-        const dn = b.id.startsWith("dion-") && /^dion:\/\/[0-9A-Za-z_-]{4,64}$/.test(b.link || "");
-        const bx = b.id.startsWith("bitrix-") && /^https:\/\/[0-9A-Za-z-]{2,63}\.bitrix24\.(ru|by|kz|com)\/video\/[0-9A-Za-z_-]{2,64}$/.test(b.link || "");
-        if (wb) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Войти в WB заново (если мост перестал работать)", onclick: wbBridge }));
-        if (dn || bx) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Сменить почту или пароль", onclick: () => acctBridge(dn ? "dion" : "bitrix") }));
-        if (tm || wb || dn || bx) {
-          const enc = encodeURIComponent(b.link);
-          const w = tm ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
-            : wb ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
-            : dn ? "winger-bridge://dion?room=" + enc + "#" + name
-            : "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name;
-          box.append(el("h3", { style: "margin:16px 0 6px", text: "📲 Мост в Winger — только у вас" }),
-            el("div", { style: "font-size:14px;color:var(--muted);margin-bottom:10px",
-              text: (tm ? "В Winger появится «Мост»: звонок Телемоста, видео VP8 24/45, надёжная доставка (KCP)"
-                : dn ? "В Winger появится «Мост»: DION, видео с его собственными настройками"
-                : (wb ? "В Winger появится «Мост»: WB Stream" : "В Winger появится «Мост»: Битрикс24")
-                  + ", сначала быстрый канал данных, если он не пойдёт — видео 24/30 с надёжной доставкой")
-                + " — настраивать ничего не нужно. Winger и так получает его сам; эта кнопка — если нужно сразу." }),
-            el("a", { class: "btn wide", href: w, style: "text-decoration:none;text-align:center;display:block", text: "📲 Открыть в Winger" }),
-            el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Скопировать ссылку для Winger",
-              onclick: () => copyText(w) }));
-        }
-      });
-    }
-
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
       scroll.append(diskRow(), maxCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
