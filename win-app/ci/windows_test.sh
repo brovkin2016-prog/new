@@ -10,6 +10,9 @@ step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }
 fail() { echo "FAIL: $*"; echo "::error::$*"; exit 1; }
 CURL=/c/Windows/System32/curl.exe  # Windows' own curl: just another program, not Winger
 export WINGER_QUIET=1
+# the tests' server runs on this same machine: with Winger on, its own way out would come back into the virtual
+# interface (a loop no real laptop has — there the server is far away), so it goes straight
+export WINGER_DIRECT=hysteria.exe
 
 step "a real hysteria server on this machine"
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj '/CN=vpn.test.local' \
@@ -62,10 +65,13 @@ timeout 60 ./winger-console.exe --selftest 'winger-bridge://telemost?link=https%
 grep -E "bridge|relay" "$OUT/bridge.log" | head -20
 grep -q "bridge: READY" "$OUT/bridge.log" || fail "the bridge's program did not start"
 grep -qE "bridge: resolve [a-z.-]+yandex[a-z.]* -> [0-9]" "$OUT/bridge.log" || fail "the bridge's program got no address"
+taskkill /im winger-relay.exe /f >/dev/null 2>&1
 echo "bridge program ✓"
 
 step "installed: the service starts, the window's API drives it, then it is removed"
 ./winger.exe --install
+reg add 'HKLM\SYSTEM\CurrentControlSet\Services\Winger' /v Environment /t REG_MULTI_SZ /d WINGER_DIRECT=hysteria.exe /f
+net stop Winger && net start Winger  # the service now knows about the tests' server (above)
 sc query Winger | tee "$OUT/service.txt" | grep -q RUNNING || fail "the service does not run after the install"
 for _ in $(seq 1 40); do [ -s /c/ProgramData/Winger/ui-token ] && break; sleep 0.5; done
 T=$(cat /c/ProgramData/Winger/ui-token)

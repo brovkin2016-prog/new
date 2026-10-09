@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -56,7 +55,7 @@ func serve(tun bool, stop <-chan struct{}) error {
 	if err != nil {
 		Logf("bridge program: %v", err)
 	}
-	eng := NewEngine(st, dir, relay, ownNames(), tun)
+	eng := NewEngine(st, dir, relay, straight(), tun)
 	fam := &Family{st: st, eng: eng, dataDir: dir}
 	eng.fam = fam
 	go fam.Loop()
@@ -76,6 +75,18 @@ func serve(tun bool, stop <-chan struct{}) error {
 		_ = srv.Close()
 		return nil
 	}
+}
+
+// straight: programs whose traffic never enters the virtual interface — this program's own files, plus (tests only)
+// WINGER_DIRECT's list: the tests' server runs on the same machine and must reach the internet by itself.
+func straight() []string {
+	names := ownNames()
+	for _, n := range strings.Split(strings.ToLower(os.Getenv("WINGER_DIRECT")), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
 }
 
 // selftest (CI): connects with this link and keeps the VPN on; meanwhile other programs' pages must go through the
@@ -109,7 +120,7 @@ func selftest(args []string) error {
 		st.Update(func(s *Settings) { s.OnlyApps, s.Apps = true, strings.Split(strings.ToLower(only), ",") })
 	}
 	relay, _ := relayPath(dir)
-	eng := NewEngine(st, dir, relay, ownNames(), true)
+	eng := NewEngine(st, dir, relay, straight(), true)
 	if err := eng.Connect(); err != nil {
 		return err
 	}
@@ -144,5 +155,3 @@ func dataDirFromEnv() string {
 	}
 	return ""
 }
-
-var _ = filepath.Join

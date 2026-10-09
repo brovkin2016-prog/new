@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,5 +186,3 @@ func (b *Box) Running() bool {
 	defer b.mu.Unlock()
 	return b.instance != nil
 }
-
-var _ = os.Getenv

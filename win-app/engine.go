@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 )
@@ -457,8 +456,6 @@ func (e *Engine) SpeedOf(p *Profile) (float64, error) {
 	}
 	return Speed(port), nil
 }
-
-var _ = strings.TrimSpace
 
 // Shutdown: off because the service stops (the computer shuts down, an update): «on after a restart» stays.
 func (e *Engine) Shutdown() {
