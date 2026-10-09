@@ -75,8 +75,10 @@ func Config(o EngineOptions) map[string]any {
 			map[string]any{"tag": "local", "type": "local"},
 			map[string]any{"tag": "fake", "type": "fakeip", "inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18"},
 		},
-		"final":    "remote",
-		"strategy": "prefer_ipv4",
+		"final": "remote",
+		// IPv4 only: programs given an IPv6 address would go by it, and a server or a network without IPv6 breaks the
+		// page instead of the program falling back
+		"strategy": "ipv4_only",
 	}
 	if !only {
 		dns["rules"] = []any{map[string]any{"query_type": []string{"A", "AAAA"}, "server": "fake"}}

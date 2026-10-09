@@ -43,4 +43,10 @@ func TestConfigs(t *testing.T) {
 		Config(cases["server, all programs"])["route"].(map[string]any)["final"] != "proxy" {
 		t.Fatal("final")
 	}
+	// programs get IPv4 addresses only: an IPv6 one breaks the page where the server or the network has no IPv6
+	for name, o := range cases {
+		if Config(o)["dns"].(map[string]any)["strategy"] != "ipv4_only" {
+			t.Errorf("%s: names must be IPv4 only", name)
+		}
+	}
 }
