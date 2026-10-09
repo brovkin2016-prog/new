@@ -76,8 +76,9 @@
       if (data.tg !== null && data.tg !== undefined) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.tg ? "🟢" : "🔴") + " Telegram без VPN",
         el("small", { text: "Для iPhone и компьютеров: ссылка — в карточке человека и в ссылке «VPN и Telegram»" }))));
       scroll.append(head, diskRow(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
-        el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на приложение Winger VPN (24 ч)",
-          onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }));
+        el("div", { class: "big-actions", style: "margin:0 0 12px" },
+          el("button", { class: "btn line", text: "🔗 Winger для Android (24 ч)", onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }),
+          el("button", { class: "btn line", text: "💻 Winger для Windows (24 ч)", onclick: () => makeLink({ op: "dl_winapp" }, "Winger для Windows") })));
       const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан" }));
       for (const u of data.users) {
         list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
