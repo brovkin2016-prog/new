@@ -200,6 +200,7 @@ public final class VpnSvc extends VpnService {
         int fails = 0;
         State.set(State.Phase.CONNECTING, profile.bridge ? "Поднимаю мост через " + service(profile) + "… до минуты" : "Подключаюсь к серверу…");
         if (socksPort == 0) socksPort = freePort();
+        quickChoice();
         while (mine()) {
             Process[] own = {null};
             String err = profile.bridge ? startBridge(own) : startClient(own);
@@ -445,8 +446,33 @@ public final class VpnSvc extends VpnService {
         }
     }
 
+    /**
+     * At the start, when a bridge is there to fall back on: a server whose address the provider shut answers nothing at
+     * all, and a minute of failed tries would go by before the move — each server is looked at once (a few seconds) and
+     * the first one that answers, or else the bridge, is taken at once. The chosen server is looked at again later (BACK).
+     */
+    private void quickChoice() {
+        if (profile.bridge || !Apps.autoBridge(this) || preferred == null || !preferred.link.equals(profile.link)) return;
+        boolean bridge = false;
+        for (Profile x : Profile.all(this)) bridge |= x.bridge;
+        if (!bridge) return;
+        Profile at = profile;
+        for (int i = 0; i < 6 && !at.bridge && mine() && !probeServer(at); i++) {
+            Profile next = nextChoice(at);
+            if (next == null || next.link.equals(preferred.link)) return;
+            at = next;
+        }
+        if (!mine() || at.link.equals(profile.link)) return;
+        switchTo(at, true, (at.bridge ? "«" + profile.name + "» не отвечает в этой сети — включаю мост через " + service(at)
+                : "«" + profile.name + "» не отвечает — пробую «" + at.name + "»") + "…");
+    }
+
     /** The next connection to try when the one in use does not answer: the chosen one, other servers, then bridges. */
     private Profile nextChoice() {
+        return nextChoice(profile);
+    }
+
+    private Profile nextChoice(Profile from) {
         if (!Apps.autoBridge(this) || preferred == null) return null;
         List<Profile> order = new java.util.ArrayList<>();
         order.add(preferred);
@@ -454,7 +480,7 @@ public final class VpnSvc extends VpnService {
         for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(preferred.link)) order.add(x);
         if (order.size() < 2) return null;
         int at = 0;
-        for (int i = 0; i < order.size(); i++) if (order.get(i).link.equals(profile.link)) at = i;
+        for (int i = 0; i < order.size(); i++) if (order.get(i).link.equals(from.link)) at = i;
         return order.get((at + 1) % order.size());
     }
 

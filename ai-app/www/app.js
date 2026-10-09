@@ -155,9 +155,22 @@
     let s = "Нет связи с сервером" + (why ? ": " + why : "") + ". Проверьте интернет и попробуйте ещё раз.";
     // only the owner has bridges in Winger; through one the helper reaches the server where the network lets few sites
     if ((S.me && S.me.panel) || store.get("wasOwner", false)) {
-      s += " Если открываются только отдельные сайты — включите в Winger мост: помощник пойдёт через него сам.";
+      s += wingerOn() ? " Включаю Winger: он сам пойдёт через мост и возьмёт помощника с собой — через полминуты заработает."
+        : " Если открываются только отдельные сайты — включите в Winger мост: помощник пойдёт через него сам.";
     }
     return s;
+  }
+  // the owner's phone, the server out of reach directly (its address shut by the provider on this network): Winger is
+  // switched on — it goes over a bridge by itself and takes this app with it; at most once in 5 minutes
+  let wingerAt = 0;
+  function wingerOn() {
+    if (Date.now() - wingerAt < 5 * 60000) return true;
+    try {
+      if (!Native || !Native.startWinger || Native.vpnOn() || !Native.wingerHere()) return false;
+      wingerAt = Date.now();
+      Native.startWinger();
+      return true;
+    } catch (e) { return false; }
   }
 
   // ---------- storage: messages of each thread ----------
@@ -594,6 +607,7 @@
       app.innerHTML = "";
       app.append(el("div", { class: "login" }, el("div", { class: "logo", text: "✦" }), el("p", { text: problem(e) }),
         el("button", { class: "btn wide", text: "Повторить", onclick: start })));
+      if (Date.now() - wingerAt < 2 * 60000) setTimeout(start, 8000);  // Winger is coming up over a bridge: again by itself
       return;
     }
     const owner = S.me.panel ? ownerCode() : null;  // fetched while the conversations load

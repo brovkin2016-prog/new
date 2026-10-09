@@ -183,6 +183,20 @@ grep -qE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|hysteria2://" "$OUT/report.log" && fail
 adb shell am start -n $ACT --es test_ai app.aihelper.family >/dev/null
 echo "journal report: $(cut -c1-300 "$OUT/report.log")"
 
+# the AI helper switches Winger on when its server does not answer: Winger connects and gives the screen straight back
+step "the AI helper switches Winger on: it connects and gives the screen back"
+mark
+adb shell am start -n $ACT --ez connect true --ez back true >/dev/null
+wait_since "connected via" 60 || fail "Winger did not connect when switched on from outside"
+sleep 2
+TOP=$(adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | head -2)
+echo "on top now: $TOP"
+echo "$TOP" | grep -q "$PKG/" && fail "Winger kept the screen although it was asked to give it back"
+mark
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_since "stopped" 20 || fail "did not switch off (switched on from outside)"
+echo "switched on from outside: connected, the screen given back"
+
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 step "a real update of the app over itself: the next build (version + 1) through the app's own i"
 # Android's «install the update?» answered by a tap — the way a phone gets every update
@@ -258,8 +272,10 @@ DEAD='hysteria2://family:test-pass-123@10.0.2.2:4999/?sni=vpn.test.local&insecur
 adb logcat -c
 adb shell "am start -a android.intent.action.VIEW -d '$DEAD' -n $ACT" >/dev/null
 sleep 2
+mark
 adb shell am start -n $ACT --el test_back 20000 --ez test_connect true >/dev/null
 wait_log "auto: «Запасной» не отвечает" 150 || fail "did not move on by itself when the chosen server did not answer"
+since | grep -q "retry 2: " && fail "the dead chosen server was tried again and again instead of being passed over at once"
 wait_log "connected via 10.0.2.2" 60 || fail "the other server did not connect after the automatic move"
 sleep 2
 adb exec-out screencap -p > "$OUT/7-auto.png"

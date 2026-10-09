@@ -401,6 +401,9 @@ public class MainActivity extends Activity implements State.Listener {
             appsChanged();
         }
         if (i.getBooleanExtra("connect", false) && Profile.chosen(this) != null && State.phase == State.Phase.OFF) connect();  // the tile
+        // the AI helper switches Winger on when its server does not answer, and the person goes straight back to it
+        // (unless Android still has to ask for the VPN: then this screen stays for the answer)
+        if (i.getBooleanExtra("back", false) && VpnService.prepare(this) == null) moveTaskToBack(true);
         String testPick = BuildConfig.DEBUG ? i.getStringExtra("test_pick") : null;  // the emulator test only
         if (testPick != null) pickApps(testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only

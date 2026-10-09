@@ -3,6 +3,7 @@ package app.aihelper.family;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.util.Base64;
@@ -21,6 +22,7 @@ import java.util.regex.Pattern;
 
 /** What the page can ask of the phone: window.AIBridge. Answers come back through window.__aiNet. */
 final class Bridge {
+    private static final String WINGER = "app.aihelper.vpn";
     private static final Pattern HOST = Pattern.compile("^[a-z0-9-]+(\\.[a-z0-9-]+)+(:\\d{1,5})?$");
     private final MainActivity act;
     private final WebView web;
@@ -90,6 +92,38 @@ final class Bridge {
             public void end() { js(id, "end", ""); }
             public void fail(String why) { js(id, "fail", why); }
         });
+    }
+
+    /** The family's Winger is on this phone (the owner's app switches it on when the server does not answer). */
+    @JavascriptInterface
+    public boolean wingerHere() {
+        try {
+            act.getPackageManager().getPackageInfo(WINGER, 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** A VPN on the phone carries this app's traffic now. */
+    @JavascriptInterface
+    public boolean vpnOn() {
+        return Net.vpnOn();
+    }
+
+    /** Winger switches on (over a bridge by itself when the server does not answer) and gives the screen straight back. */
+    @JavascriptInterface
+    public boolean startWinger() {
+        Intent i = new Intent().setClassName(WINGER, WINGER + ".MainActivity").putExtra("connect", true).putExtra("back", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        act.runOnUiThread(() -> {
+            try {
+                act.startActivity(i);
+            } catch (Exception e) {
+                android.util.Log.i("AIWeb", "Winger did not start: " + e);
+            }
+        });
+        return true;
     }
 
     @JavascriptInterface
