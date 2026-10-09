@@ -110,6 +110,7 @@ func selftest(args []string) error {
 	dir, _ := os.MkdirTemp("", "winger-test")
 	os.Setenv("WINGER_DATA", dir)
 	OpenJournal(dir)
+	journalEcho = true
 	st := OpenStore(dir)
 	p, err := ParseLink(link)
 	if err != nil {

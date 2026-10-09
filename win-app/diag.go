@@ -42,6 +42,9 @@ func OpenJournal(dir string) {
 	journalPath = filepath.Join(dir, "journal.log")
 }
 
+// journalEcho: the self-test (CI) also shows the journal as it goes, so a check cut short still has it.
+var journalEcho bool
+
 // Logf writes a line to the journal (masked).
 func Logf(format string, a ...any) {
 	line := time.Now().Format("02.01 15:04:05") + " " + Mask(fmt.Sprintf(format, a...)) + "\n"
@@ -56,6 +59,9 @@ func Logf(format string, a ...any) {
 		return
 	}
 	_, _ = f.WriteString(line)
+	if journalEcho {
+		fmt.Print(line)
+	}
 	st, _ := f.Stat()
 	f.Close()
 	if st != nil && st.Size() > journalMax {
