@@ -148,26 +148,35 @@ step "on a bridge the AI helper goes through it whatever is ticked"
 AI=$(for p in com.android.contacts com.android.camera2 com.android.documentsui com.android.dialer com.android.calendar; do
   adb shell pm path $p 2>/dev/null | grep -q package: && { echo $p; break; }; done)
 [ -n "$AI" ] || fail "no app on this emulator to stand in for the AI helper"
-adb logcat -c
+# (a mark in the journal, not «logcat -c»: the clearing does not always take, and an older line must not answer)
+mark() { M="mark-$RANDOM$RANDOM"; adb shell log -t AIVPN "$M"; }
+since() { adb logcat -d -s AIVPN:V | awk -v m="$M" 'f; index($0, m) {f=1}'; }
+wait_since() { for _ in $(seq 1 "$2"); do since | grep -q "$1" && return 0; sleep 1; done; return 1; }
+mark
 adb shell am start -n $ACT --es test_ai $AI --ez test_mapdns true --ez test_connect true >/dev/null
-wait_log "through the VPN: \[.*$AI" 60 || fail "the AI helper did not go through the bridge's way"
-wait_log "the AI helper goes through the bridge too" 5 || fail "the AI helper's way through the bridge is not in the journal"
+wait_since "connected via" 60 || fail "no connection on the bridge's way (the AI helper's check)"
+since | grep "through the VPN: \[" | tail -1 | grep -q "$AI" || fail "the AI helper did not go through the bridge's way"
+since | grep -q "the AI helper goes through the bridge too" || fail "the AI helper's way through the bridge is not in the journal"
+mark
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
-wait_log "stopped" 20 || fail "did not switch off (the AI helper's way)"
-adb logcat -c
+wait_since "stopped" 20 || fail "did not switch off (the AI helper's way)"
+mark
 adb shell am start -n $ACT --ez test_connect true >/dev/null
-wait_log "through the VPN: \[" 60 || fail "no tunnel through the server after the bridge's way"
-adb logcat -d -s AIVPN:V | grep "through the VPN: \[" | tail -1 | grep -q "$AI" && fail "the AI helper went through the server although not ticked"
+wait_since "connected via" 60 || fail "no connection through the server after the bridge's way"
+L=$(since | grep "through the VPN: \[" | tail -1)
+[ -n "$L" ] || fail "no tunnel through the server after the bridge's way"
+echo "$L" | grep -q "$AI" && fail "the AI helper went through the server although not ticked"
+mark
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
-wait_log "stopped" 20 || fail "did not switch off (after the AI helper's way)"
+wait_since "stopped" 20 || fail "did not switch off (after the AI helper's way)"
 echo "AI helper ($AI standing in): through the bridge's way, not through the server unless ticked"
 
 # the journal with a check of the way to the server, copied for a chat when the server is out of reach
 step "the journal with a check of the way to the server, copied for a chat"
-adb logcat -c
+mark
 adb shell am start -n $ACT --es test_ai $AI --ez test_journal true >/dev/null
-wait_log "report: Winger" 40 || fail "the journal's report did not come"
-adb logcat -d -s AIVPN:V | grep "report: Winger" | tail -1 | tee "$OUT/report.log"
+wait_since "report: Winger" 40 || fail "the journal's report did not come"
+since | grep "report: Winger" | tail -1 | tee "$OUT/report.log"
 grep -q "ИИ-помощник: установлен" "$OUT/report.log" || fail "the report does not see the AI helper"
 grep -qE "сеть телефона: (Wi-Fi|мобильная|другая)" "$OUT/report.log" || fail "the report does not name the phone's network"
 grep -qE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|hysteria2://" "$OUT/report.log" && fail "the report shows an address or a link"
