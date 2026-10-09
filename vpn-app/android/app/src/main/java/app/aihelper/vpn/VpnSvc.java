@@ -241,6 +241,11 @@ public final class VpnSvc extends VpnService {
             }
             fails++;
             Diag.i(this, "retry " + fails + ": " + err);
+            if (!profile.bridge && fails == 1 && moved(profile)) {  // at its new address: no failure, straight on
+                fails = 0;
+                if (!sleep(300)) break;
+                continue;
+            }
             if (profile.bridge && "dc".equals(tunnel) && fails >= 2 && !profile.tunnelMode.isEmpty()) {
                 tunnel = "video";  // the data channel does not carry here: the call's video does, a little slower
                 fails = 0;
@@ -458,6 +463,7 @@ public final class VpnSvc extends VpnService {
         if (!bridge) return;
         Profile at = profile;
         for (int i = 0; i < 6 && !at.bridge && mine() && !probeServer(at); i++) {
+            if (i == 0 && moved(at)) return;  // the chosen server is there, at its new address
             Profile next = nextChoice(at);
             if (next == null || next.link.equals(preferred.link)) return;
             at = next;
@@ -465,6 +471,20 @@ public final class VpnSvc extends VpnService {
         if (!mine() || at.link.equals(profile.link)) return;
         switchTo(at, true, (at.bridge ? "«" + profile.name + "» не отвечает в этой сети — включаю мост через " + service(at)
                 : "«" + profile.name + "» не отвечает — пробую «" + at.name + "»") + "…");
+    }
+
+    /**
+     * The family server may have moved to a new address (its name follows it): the saved link is renewed from the server
+     * and, when the server answers there, used. True when it switched to it.
+     */
+    private boolean moved(Profile p) {
+        Profile fresh = BridgeSync.renewNow(this, p);
+        if (fresh == null || !mine() || !probeServer(fresh)) return false;
+        synchronized (lock) {
+            if (preferred != null && preferred.link.equals(p.link)) preferred = fresh;
+        }
+        switchTo(fresh, false, "Сервер переехал на новый адрес — подключаюсь по новому…");
+        return true;
     }
 
     /** The next connection to try when the one in use does not answer: the chosen one, other servers, then bridges. */

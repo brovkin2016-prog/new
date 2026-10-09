@@ -41,6 +41,7 @@ final class BridgeSync {
         new Thread(() -> {
             try {
                 fetch(c, host, auth, false);
+                renewServer(c, host, auth, false);
             } finally {
                 busy = false;
             }
@@ -59,6 +60,47 @@ final class BridgeSync {
             return false;
         }
         return fetch(c, host, auth, true) > 0;
+    }
+
+    /**
+     * Now, on this thread and past the VPN: asks the family server, by its name, for this phone's own current link — when
+     * the server got a new address, the saved one is renewed in place. The renewed connection, or null when nothing
+     * changed (or the server could not be asked).
+     */
+    static Profile renewNow(Context ctx, Profile current) {
+        Context c = ctx.getApplicationContext();
+        String host = Profile.homeHost(c);
+        if (current == null || current.bridge || host == null || current.auth == null || current.auth.indexOf(':') <= 0) return null;
+        if (!renewServer(c, host, current.auth, true)) return null;
+        for (Profile p : Profile.all(c)) if (!p.bridge && current.auth.equals(p.auth) && current.ports.equals(p.ports)) return p;
+        return null;
+    }
+
+    private static boolean renewServer(Context c, String host, String login, boolean direct) {
+        try {
+            HttpURLConnection h = Updater.open("https://" + host + ":8443/api/winger_profile", direct);
+            h.setConnectTimeout(10_000);
+            h.setReadTimeout(15_000);
+            h.setRequestMethod("POST");
+            h.setDoOutput(true);
+            h.setRequestProperty("Content-Type", "application/json");
+            try (OutputStream o = h.getOutputStream()) {
+                o.write(new JSONObject().put("auth", login).toString().getBytes(StandardCharsets.UTF_8));
+            }
+            int code = h.getResponseCode();
+            boolean changed = false;
+            if (code == 200) {
+                JSONObject js = new JSONObject(read(h.getInputStream()));
+                Profile main = Profile.parse(js.optString("link")), hop = Profile.parse(js.optString("hop"));
+                changed = main != null && Profile.renew(c, login, main, hop);
+                if (changed) Diag.i(c, "the family server moved: its link renewed");
+            }
+            h.disconnect();
+            return changed;
+        } catch (Exception e) {
+            Diag.i(c, "server link check: " + e);
+            return false;
+        }
     }
 
     /** The number of bridge links that were new or changed; -1 when the server could not be asked. */

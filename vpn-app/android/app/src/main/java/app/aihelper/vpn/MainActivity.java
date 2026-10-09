@@ -375,6 +375,14 @@ public class MainActivity extends Activity implements State.Listener {
         if (BuildConfig.DEBUG) VpnSvc.testMapdns = i.getBooleanExtra("test_mapdns", false);  // the emulator test only
         if (BuildConfig.DEBUG && i.hasExtra("test_back")) VpnSvc.testBackMs = i.getLongExtra("test_back", 0);  // the emulator test only
         if (BuildConfig.DEBUG && i.hasExtra("test_ai")) Apps.aiHelper = i.getStringExtra("test_ai");  // the emulator test only
+        String testRenew = BuildConfig.DEBUG ? i.getStringExtra("test_renew") : null;  // the emulator test only
+        if (testRenew != null) {
+            Profile f = Profile.parse(testRenew);
+            boolean renewed = f != null && Profile.renew(this, f.auth, f, null);
+            Profile now = Profile.chosen(this);
+            Diag.i(this, "renew: " + renewed + " · chosen «" + (now == null ? "" : now.name) + "» " + (now == null ? "" : now.link.contains("moved=1")));
+            changed();
+        }
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_journal", false)) {  // the emulator test only
             new Thread(() -> Diag.i(this, "report: " + Diag.report(this).split("\n--- ")[0].replace('\n', '|')), "journal-test").start();
         }

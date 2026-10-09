@@ -197,6 +197,26 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_since "stopped" 20 || fail "did not switch off (switched on from outside)"
 echo "switched on from outside: connected, the screen given back"
 
+# the family server moved to a new address: the saved server, found by its login, takes the new link in place
+step "the family server moved: the saved server takes the new link in place, its name stays"
+NEWLINK='hysteria2://family:test-pass-123@10.0.2.2:4443/?sni=vpn.test.local&insecure=1&moved=1#Новое'
+mark
+adb shell "am start -n $ACT --es test_renew '$NEWLINK'" >/dev/null
+wait_since "renew: true · chosen «Тест» true" 20 || fail "the saved server did not take the new link in place (name and choice kept)"
+mark
+adb shell "am start -n $ACT --es test_renew '$NEWLINK'" >/dev/null
+wait_since "renew: false" 20 || fail "the same link again changed something"
+mark
+adb shell "am start -n $ACT --es test_renew 'hysteria2://stranger:other-pass@10.0.2.2:4443/?sni=vpn.test.local&insecure=1#Чужой'" >/dev/null
+wait_since "renew: false · chosen «Тест» true" 20 || fail "a link with another login replaced the saved server"
+mark
+adb shell am start -n $ACT --ez test_connect true >/dev/null
+wait_since "connected via 10.0.2.2" 60 || fail "no connection with the renewed link"
+mark
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_since "stopped" 20 || fail "did not switch off (renewed link)"
+echo "server moved: the saved server took the new link in place, its name and choice kept; another login changes nothing"
+
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 step "a real update of the app over itself: the next build (version + 1) through the app's own i"
 # Android's «install the update?» answered by a tap — the way a phone gets every update
