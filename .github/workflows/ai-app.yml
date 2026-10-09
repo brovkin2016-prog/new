@@ -135,5 +135,15 @@ jobs:
           cp /tmp/t/stub.log /tmp/rel/stub.log 2>/dev/null || true
           find /tmp/rel -type f -size 0 -delete  # an empty file cannot be a release asset
           STATE="${{ job.status }}"
-          gh release create "ai-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
-            --title "ИИ-помощник 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key."
+          ls -la /tmp/rel
+          # gh's own words go into the run's summary: the job's log cannot be read from outside
+          for try in 1 2; do
+            if R=$(gh release create "ai-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+                 --title "ИИ-помощник 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key." 2>&1); then
+              echo "$R"; exit 0
+            fi
+            echo "::warning::Publish, try $try: $(echo "$R" | tail -4 | tr '\n' ' ')"
+            gh release delete "ai-app-$CODE" --yes --cleanup-tag 2>/dev/null || true
+            sleep 30
+          done
+          echo "::error::Publish: the release was not created (gh's words above)"; exit 1
