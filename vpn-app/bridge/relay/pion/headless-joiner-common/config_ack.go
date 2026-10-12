@@ -28,6 +28,19 @@ func (t *configAckTracker) arm() (acked, cancel chan struct{}) {
 	return t.acked, t.cancel
 }
 
+// reset: the far side must hear the config again (winger: after a reconnect it starts afresh); a sender still
+// resending it for the old connection stops.
+func (t *configAckTracker) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.confirmed = false
+	if t.cancel != nil {
+		close(t.cancel)
+		t.cancel = nil
+	}
+	t.acked = nil
+}
+
 func (t *configAckTracker) mark() {
 	t.mu.Lock()
 	defer t.mu.Unlock()

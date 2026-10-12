@@ -100,6 +100,7 @@ type shareRig struct {
 	closedByCreator sync.Map
 	connected       chan *rtc.MultiTrackKCPTunnel
 	secret          []byte
+	joinerObf       *tunnel.TunnelObfuscator
 }
 
 var quietLog = func(string, ...any) {}
@@ -158,6 +159,17 @@ func newShareRig(t *testing.T, loss float64) *shareRig {
 // the first), its config, and the creator's tunnel that comes of it. obf: the joiner's tunnel identity (its epoch).
 func (rig *shareRig) joinerConnects(t *testing.T, obf *tunnel.TunnelObfuscator, loss float64) {
 	t.Helper()
+	rig.joinerUp(obf, loss)
+	select {
+	case rig.creator = <-rig.connected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the creator never took the joiner's config")
+	}
+}
+
+// joinerUp: the joiner's side of joinerConnects, without waiting for the creator.
+func (rig *shareRig) joinerUp(obf *tunnel.TunnelObfuscator, loss float64) {
+	rig.joinerObf = obf
 	pub := rtc.NewVP8DataTunnelWithQueue(nil, obf, quietLog, rtc.KCPCarrierQueueDepth)
 	pubW := &shareWire{rnd: rand.New(rand.NewSource(13)), loss: loss, to: rig.relay.handleVideoFrame}
 	pub.WriteFrame = pubW.send
@@ -170,11 +182,6 @@ func (rig *shareRig) joinerConnects(t *testing.T, obf *tunnel.TunnelObfuscator, 
 	rig.joiner.SetSendSessions(1)
 	rig.joiner.SetOnData(rig.end.take)
 	rig.joiner.SendData(tunnel.EncodeVP8ConfigFlags(50, 20, 2, tunnel.ConfigKCPEveryTrack))
-	select {
-	case rig.creator = <-rig.connected:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the creator never took the joiner's config")
-	}
 }
 
 // waitReady: the creator's screenshare session is in use.

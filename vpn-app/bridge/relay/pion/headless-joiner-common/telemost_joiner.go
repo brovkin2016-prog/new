@@ -201,6 +201,23 @@ func (j *TelemostHeadlessJoiner) resetSessionState() {
 	j.boundPeers = nil
 	j.unboundPeers = nil
 	j.boundMu.Unlock()
+	j.renewEpoch()
+}
+
+// renewEpoch (winger): a reconnect starts this side's tunnel afresh (initPC makes a new one, its reliable layer from
+// the first segment). The creator must start afresh too: with the old epoch it keeps its reliable sessions, which take
+// every segment of the new ones as an old one already had, and nothing gets through either way until Winger is
+// restarted. A new epoch is what every creator takes as a new joiner (resetForNewPeer); the config goes again so that
+// it hears the rate, the track count and the flags anew.
+func (j *TelemostHeadlessJoiner) renewEpoch() {
+	obf, err := tunnel.NewTunnelObfuscator(tunnel.DeriveSecretFromJoinLink(j.joinLink))
+	if err != nil {
+		j.logFn("telemost-joiner: obfuscator renew failed, keeping the old one: %v", err)
+		return
+	}
+	j.obf = obf
+	j.configAck.reset()
+	j.logFn("telemost-joiner: localEpoch=0x%08x for the reconnect", obf.LocalEpoch())
 }
 
 func (j *TelemostHeadlessJoiner) Close() {
