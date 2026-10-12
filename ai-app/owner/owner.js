@@ -475,6 +475,11 @@
       });
     }
     // «🛠 Разобрать с Claude» from the server's cards (only the owner has them): a new talk with the problem in it
+    // the journal as Claude gets it: its newest part (where the trouble is) when it is long; the whole one is on the server
+    const WLOG_ASK = "Разбери журнал Winger с моего телефона: почему мост или VPN работает плохо, и как исправить? "
+      + "Полный журнал — на сервере: /var/lib/aibot/winger-log.json (прочитай его целиком).\n\n";
+    const clip = (t) => t.length <= 7900 ? t : t.slice(0, t.indexOf("\n\n") > 0 && t.indexOf("\n\n") < 600 ? t.indexOf("\n\n") + 2 : 300)
+      + "…(начало пропущено — новые строки ниже)…\n" + t.slice(-7300);
     async function toClaude(text) {
       part = "claude"; store.set("accessPart", "claude"); refreshTop();
       try {
@@ -483,7 +488,7 @@
         cache.claude = st; draw();
         if (!st.installed) return;
         if (st.busy) return toast("Claude ещё работает над прошлым — отправьте, когда закончит", 5000);
-        talk({ op: "agent_ask", chat: "new", text: text.slice(0, 7900) }, text.slice(0, 7900));
+        talk({ op: "agent_ask", chat: "new", text: clip(text) }, clip(text));
       } catch (e) { toast(problem(e)); }
     }
     const claudeBtn = (text, close) => !cache.claudeOk ? null : el("button", { class: "btn line", text: "🛠 Разобрать с Claude",
@@ -675,7 +680,7 @@
         }
         if (short) {
           card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Получен " + when(w.at), el("small", { text: [w.device, w.app ? "Winger " + w.app : ""].filter(Boolean).join(" · ") })),
-            claudeBtn(() => "Разбери журнал Winger с моего телефона: почему мост или VPN работает плохо, и как исправить?\n\n"
+            claudeBtn(() => WLOG_ASK
               + ["Журнал Winger (" + [w.device, w.app ? "Winger " + w.app : ""].filter(Boolean).join(", ") + "), получен " + when(w.at), "", ...w.lines].join("\n"))));
           return;
         }
@@ -691,7 +696,7 @@
           `Мост: подключался ${m.bridge_up}, рвался ${m.bridge_lost}, ошибок ${m.bridge_errors}; отклик ср. ${m.ping_avg || "—"} мс, макс. ${m.ping_max || "—"}; без ответа ${m.ping_failed}; переподключений ${m.retries}`,
           "", ...w.lines].join("\n");
         card.append(el("div", { class: "big-actions", style: "margin-top:8px" },
-          claudeBtn(() => "Разбери журнал Winger с моего телефона: почему мост или VPN работает плохо, и как исправить?\n\n" + text()),
+          claudeBtn(() => WLOG_ASK + text()),
           el("button", { class: "btn line", text: "📋 Скопировать", onclick: () => { copyText(text()); toast("Скопировано", 4000); } })));
       }).catch(() => card.remove());
       return card;

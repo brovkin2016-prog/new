@@ -427,7 +427,8 @@ public final class VpnSvc extends VpnService {
         if ("salamander".equalsIgnoreCase(p.obfs)) {
             y.append("obfs:\n  type: salamander\n  salamander:\n    password: ").append(q(p.obfsPassword == null ? "" : p.obfsPassword)).append('\n');
         }
-        y.append("quic:\n  keepAlivePeriod: 10s\n");
+        // a phone that dozes a little (Xiaomi, Android power saving) keeps its connection: the server waits as long
+        y.append("quic:\n  keepAlivePeriod: 10s\n  maxIdleTimeout: 90s\n");
         y.append("fastOpen: true\n");
         y.append("socks5:\n  listen: 127.0.0.1:").append(port).append('\n');
         return y.toString();
