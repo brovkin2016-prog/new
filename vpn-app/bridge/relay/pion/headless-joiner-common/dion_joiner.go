@@ -29,7 +29,16 @@ type DionHeadlessJoiner struct {
 	closed   bool
 	stopCh   chan struct{}
 	stopOnce sync.Once
+
+	// the rate asked of the creator (its sending is what reaches this phone) and used for this side's own sending;
+	// 0: DION's defaults, nothing asked
+	vp8FPS    int
+	vp8Batch  int
+	configAck configAckTracker
 }
+
+// MarkConfigAcked: the creator took the rate asked of it.
+func (j *DionHeadlessJoiner) MarkConfigAcked() { j.configAck.mark() }
 
 func NewDionHeadlessJoiner(logFn func(string, ...any), resolveFn ResolveFunc, status StatusEmitter, pcConfig PeerConnectionConfigurer) *DionHeadlessJoiner {
 	return &DionHeadlessJoiner{
@@ -45,6 +54,8 @@ func (j *DionHeadlessJoiner) RunWithParams(jsonParams string) {
 	var params struct {
 		RoomID      string `json:"roomId"`
 		DisplayName string `json:"displayName"`
+		VP8FPS      int    `json:"vp8Fps"`
+		VP8Batch    int    `json:"vp8Batch"`
 	}
 	if err := json.Unmarshal([]byte(jsonParams), &params); err != nil {
 		j.logFn("dion-joiner: failed to parse params: %v", err)
@@ -61,8 +72,15 @@ func (j *DionHeadlessJoiner) RunWithParams(jsonParams string) {
 		params.DisplayName = "Joiner"
 	}
 
+	if params.VP8Batch > 0 {
+		j.vp8FPS, j.vp8Batch = params.VP8FPS, params.VP8Batch
+		if j.vp8FPS <= 0 {
+			j.vp8FPS = 24
+		}
+	}
+
 	httpClient := j.makeHTTPClient()
-	j.logFn("dion-joiner: room=%s name=%s", slug, params.DisplayName)
+	j.logFn("dion-joiner: room=%s name=%s vp8Fps=%d vp8Batch=%d", slug, params.DisplayName, j.vp8FPS, j.vp8Batch)
 
 	var configureSettingEngine func(*webrtc.SettingEngine)
 	if j.PCConfig != nil {
@@ -120,11 +138,19 @@ func (j *DionHeadlessJoiner) runOnce(httpClient *http.Client, slug, displayName 
 		NetDialContext:         j.makeDialContext(),
 		ResolveICEHost:         j.ResolveFn,
 		Role:                   dion.RoleJoiner,
+		VP8FPS:                 j.vp8FPS,
+		VP8Batch:               j.vp8Batch,
 	})
 	call.OnConnected = func(tun tunnel.DataTunnel) {
 		attempt.Store(0)
 		j.logFn("dion-joiner: === TUNNEL CONNECTED ===")
 		j.Status.EmitStatus(common.StatusTunnelConnected)
+		if j.vp8Batch > 0 {
+			// each connection is a fresh tunnel on the creator's side too: asked again every time, until it says yes
+			acked, cancel := j.configAck.arm()
+			go tunnel.SendVP8ConfigUntilAcked(acked, cancel, j.stopCh, tun, j.vp8FPS, j.vp8Batch, 1, j.logFn, "dion-joiner")
+			j.logFn("dion-joiner: pushed vp8 config to creator fps=%d batch=%d", j.vp8FPS, j.vp8Batch)
+		}
 		if j.OnConnected != nil {
 			j.OnConnected(tun)
 		}

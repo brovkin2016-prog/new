@@ -142,7 +142,7 @@ func main() {
 		c.Run()
 	case "dion-headless-joiner":
 		c := android.NewDionHeadlessJoiner(log.Printf)
-		c.OnConnected = newPersistentJoinerBridge(nil)
+		c.OnConnected = newPersistentJoinerBridge(c.MarkConfigAcked)
 		c.Run()
 	case "bitrix-headless-joiner":
 		c := android.NewBitrixHeadlessJoiner(log.Printf)

@@ -344,6 +344,20 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 sleep 3
 echo "bridge WB Stream: relay started in its mode, room taken"
 adb shell "am start -n $ACT --es test_remove МостWB" >/dev/null; sleep 1
+
+# DION: by itself 24 × 10 packets a second reach the phone; the relay is given twice that to ask of the server's side
+step "DION: the relay is given the higher speed to ask of the server's side"
+DN='winger-bridge://dion?room=dion%3A%2F%2Fabc-def-ghi#МостDION'
+adb logcat -c
+adb shell "am start -n $ACT --es test_bridge '$DN' --ez test_connect true" >/dev/null
+for _ in $(seq 1 40); do adb logcat -d -s AIVPN:V | grep -q "dion-joiner: room=" && break; sleep 1; done
+adb logcat -d -s AIVPN:V | grep -E "bridge|relay" | head -12 | tee "$OUT/bridge-dion.log"
+grep -q "bridge: READY" "$OUT/bridge-dion.log" || fail "the DION relay did not start"
+grep -q "dion-joiner: room=abc-def-ghi name=.* vp8Fps=24 vp8Batch=20" "$OUT/bridge-dion.log" || fail "the DION relay did not take the higher speed"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+sleep 3
+echo "bridge DION: relay started with the higher speed to ask for"
+adb shell "am start -n $ACT --es test_remove МостDION" >/dev/null; sleep 1
 adb shell am start -n $ACT --es test_remove Запасной >/dev/null; sleep 1
 
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install

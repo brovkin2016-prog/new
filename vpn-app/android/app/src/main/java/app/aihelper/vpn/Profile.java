@@ -27,7 +27,8 @@ final class Profile {
     String joinLink;
     int fps, batch;
     String platform = "";   // a bridge's call service: telemost, wbstream, dion, bitrix
-    String tunnelMode = ""; // WB Stream and Bitrix: "dc" (a data channel — quicker) or "video"
+    String tunnelMode = ""; // WB Stream and Bitrix: "dc" (a data channel — quicker) or "video"; DION: "dc" its higher
+                            // speed (asked of the server's side), "video" its own usual one
 
     /** The first hysteria2:// link anywhere in the text (a message, a QR code), or null. */
     static Profile find(String text) {
@@ -143,11 +144,13 @@ final class Profile {
             // data channels), so a bigger batch per frame; WB Stream and Bitrix24 have a data channel — quicker, and
             // reliable by itself — tried first, the video (24 frames, 30 per batch, made reliable) when it does not carry
             p.fps = number(u.getQueryParameter("fps"), 24, 1, 60);
-            p.batch = number(u.getQueryParameter("batch"), plat.equals("telemost") ? 45 : 30, 1, 200);
+            p.batch = number(u.getQueryParameter("batch"), plat.equals("telemost") ? 45 : plat.equals("dion") ? 20 : 30, 1, 200);
             p.reliable = !"0".equals(u.getQueryParameter("reliable"));
             p.dualTrack = "1".equals(u.getQueryParameter("dual"));
             String mode = u.getQueryParameter("mode");
-            if (plat.equals("wbstream") || plat.equals("bitrix")) p.tunnelMode = "video".equals(mode) ? "video" : "dc";
+            // DION by itself sends 24 × 10 packets a second to the phone (~250 KB/s): twice that is asked first, and
+            // its own speed again when that does not carry (as WB Stream's and Bitrix24's video after their data channel)
+            if (plat.equals("wbstream") || plat.equals("bitrix") || plat.equals("dion")) p.tunnelMode = "video".equals(mode) ? "video" : "dc";
             String frag = u.getFragment();
             p.name = frag != null && !frag.trim().isEmpty() ? frag.trim() : label;
             return p;
@@ -176,11 +179,18 @@ final class Profile {
             default:
                 j.put("joinLink", joinLink);
         }
-        if (!platform.equals("dion")) {
+        if (platform.equals("dion")) {
+            if ("dc".equals(tunnel)) j.put("vp8Fps", fps).put("vp8Batch", batch);  // nothing: DION's own speed
+        } else {
             j.put("vp8Fps", fps).put("vp8Batch", batch).put("reliable", reliable).put("dualTrack", dualTrack);
             if (platform.equals("wbstream") || platform.equals("bitrix")) j.put("tunnelMode", tunnel);
         }
         return j.toString();
+    }
+
+    /** The bridge's way in the journal: "dc"/"video", or DION's "fast"/"usual". */
+    String modeLabel(String tunnel) {
+        return platform.equals("dion") ? ("dc".equals(tunnel) ? "fast" : "usual") : tunnel;
     }
 
     private static int number(String v, int dflt, int min, int max) {

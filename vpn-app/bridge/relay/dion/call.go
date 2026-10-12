@@ -49,6 +49,10 @@ type CallConfig struct {
 	RecvMid     string
 	Role        Role
 
+	// VP8FPS, VP8Batch: this side's own sending rate (0: the role's default above)
+	VP8FPS   int
+	VP8Batch int
+
 	ConfigureSettingEngine func(*webrtc.SettingEngine)
 	NetDialContext         func(ctx context.Context, network, addr string) (net.Conn, error)
 	ResolveICEHost         func(host string) (string, error)
@@ -367,6 +371,12 @@ func (c *Call) Start() error {
 	fps, batch := joinerVP8FPS, joinerVP8Batch
 	if c.cfg.Role == RoleCreator {
 		fps, batch = creatorVP8FPS, creatorVP8Batch
+	}
+	if c.cfg.VP8FPS > 0 {
+		fps = c.cfg.VP8FPS
+	}
+	if c.cfg.VP8Batch > 0 {
+		batch = c.cfg.VP8Batch
 	}
 	c.vp8tun = rtc.NewVP8DataTunnel(c.sendTrack, c.cfg.Obfuscator, c.cfg.LogFn)
 	c.vp8tun.Start(fps, batch)

@@ -218,7 +218,7 @@ public final class VpnSvc extends VpnService {
                     backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;  // the chosen server held for a while: the usual wait again
                 }
                 State.set(State.Phase.ON, "");
-                Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + tunnel + ")" : ""));
+                Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + profile.modeLabel(tunnel) + ")" : ""));
                 ping();
                 err = watch(own[0]);
             }
@@ -249,7 +249,8 @@ public final class VpnSvc extends VpnService {
             if (profile.bridge && "dc".equals(tunnel) && fails >= 2 && !profile.tunnelMode.isEmpty()) {
                 tunnel = "video";  // the data channel does not carry here: the call's video does, a little slower
                 fails = 0;
-                Diag.i(this, "bridge: the data channel does not carry, trying the video");
+                Diag.i(this, "dion".equals(profile.platform) ? "bridge: DION does not carry at the higher speed, back to its usual one"
+                        : "bridge: the data channel does not carry, trying the video");
                 continue;
             }
             Profile next = fails >= 2 ? nextChoice() : null;

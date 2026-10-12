@@ -28,6 +28,8 @@ func NewDionHeadlessJoiner(logFn func(string, ...any)) *DionHeadlessJoiner {
 	return wrapper
 }
 
+func (j *DionHeadlessJoiner) MarkConfigAcked() { j.inner.MarkConfigAcked() }
+
 func (j *DionHeadlessJoiner) Run() {
 	j.inner.Status.EmitStatus(common.StatusReady)
 	for {
