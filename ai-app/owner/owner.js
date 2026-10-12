@@ -847,7 +847,7 @@
         const go = async (cookies) => {
           close();
           try {
-            const end = await panel({ op: "bridge_vk", cookies }, (t) => toast(t, 150000));
+            const end = await panel({ op: "bridge_vk", cookies }, (t) => toast(t, 260000));
             document.querySelectorAll(".toast").forEach((t) => t.remove());
             if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
             toast("✅ Мост VK работает — Winger возьмёт его сам", 6000);
@@ -889,7 +889,7 @@
         const go = async (token) => {
           close();
           try {
-            const end = await panel({ op: "bridge_wb", token }, (t) => toast(t, 150000));
+            const end = await panel({ op: "bridge_wb", token }, (t) => toast(t, 260000));
             document.querySelectorAll(".toast").forEach((t) => t.remove());
             if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
             toast("✅ Мост WB Stream работает — Winger возьмёт его сам", 6000);
@@ -942,7 +942,7 @@
             if (!body.email || !body.password || (bx && !body.portal)) { toast("Заполните все поля", 3000); return; }
             close();
             try {
-              const end = await panel(body, (t) => toast(t, 150000));
+              const end = await panel(body, (t) => toast(t, 260000));
               document.querySelectorAll(".toast").forEach((t) => t.remove());
               if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
               toast(`✅ Мост ${name} работает — Winger возьмёт его сам`, 6000);
