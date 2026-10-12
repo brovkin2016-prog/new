@@ -110,6 +110,8 @@ func (r *Relay) read(out io.Reader, in io.Writer, join string, onLink func(up bo
 					r.mu.Unlock()
 					setCaptcha(r, u)
 				}
+			case strings.HasPrefix(st, "Captcha solved"):
+				setCaptcha(r, "") // VK took the tick (its page itself shows no change): the notice goes, the call is next
 			case st == "TUNNEL_CONNECTED":
 				setCaptcha(r, "")
 				r.mu.Lock()

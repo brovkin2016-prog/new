@@ -11,8 +11,10 @@ import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.webkit.ConsoleMessage;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -62,8 +64,22 @@ public class CaptchaActivity extends Activity implements State.Listener {
         hint.setText("Отметьте галочку ниже (если VK покажет задание — выполните его). Мост подключится сам, окно закроется.");
         hint.setTextColor(muted);
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        TextView browser = new TextView(this);  // a phone whose built-in web view is too old for VK's page
+        browser.setText("Пусто или не грузится? Открыть в браузере");
+        browser.setTextColor(0xFF6366F1);
+        browser.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        browser.setPadding(0, dp(6), 0, dp(2));
+        browser.setOnClickListener(v -> {
+            Diag.i(this, "bridge: VK's check opened in the browser instead");
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (RuntimeException e) {
+                Toast.makeText(this, "Нет браузера на телефоне", Toast.LENGTH_SHORT).show();
+            }
+        });
         words.addView(title);
         words.addView(hint);
+        words.addView(browser);
         head.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
         TextView close = new TextView(this);
         close.setText("Закрыть");
@@ -95,14 +111,34 @@ public class CaptchaActivity extends Activity implements State.Listener {
             public void onPageFinished(WebView v, String u) {
                 Diag.i(CaptchaActivity.this, "bridge: VK's check page shown in Winger");
             }
+
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
+                if (req.isForMainFrame()) Diag.i(CaptchaActivity.this, "bridge: VK's check page did not load: " + err.getDescription());
+            }
         });
         web.setWebChromeClient(new WebChromeClient() {
+            private int told;
+
             @Override
             public void onProgressChanged(WebView v, int p) {
                 bar.setProgress(p);
                 bar.setVisibility(p < 100 ? View.VISIBLE : View.INVISIBLE);
             }
+
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage m) {  // why a page stays blank: its errors, the first few
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && told++ < 8) {
+                    String s = m.message();
+                    Diag.i(CaptchaActivity.this, "bridge: VK's check page: " + (s.length() > 200 ? s.substring(0, 200) : s));
+                }
+                return false;
+            }
         });
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.content.pm.PackageInfo wv = WebView.getCurrentWebViewPackage();
+            if (wv != null) Diag.i(this, "bridge: VK's check in Winger, web view " + wv.versionName);
+        }
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xFFFFFFFF);  // VK's page is light
         web.setBackground(bg);

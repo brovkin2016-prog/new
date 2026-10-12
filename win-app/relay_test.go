@@ -52,7 +52,9 @@ func TestRelayCaptchaAndReconnect(t *testing.T) {
 	path := fakeRelay(t, `echo "STATUS:READY"
 read join
 echo "STATUS:CAPTCHA:http://127.0.0.1:5555/"
-sleep 2
+sleep 1
+echo "STATUS:Captcha solved, retrying..."
+sleep 1.5
 echo "STATUS:TUNNEL_CONNECTED"
 for i in 1 2 3; do echo "2026/10/12 10:00:0$i relay: SOCKS CONNECT $i -> ex.com:443"; echo "relay: SOCKS CONNECTED $i -> ex.com:443 rdy_wait=1ms"; echo "relay: SOCKS $i first send 10B to tunnel"; done
 echo "relay: SOCKS CONNECT 4 -> ex.com:443"
@@ -74,7 +76,11 @@ sleep 30
 	if Captcha() != "http://127.0.0.1:5555/" {
 		t.Fatalf("captcha not shown: %q", Captcha())
 	}
-	if err := r.Wait(time.Second); err != nil { // its own time is 1 s, the check took 2 s
+	time.Sleep(1100 * time.Millisecond)
+	if Captcha() != "" {
+		t.Fatalf("captcha still shown once VK took the tick: %q", Captcha())
+	}
+	if err := r.Wait(time.Second); err != nil { // its own time is 1 s, the check and the call took 2.5 s
 		t.Fatalf("the wait did not give the person time: %v", err)
 	}
 	time.Sleep(time.Second)

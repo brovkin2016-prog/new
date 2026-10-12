@@ -684,6 +684,12 @@ public final class VpnSvc extends VpnService {
                         w.flush();
                     } else if (st.startsWith("CAPTCHA:")) {
                         captcha(st.substring(8).trim());  // VK wants a person: «I am not a robot», shown on this phone
+                    } else if (st.startsWith("Captcha solved")) {  // VK took the tick (its page itself shows no change)
+                        captchaDone();
+                        if (mine(owner)) {
+                            State.set(State.Phase.CONNECTING, "Проверка VK пройдена — вхожу в звонок…");
+                            update();
+                        }
                     } else if (st.equals("TUNNEL_CONNECTED")) {
                         captchaDone();
                         up.countDown();
