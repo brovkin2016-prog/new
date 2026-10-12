@@ -852,6 +852,18 @@
   }
 
   // ---------- Chat ----------
+  // several chats on this phone, each its own thread of messages (the first one keeps the old thread «chat»)
+  const CHATS_MAX = 30;
+  const chatName = (id) => (id === "main" ? "chat" : "chat:" + id);
+  function chatsAll() {
+    const l = store.get("chats", null);
+    return Array.isArray(l) && l.length ? l : [{ id: "main", title: "", upd: 0 }];
+  }
+  function chatTitle(c) {
+    if (c.title) return c.title;
+    const first = (S.msgs[chatName(c.id)] || []).find((m) => m.role === "me" && m.text);
+    return first ? first.text.slice(0, 40) : c.id === "main" ? "Первый чат" : "Новый чат";
+  }
   function chatView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
@@ -860,8 +872,8 @@
       el("div", { class: "hints" }, ...["Объясни, как работает ипотека", "Составь меню на неделю", "Помоги ответить на письмо"]
         .concat(S.me.can.draw ? ["Нарисуй кота-космонавта на Луне"] : [])
         .map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.focus(); sync(); } }))));
-    const th = thread("chat", scroll, empty);
-    scroll.append(th.box);
+    let cur = store.get("chatCur", "main"), th = null;
+    if (!chatsAll().some((c) => c.id === cur)) cur = chatsAll()[0].id;
     const attach = el("div", { class: "attach-row hidden" });
     const chips = el("div", { class: "chips hidden", style: "padding:0 4px 8px" });
     const ta = el("textarea", { rows: 1, placeholder: "Сообщение" });
@@ -907,16 +919,79 @@
       sync();
       th.ask(req, mine, im, d);
     }
-    th.ask = async (req, mine, im, d) => {
-      if (!im && !d && !req.op && !req.idea && !req.followup && req.text && REMIND_ASK.test(req.text)) {
-        await th.run("/api/remind", { text: req.text }, mine);  // «напомни …»: the phone rings by itself
-        return;
-      }
-      const body = Object.assign({ context: context("chat") }, req);
-      if (im) body.image = await b64(await shrink(im, 2048, 0.88));
-      if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
-      await th.run("/api/chat", body, mine);
-    };
+    function bind() {  // the thread of the chat that is open now, with its own asking
+      const name = chatName(cur);
+      if (!S.msgs[name]) S.msgs[name] = [];
+      const t = thread(name, scroll, empty);
+      t.ask = async (req, mine, im, d) => {
+        touch(mine && mine.text);
+        if (!im && !d && !req.op && !req.idea && !req.followup && req.text && REMIND_ASK.test(req.text)) {
+          await t.run("/api/remind", { text: req.text }, mine);  // «напомни …»: the phone rings by itself
+          return;
+        }
+        const body = Object.assign({ context: context(name) }, req);
+        if (im) body.image = await b64(await shrink(im, 2048, 0.88));
+        if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
+        await t.run("/api/chat", body, mine);
+      };
+      if (th) th.box.replaceWith(t.box); else scroll.append(t.box);
+      th = t;
+      th.redraw();
+    }
+    function touch(text) {  // the chat's name (its first question) and when it was used, for the list
+      const chats = chatsAll();
+      let c = chats.find((x) => x.id === cur);
+      if (!c) { c = { id: cur, title: "", upd: 0 }; chats.unshift(c); }
+      if (!c.title && text && !S.msgs[chatName(cur)].some((m) => m.role === "me")) c.title = text.replace(/\s+/g, " ").slice(0, 40);
+      c.upd = Date.now();
+      chats.sort((a, b) => (b.upd || 0) - (a.upd || 0));
+      store.set("chats", chats);
+    }
+    async function openChat(id) {
+      // a new chat left without a word in it does not stay in the list
+      const left = chatsAll().filter((c) => c.id === id || c.id === "main" || c.title || (S.msgs[chatName(c.id)] || []).length);
+      if (left.length) store.set("chats", left);
+      cur = id;
+      store.set("chatCur", id);
+      const name = chatName(id);
+      if (!S.msgs[name] || !S.msgs[name].length) S.msgs[name] = await DB.list(name);
+      bind();
+      refreshTop();
+    }
+    async function newChat() {
+      if (!S.msgs[chatName(cur)].length) { toast("Это уже новый чат — пишите"); return; }
+      const id = Date.now().toString(36), chats = chatsAll();
+      chats.unshift({ id, title: "", upd: Date.now() });
+      for (const old of chats.slice(CHATS_MAX)) { await DB.clear(chatName(old.id)); delete S.msgs[chatName(old.id)]; }
+      store.set("chats", chats.slice(0, CHATS_MAX));
+      await openChat(id);
+    }
+    async function delChat(c) {
+      if (!(await confirmBox(`Удалить чат «${chatTitle(c)}»? Переписка удалится с телефона.`, "Удалить"))) return;
+      await DB.clear(chatName(c.id));
+      delete S.msgs[chatName(c.id)];
+      let chats = chatsAll().filter((x) => x.id !== c.id);
+      if (!chats.length) chats = [{ id: Date.now().toString(36), title: "", upd: Date.now() }];
+      store.set("chats", chats);
+      if (c.id === cur) await openChat(chats[0].id); else refreshTop();
+    }
+    function chatsSheet() {
+      sheet("💬 Чаты", (box, close) => {
+        box.append(el("button", { class: "btn wide", style: "margin-bottom:10px", text: "➕ Новый чат", onclick: () => { close(); newChat(); } }));
+        for (const c of chatsAll()) {
+          const day = c.upd ? new Date(c.upd).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "";
+          box.append(el("div", { class: "row", style: "cursor:pointer" + (c.id === cur ? ";font-weight:600" : ""), onclick: () => { close(); openChat(c.id); } },
+            el("div", { class: "grow" }, chatTitle(c), el("small", { text: c.id === cur ? "открыт сейчас" : day })),
+            el("button", { class: "round ghost", style: "width:36px;height:36px;font-size:15px", text: "✏️", title: "Переименовать", onclick: async (e) => {
+              e.stopPropagation(); close();
+              const t = await ask("Название чата", "Например: Ремонт кухни", chatTitle(c));
+              if (t) { const chats = chatsAll(); const x = chats.find((y) => y.id === c.id); if (x) { x.title = t.slice(0, 60); store.set("chats", chats); refreshTop(); } }
+            } }),
+            el("button", { class: "round ghost", style: "width:36px;height:36px;font-size:15px;margin-left:6px", text: "🗑", title: "Удалить",
+              onclick: (e) => { e.stopPropagation(); close(); delChat(c); } })));
+        }
+      });
+    }
     act.onclick = () => (act.textContent === "➤" ? sendNow() : record());
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); sendNow(); } });
 
@@ -942,16 +1017,12 @@
         ta.focus();
       }]));
     }
-    th.redraw();
+    bind();
+    if (cur !== "main") openChat(cur);
     return {
-      root, redraw: th.redraw,
-      sub: () => S.me.modes[S.me.mode],
-      buttons: () => [["🧹", "Новый чат", async () => {
-        if (!S.msgs.chat.length || !(await confirmBox("Начать новый чат? Эта переписка удалится.", "Новый чат"))) return;
-        await DB.clear("chat");
-        S.msgs.chat = [];
-        th.redraw();
-      }]],
+      root, redraw: () => th.redraw(),
+      sub: () => (chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) + " · " : "") + S.me.modes[S.me.mode],
+      buttons: () => [["🗂", "Чаты", chatsSheet], ["➕", "Новый чат", newChat]],
       attachImage(im) { image = im; sync(); },
       onShow: () => th.down(),
     };

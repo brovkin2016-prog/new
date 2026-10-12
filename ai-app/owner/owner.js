@@ -1185,16 +1185,16 @@
           const mine = u.bridges || [], has = mine.length > 0;
           const links = mine.map(wingerLink).filter(Boolean);
           box.append(el("div", { class: "row", style: "margin-top:12px" },
-            el("div", { class: "grow" }, "🌉 Мост" + (has ? ": " + mine.map((b) => (b.ok ? "🟢 " : "🔴 ") + b.label.replace(/^.*· /, "")).join(", ") : ""),
-              el("small", { text: has ? "Свой звонок для Winger этого человека: Winger берёт его сам и включает, когда сервер не отвечает."
-                : u.can_bridge ? "Свой звонок для Winger этого человека — на дни, когда мобильный интернет пускает только отдельные сайты."
-                : "Сначала нужен ваш мост Телемоста: мост человека — его копия." })),
+            el("div", { class: "grow" }, "🌉 Мосты" + (has ? ": " + mine.map((b) => (b.ok ? "🟢 " : "🔴 ") + b.label.replace(/^.*· /, "")).join(", ") : ""),
+              el("small", { text: has ? "Свои звонки для Winger этого человека: Winger берёт их сам и включает рабочий, когда сервер не отвечает."
+                : u.can_bridge ? "Копии ваших мостов со своими звонками — на дни, когда мобильный интернет пускает только отдельные сайты."
+                : "Сначала поднимите хотя бы один свой мост: «🖥 Сервер» → «🌉 Мосты»." })),
             el("button", { class: "btn" + (has ? " line" : ""), style: "flex:none;padding:8px 14px", text: has ? "Убрать" : "Выдать",
               disabled: !has && !u.can_bridge, onclick: () => { close(); userBridge(u, !has); } })));
           if (links.length) {
             // when the person's phone cannot reach the server at all, Winger cannot fetch it: the link goes by messenger
-            const msg = `Мост для Winger (${u.name}):\n${links.join("\n")}\n\nСкопируйте всё сообщение, откройте Winger и нажмите «Вставить ссылку».`;
-            box.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📤 Отправить мост человеку",
+            const msg = `Мосты для Winger (${u.name}):\n${links.join("\n")}\n\nСкопируйте всё сообщение, откройте Winger и нажмите «Вставить ссылку».`;
+            box.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📤 Отправить мосты человеку",
               onclick: () => (navigator.share ? navigator.share({ text: msg }).catch(() => copyText(msg)) : copyText(msg)) }));
           }
         }
@@ -1207,12 +1207,13 @@
       });
     }
     async function userBridge(u, on) {
-      if (!on && !(await confirmBox(`Убрать мост у «${u.name}»? Его звонок закроется, Winger этого человека останется без моста.`, "Убрать"))) return;
+      if (!on && !(await confirmBox(`Убрать мосты у «${u.name}»? Их звонки закроются, Winger этого человека останется без мостов.`, "Убрать"))) return;
       try {
-        const end = await panel({ op: "user_bridge", name: u.name, on }, (t) => toast(t, 170000));
+        const end = await panel({ op: "user_bridge", name: u.name, on }, (t) => toast(t, 230000));
         document.querySelectorAll(".toast").forEach((t) => t.remove());
         if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
-        toast(on ? `✅ Мост для «${u.name}» готов — Winger этого человека возьмёт его сам (до 20 минут)` : `Мост у «${u.name}» убран`, 6000);
+        const drop = (end.dropped || []).length ? ` Без ${end.dropped.join(", ")}: второй звонок с вашего входа выбивал ваш мост.` : "";
+        toast(on ? `✅ Мосты для «${u.name}» готовы — Winger этого человека возьмёт их сам (до 20 минут).` + drop : `Мосты у «${u.name}» убраны`, 8000);
         load();
         card(u.name, end);
       } catch (e) { toast(problem(e)); }
