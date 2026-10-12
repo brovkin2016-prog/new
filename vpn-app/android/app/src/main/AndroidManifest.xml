@@ -82,6 +82,13 @@
             </intent-filter>
         </activity>
 
+        <!-- VK's «I am not a robot» for the VK bridge, shown inside Winger -->
+        <activity
+            android:name=".CaptchaActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale" />
+
         <!-- after a reboot or an update the VPN comes back by itself (unless switched off by hand) -->
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

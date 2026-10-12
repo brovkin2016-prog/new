@@ -22,6 +22,7 @@ final class State {
     static volatile double downRate, upRate;  // bytes per second, smoothed
     static volatile String activeLink = "";  // the connection in use now (it may be the bridge Winger moved to by itself)
     static volatile boolean auto;            // in use because the chosen one did not answer
+    static volatile String captcha = "";     // VK's «I am not a robot» page of the bridge program, waiting for the person
 
     private static final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private static final Handler main = new Handler(Looper.getMainLooper());

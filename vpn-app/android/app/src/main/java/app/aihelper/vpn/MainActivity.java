@@ -61,6 +61,7 @@ public class MainActivity extends Activity implements State.Listener {
     private TextView status, detail, ping, appsName;
     private LinearLayout conns, appsCard;
     private String connsKey = "";
+    private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
     private final List<TextView> connNotes = new ArrayList<>();
 
@@ -246,6 +247,11 @@ public class MainActivity extends Activity implements State.Listener {
 
     @Override
     public void changed() {
+        String check = State.captcha;  // VK asks the bridge for a person: its check opens at once while Winger is in front
+        if (!check.isEmpty() && !check.equals(captchaShown)) {
+            captchaShown = check;
+            startActivity(new Intent(this, CaptchaActivity.class).putExtra(CaptchaActivity.URL, check));
+        }
         Profile p = Profile.chosen(this);
         List<Profile> all = Profile.all(this);
         boolean has = p != null;

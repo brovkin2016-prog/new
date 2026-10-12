@@ -163,6 +163,7 @@ func RunVKAuth(joinLink string, displayName string, logFn func(string, ...any), 
 
 				logFn("vk-auth: captcha required")
 				statusFn("Solve the captcha:")
+				captchaLog = logFn // winger: what the check page does goes to the journal
 
 				proxyPort := StartCaptchaProxy(captchaErr.redirectURI, resolveFn)
 				if proxyPort == 0 {

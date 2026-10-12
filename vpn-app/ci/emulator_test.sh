@@ -372,7 +372,40 @@ adb logcat -d -s AIVPN:V | grep -E "bridge|relay" | head -16 | tee "$OUT/bridge-
 grep -q "bridge: READY" "$OUT/bridge-vk.log" || fail "the VK relay did not start"
 grep -q "vk-auth: appID=" "$OUT/bridge-vk.log" || fail "the VK relay did not take the call's settings (AUTH:)"
 grep -qE "bridge: resolve login\.vk\.(ru|com) -> [0-9.]+" "$OUT/bridge-vk.log" || fail "the VK relay got no address from the app"
-adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+# VK may ask this phone for «I am not a robot» (a guest from a data centre often is): then Winger's own window shows
+# VK's page at once (Winger is on the screen); the tick is pressed as a person would, and what followed is kept
+step "VK: «I am not a robot», if asked, opens inside Winger"
+for _ in $(seq 1 45); do adb logcat -d -s AIVPN:V | grep -qE "bridge: CAPTCHA:|bridge: ERROR|VK API error|vk-auth: OK.ru" && break; sleep 1; done
+resumed() { adb shell dumpsys activity activities | grep -E "(mResumedActivity|topResumedActivity)" | grep -q "$1"; }
+if adb logcat -d -s AIVPN:V | grep -q "bridge: CAPTCHA:"; then
+  for _ in $(seq 1 15); do resumed CaptchaActivity && break; sleep 1; done
+  resumed CaptchaActivity || fail "VK's check did not open inside Winger"
+  wait_log "VK's check page shown in Winger" 40 || fail "VK's check page did not load inside Winger"
+  sleep 4
+  adb exec-out screencap -p > "$OUT/8-captcha.png"
+  adb shell uiautomator dump /sdcard/cap.xml >/dev/null 2>&1
+  adb shell cat /sdcard/cap.xml > "$OUT/captcha-ui.xml"
+  B=$(grep -o '<node [^>]*checkable="true"[^>]*>' "$OUT/captcha-ui.xml" | grep -o 'bounds="[^"]*"' | head -1)
+  [ -n "$B" ] || B=$(grep -o '<node [^>]*[Рр]обот[^>]*>' "$OUT/captcha-ui.xml" | grep -o 'bounds="[^"]*"' | head -1)
+  if [ -n "$B" ]; then
+    read -r X1 Y1 X2 Y2 < <(echo "$B" | tr -c '0-9' ' ')
+    adb shell input tap $(((X1 + X2) / 2)) $(((Y1 + Y2) / 2))
+    sleep 15
+    adb exec-out screencap -p > "$OUT/8a-captcha-tick.png"
+    echo "VK check: ticked at $B"
+  else
+    echo "note: no tick found on VK's page (see 8-captcha.png)"
+  fi
+  adb logcat -d -s AIVPN:V | grep -E "captcha|vk-auth" | tee "$OUT/captcha.log"
+  adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+  for _ in $(seq 1 10); do resumed CaptchaActivity || break; sleep 1; done
+  resumed CaptchaActivity && fail "Winger's check window stayed after the bridge was switched off"
+  echo "VK check: shown inside Winger, closed with the bridge"
+else
+  echo "note: VK did not ask for «I am not a robot» here"
+  adb logcat -d -s AIVPN:V | grep -E "vk-auth|bridge: ERROR" | tail -5
+  adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+fi
 sleep 3
 echo "bridge VK: relay started, guest sign-in begun, addresses answered"
 adb shell "am start -n $ACT --es test_remove МостVK" >/dev/null; sleep 1

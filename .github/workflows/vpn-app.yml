@@ -59,6 +59,9 @@ jobs:
           go test ./relay/tunnel/ -run '^(TestStrayFrameIsNotPeerRestart|TestJoinerAsksCreatorForRate)$' -v | tee /tmp/fix-test.log
           grep -q -- "--- PASS: TestStrayFrameIsNotPeerRestart" /tmp/fix-test.log
           grep -q -- "--- PASS: TestJoinerAsksCreatorForRate" /tmp/fix-test.log
+          # VK's «I am not a robot» page: its calls go out as from VK's page, its token is taken by the program
+          go test ./relay/pion/headless-joiner-common/ -run '^TestGenericProxyLikeThePage$' -v | tee /tmp/captcha-test.log
+          grep -q -- "--- PASS: TestGenericProxyLikeThePage" /tmp/captcha-test.log
           ls -l "$J"/*/librelay.so
 
       - name: Version

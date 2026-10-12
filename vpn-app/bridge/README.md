@@ -7,6 +7,9 @@ reset every connection; `obfuscator_epoch_test.go` covers it). The family server
 A second change, on the phone's side only: DION's joiner may be given `vp8Fps`/`vp8Batch` in its `JOIN:` and then
 asks the creator to send at that rate (the creator's side has always answered such a request, it was only never
 asked: DION stayed at 24 × 10 packets a second towards the phone); `config_flow_test.go` covers the asking.
+A third, also the joiner's: VK's «I am not a robot» page (`headless-joiner-common/captcha_proxy.go`) sends its own
+calls through `/generic_proxy` as VK's page would (Origin and Referer of VK, not of 127.0.0.1), keeps their cookies,
+takes a passed check's token itself and tells the journal which call failed; `captcha_proxy_test.go` covers it.
 
 `headless/telemost`, `headless/wbstream`, `headless/dion`, `headless/bitrix`, `headless/vk` are the same version's creators (the
 server side of each bridge), unchanged; built with the fixed relay they carry the fix too. The `bridge` workflow

@@ -713,14 +713,15 @@ public final class VpnSvc extends VpnService {
 
     /**
      * VK lets the bridge into its call as a guest, but now and then asks for «I am not a robot» first. The bridge's
-     * program shows that check on a page of its own on this phone (127.0.0.1): a notice opens it in the browser; once
-     * it is passed the bridge goes on by itself.
+     * program shows that check on a page of its own on this phone (127.0.0.1): Winger's own window shows it (at once
+     * when Winger is on the screen, else from the notice); once it is passed the bridge goes on by itself.
      */
     private void captcha(String url) {
-        if (!url.matches("http://127\\.0\\.0\\.1:[0-9]{2,5}/")) return;  // only the bridge program's own page
+        if (!url.matches(CaptchaActivity.LOCAL)) return;  // only the bridge program's own page
         captchaAt = SystemClock.elapsedRealtime();
-        Diag.i(this, "bridge: VK asks to confirm a person (captcha), a notice is shown");
-        State.set(State.Phase.CONNECTING, "VK просит подтвердить, что вы не робот: нажмите на уведомление «Мост VK».");
+        Diag.i(this, "bridge: VK asks to confirm a person (captcha), Winger shows it");
+        State.captcha = url;
+        State.set(State.Phase.CONNECTING, "VK просит подтвердить, что вы не робот: откройте Winger или уведомление «Мост VK».");
         update();
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm == null) return;
@@ -733,17 +734,22 @@ public final class VpnSvc extends VpnService {
         } else {
             b = new Notification.Builder(this);
         }
-        Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent view = new Intent(this, CaptchaActivity.class).putExtra(CaptchaActivity.URL, url)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open = PendingIntent.getActivity(this, 8, view, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         nm.notify(CAPTCHA_NOTE, b.setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle("Мост VK: подтвердите, что вы не робот")
-                .setContentText("Нажмите — откроется проверка VK, после неё мост подключится сам")
+                .setContentText("Нажмите — проверка VK откроется в Winger, после неё мост подключится сам")
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build());
     }
 
     private void captchaDone() {
+        if (!State.captcha.isEmpty()) {
+            State.captcha = "";
+            State.fire();  // Winger's check window closes
+        }
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.cancel(CAPTCHA_NOTE);
     }

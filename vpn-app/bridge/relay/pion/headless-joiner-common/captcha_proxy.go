@@ -82,8 +82,10 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc) int {
 				}
 			}
 		},
+		ErrorHandler: captchaFailed,
 		ModifyResponse: func(res *http.Response) error {
 			rewriteProxyCookies(res)
+			captchaNote(res)
 
 			if res.StatusCode >= 300 && res.StatusCode < 400 {
 				if loc := res.Header.Get("Location"); loc != "" {
@@ -176,7 +178,36 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc) int {
 				req.Out.URL.RawQuery = parsed.RawQuery
 				req.Out.Host = parsed.Host
 				req.Out.Header.Del("Accept-Encoding")
+				// winger: the check's own calls (api.vk.ru …) go out as the real page sends them — from VK's page, not
+				// from 127.0.0.1, which VK may refuse; then the check never goes past its tick
+				for _, headerName := range []string{"Origin", "Referer"} {
+					if val := req.Out.Header.Get(headerName); val != "" {
+						req.Out.Header.Set(headerName, strings.ReplaceAll(val, localOrigin, upstreamOrigin))
+					}
+				}
 			},
+			ModifyResponse: func(res *http.Response) error {
+				rewriteProxyCookies(res) // winger: the check's cookies kept on this page too
+				captchaNote(res)
+				if !strings.Contains(parsed.Path, "captchaNotRobot.check") {
+					return nil
+				}
+				// winger: the passed check's token taken here as well, not only by the page's script
+				bodyBytes, err := io.ReadAll(res.Body)
+				if err != nil {
+					return err
+				}
+				res.Body.Close()
+				if token := extractSuccessToken(bodyBytes); token != "" {
+					select {
+					case keyCh <- token:
+					default:
+					}
+				}
+				res.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				return nil
+			},
+			ErrorHandler: captchaFailed,
 		}
 		genericProxy.ServeHTTP(w, r)
 	})
@@ -202,6 +233,22 @@ func StartCaptchaProxy(redirectURI string, resolveFn ResolveFunc) int {
 	go http.Serve(listener, mux)
 
 	return port
+}
+
+// winger: what the check page asked for, in the bridge's journal — its calls (not its pictures and scripts) and anything
+// that did not come; the address only, never its query (tokens live there)
+var captchaLog = func(string, ...any) {}
+
+func captchaNote(res *http.Response) {
+	u := res.Request.URL
+	if res.StatusCode >= 400 || strings.Contains(u.Path, "/method/") {
+		captchaLog("captcha-proxy: %s%s -> %d", u.Host, u.Path, res.StatusCode)
+	}
+}
+
+func captchaFailed(w http.ResponseWriter, r *http.Request, err error) {
+	captchaLog("captcha-proxy: %s%s failed: %v", r.URL.Host, r.URL.Path, err)
+	w.WriteHeader(http.StatusBadGateway)
 }
 
 func GetCaptchaResult() string {

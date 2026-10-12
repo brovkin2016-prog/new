@@ -5,4 +5,8 @@
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">cp.cloudflare.com</domain>
     </domain-config>
+    <!-- the VK bridge's «I am not a robot» page: the bridge program's own, on this phone -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>
