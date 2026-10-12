@@ -96,11 +96,16 @@ type shareRig struct {
 	joiner          *rtc.MultiTrackKCPTunnel
 	share           *rtc.VP8DataTunnel
 	camW, shareW    *shareWire
+	pub             *rtc.VP8DataTunnel // the joiner's track
+	pubW            *shareWire
 	end             *joinerEnd
 	closedByCreator sync.Map
 	connected       chan *rtc.MultiTrackKCPTunnel
 	secret          []byte
 	joinerObf       *tunnel.TunnelObfuscator
+	joinerHeard     atomic.Int32 // the joiner's tunnel saw the creator's start afresh (a new epoch)
+	mu              sync.Mutex
+	stops           []func()
 }
 
 var quietLog = func(string, ...any) {}
@@ -112,12 +117,41 @@ func newShareRig(t *testing.T, loss float64) *shareRig {
 	t.Helper()
 	rig := &shareRig{end: &joinerEnd{got: map[uint32][][]byte{}, closed: map[uint32]bool{}},
 		connected: make(chan *rtc.MultiTrackKCPTunnel, 4), secret: tunnel.DeriveSecretFromJoinLink("https://telemost.yandex.ru/j/4242424242")}
+	t.Cleanup(func() {
+		rig.mu.Lock()
+		defer rig.mu.Unlock()
+		for _, stop := range rig.stops {
+			stop()
+		}
+	})
+	rig.creatorUp(loss)
+	jobf, _ := tunnel.NewTunnelObfuscator(rig.secret)
+	rig.joinerConnects(t, jobf, loss)
+	// the sharing data channel opens: its track and, the joiner keeping a session for it, its reliable session
+	rig.relay.addShareSub(rig.share)
+	return rig
+}
+
+func (rig *shareRig) onStop(stop func()) {
+	rig.mu.Lock()
+	rig.stops = append(rig.stops, stop)
+	rig.mu.Unlock()
+}
+
+// creatorUp: the creator's relay as initRelay makes it (an epoch of its own) with its camera and screenshare tracks,
+// reaching the joiner's track if there is one; called again, the creator starts afresh (its call connection came
+// back) under the same joiner.
+func (rig *shareRig) creatorUp(loss float64) {
 	cobf, _ := tunnel.NewTunnelObfuscator(rig.secret)
 	cam := rtc.NewVP8DataTunnelWithQueue(nil, cobf, quietLog, rtc.KCPCarrierQueueDepth)
 	share := rtc.NewVP8DataTunnelWithQueue(nil, cobf, quietLog, rtc.KCPCarrierQueueDepth)
 	rig.share = share
 	rig.camW = &shareWire{rnd: rand.New(rand.NewSource(11)), loss: loss}
 	rig.shareW = &shareWire{rnd: rand.New(rand.NewSource(12)), loss: loss}
+	if rig.pub != nil {
+		rig.camW.setTo(rig.pub.HandleFrame)
+		rig.shareW.setTo(rig.pub.HandleFrame)
+	}
 	cam.WriteFrame, share.WriteFrame = rig.camW.send, rig.shareW.send
 
 	r := NewSFURelay()
@@ -125,8 +159,10 @@ func newShareRig(t *testing.T, loss float64) *shareRig {
 	r.tun = cam
 	r.mt = rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{cam})
 	r.mt.Start(50, 20)
+	rig.onStop(r.mt.Stop)
 	r.OnConnected = func(tun tunnel.DataTunnel) {
 		k := tun.(*rtc.MultiTrackKCPTunnel)
+		rig.onStop(k.Stop)
 		// the creator's relay: the joiner's config, and a close this side's relay is told of
 		k.SetOnData(func(data []byte) {
 			tunnel.DecodeFrames(data, func(conn uint32, msgType byte, payload []byte) {
@@ -143,16 +179,9 @@ func newShareRig(t *testing.T, loss float64) *shareRig {
 	mt := r.mt
 	mt.SetOnData(func(payload []byte) { r.activate(mt, payload) })
 	rig.relay = r
-
-	jobf, _ := tunnel.NewTunnelObfuscator(rig.secret)
-	rig.joinerConnects(t, jobf, loss)
-	// the sharing data channel opens: its track and, the joiner keeping a session for it, its reliable session
-	r.addShareSub(share)
-	t.Cleanup(func() {
-		rig.creator.Stop()
-		rig.joiner.Stop()
-	})
-	return rig
+	if rig.pubW != nil {
+		rig.pubW.setTo(r.handleVideoFrame)
+	}
 }
 
 // joinerConnects: the joiner's track and reliable layer as initPC makes them (a session per creator track, sending on
@@ -171,13 +200,16 @@ func (rig *shareRig) joinerConnects(t *testing.T, obf *tunnel.TunnelObfuscator, 
 func (rig *shareRig) joinerUp(obf *tunnel.TunnelObfuscator, loss float64) {
 	rig.joinerObf = obf
 	pub := rtc.NewVP8DataTunnelWithQueue(nil, obf, quietLog, rtc.KCPCarrierQueueDepth)
-	pubW := &shareWire{rnd: rand.New(rand.NewSource(13)), loss: loss, to: rig.relay.handleVideoFrame}
-	pub.WriteFrame = pubW.send
+	rig.pub = pub
+	rig.pubW = &shareWire{rnd: rand.New(rand.NewSource(13)), loss: loss, to: rig.relay.handleVideoFrame}
+	pub.WriteFrame = rig.pubW.send
 	rig.camW.setTo(pub.HandleFrame)
 	rig.shareW.setTo(pub.HandleFrame)
 	jmt := rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{pub})
+	jmt.SetOnPeerRestart(func() { rig.joinerHeard.Add(1) })
 	jmt.Start(50, 20)
 	rig.joiner = rtc.NewMultiTrackKCPTunnel(jmt, nil)
+	rig.onStop(rig.joiner.Stop)
 	rig.joiner.AddSession(pub)
 	rig.joiner.SetSendSessions(1)
 	rig.joiner.SetOnData(rig.end.take)

@@ -179,8 +179,9 @@ type MultiTrackKCPTunnel struct {
 	currentWindow atomic.Int32
 	sendSessions  atomic.Int32 // winger: how many sessions this side sends on (0: all); the others only receive
 
-	probe          []byte    // winger: a frame the far side's relay takes as nothing new (AddProbedSession; t.mu)
-	lastFirstProbe time.Time // updateLoop only
+	probe          []byte       // winger: a frame the far side's relay takes as nothing new (AddProbedSession; t.mu)
+	lastFirstProbe time.Time    // updateLoop only
+	unanswered     atomic.Int64 // winger: see Unanswered
 
 	sentMessages      atomic.Uint64
 	deliveredMessages atomic.Uint64
@@ -548,18 +549,8 @@ func (t *MultiTrackKCPTunnel) handleInnerClose() {
 // track, or its data channel closed): its connections are closed and new ones go elsewhere until the far side answers
 // on it again (its resends get through). A first session with nothing waiting gets the probe now and then, so that a
 // far side with nothing to send still says whether it is there.
-func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, waiting int, now time.Time) {
-	if waiting == 0 || s.removed.Load() {
-		s.busySince = time.Time{}
-		return
-	}
-	if s.busySince.IsZero() {
-		s.busySince = now
-	}
-	if last := time.Unix(0, s.lastIn.Load()); last.After(s.busySince) {
-		s.busySince = last
-	}
-	if !s.heard.Load() || s == first {
+func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, now time.Time) {
+	if s.busySince.IsZero() || !s.heard.Load() || s == first {
 		return // not in use: nothing on it to close
 	}
 	quiet := now.Sub(s.busySince)
@@ -582,6 +573,61 @@ func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, 
 		}
 		t.retire(index)
 	}
+}
+
+// trackBusy (updateLoop): since when something has waited on the session without an answer from the far side on it.
+func (s *trackKCPSession) trackBusy(waiting int, now time.Time) {
+	if waiting == 0 || s.removed.Load() {
+		s.busySince = time.Time{}
+		return
+	}
+	if s.busySince.IsZero() {
+		s.busySince = now
+	}
+	if last := time.Unix(0, s.lastIn.Load()); last.After(s.busySince) {
+		s.busySince = last
+	}
+}
+
+// noteUnanswered (updateLoop): the longest something has waited on a session this side sends on with no word from
+// the far side on any session meanwhile (Unanswered).
+func (t *MultiTrackKCPTunnel) noteUnanswered(sessions []*trackKCPSession, now time.Time) {
+	var heard int64
+	for _, s := range sessions {
+		if in := s.lastIn.Load(); in > heard {
+			heard = in
+		}
+	}
+	n := len(sessions)
+	if s := int(t.sendSessions.Load()); s > 0 && s < n {
+		n = s
+	}
+	var worst time.Duration
+	for _, s := range sessions[:n] {
+		if s.busySince.IsZero() {
+			continue
+		}
+		since := s.busySince
+		if last := time.Unix(0, heard); last.After(since) {
+			since = last
+		}
+		if quiet := now.Sub(since); quiet > worst {
+			worst = quiet
+		}
+	}
+	t.unanswered.Store(int64(worst))
+}
+
+// Unanswered: how long what this side sent has waited with no word at all from the far side (0: nothing waits, or
+// the far side speaks). winger: the Telemost joiner reconnects when it grows long — the creator's tunnel may have
+// started afresh under it, and an older creator never says so.
+func (t *MultiTrackKCPTunnel) Unanswered() time.Duration {
+	return time.Duration(t.unanswered.Load())
+}
+
+// Done: closed once the reliable layer stops.
+func (t *MultiTrackKCPTunnel) Done() <-chan struct{} {
+	return t.stopCh
 }
 
 func (t *MultiTrackKCPTunnel) wake() {
@@ -618,10 +664,12 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 				session.update()
 				waiting := session.waitSnd()
 				pending += waiting
+				session.trackBusy(waiting, now)
 				if session.probed {
-					t.watchProbed(i, session, sessions[0], waiting, now)
+					t.watchProbed(i, session, sessions[0], now)
 				}
 			}
+			t.noteUnanswered(sessions, now)
 			if pending > 0 {
 				idleTicks = 0
 				if !fast {

@@ -294,6 +294,12 @@ func (r *SFURelay) activate(mt *rtc.MultiTrackTunnel, payload []byte) {
 	if useKCP {
 		if kcptun, ok := delivered.(*rtc.MultiTrackKCPTunnel); ok {
 			kcptun.InjectSegment(payload)
+			// winger: speak first on the new tunnel. This relay may be new under a joiner that kept its tunnel (the
+			// call connection came back: initRelay), whose reliable sessions are far past where these start; neither
+			// side would ever take the other's segments, and a joiner that is past a window of them hears nothing back
+			// at all. A frame of this epoch tells it the creator started afresh (it reconnects as a new joiner); an
+			// empty config is what every joiner's relay takes as nothing.
+			kcptun.SendData(tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfig, nil))
 		}
 	} else {
 		mt.DeliverData(payload)

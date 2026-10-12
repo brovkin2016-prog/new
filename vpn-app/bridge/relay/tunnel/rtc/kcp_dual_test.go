@@ -73,6 +73,7 @@ type pair struct {
 	creator, joiner   *MultiTrackKCPTunnel
 	cam, share        *lossyWire
 	creatorShareTrack *VP8DataTunnel
+	creatorTracks     *MultiTrackTunnel
 }
 
 // newPair: a creator with a camera and a screenshare track and a joiner with one track; creatorShare/joinerShare: each
@@ -112,7 +113,7 @@ func newPairDepth(t *testing.T, creatorShare, joinerShare bool, loss float64, de
 		jkcp.SetSendSessions(1)
 	}
 	t.Cleanup(func() { ckcp.Stop(); jkcp.Stop() })
-	return &pair{creator: ckcp, joiner: jkcp, cam: camW, share: shareW, creatorShareTrack: share}
+	return &pair{creator: ckcp, joiner: jkcp, cam: camW, share: shareW, creatorShareTrack: share, creatorTracks: cmt}
 }
 
 // run: the creator sends `down` messages over 16 connections, the joiner `up`; both arrive whole and in order.
@@ -196,6 +197,49 @@ func TestTelemostProbedShareSession(t *testing.T) {
 			t.Fatalf("a session the joiner never answered on is in use")
 		}
 	}
+}
+
+// Unanswered: while the far side answers it stays short; when the far side's reliable layer starts afresh under this
+// one (the Telemost creator's call connection came back) and this side is past a window of segments, nothing it sends
+// is answered any more, and it grows (the joiner reconnects at 20 s)
+func TestUnansweredWhenFarSideStartsAfresh(t *testing.T) {
+	p := newPair(t, false, false, 0.02)
+	var worst time.Duration
+	stop := make(chan struct{})
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+			if u := p.joiner.Unanswered(); u > worst {
+				worst = u
+			}
+		}
+	}()
+	run(t, p, 1500, 600) // the joiner sends more than a window of segments
+	close(stop)
+	<-sampled
+	if worst > time.Second {
+		t.Fatalf("Unanswered reached %s while the creator answered", worst)
+	}
+
+	p.creator.StopLayer()
+	fresh := NewMultiTrackKCPTunnel(p.creatorTracks, nil)
+	defer fresh.StopLayer()
+	fresh.SetOnData(func([]byte) {})
+	p.joiner.SendData(msg(99, 0))
+	deadline := time.Now().Add(5 * time.Second)
+	for p.joiner.Unanswered() < 2*time.Second {
+		if time.Now().After(deadline) {
+			t.Fatalf("Unanswered stays at %s with a creator that will never answer", p.joiner.Unanswered())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Logf("while answered at most %s; unanswered for %s after the creator started afresh", worst, p.joiner.Unanswered().Round(time.Millisecond))
 }
 
 // the deeper queue: the reliable layer may put its whole window (the far side allows hundreds) on the track at once;

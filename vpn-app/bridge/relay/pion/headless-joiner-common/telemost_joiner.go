@@ -204,6 +204,44 @@ func (j *TelemostHeadlessJoiner) resetSessionState() {
 	j.renewEpoch()
 }
 
+// reliableUnansweredReconnect (winger): how long what the joiner sent on its reliable tunnel may wait without a word
+// from the creator before it reconnects (watchCreatorRestart).
+const reliableUnansweredReconnect = 20 * time.Second
+
+// watchCreatorRestart (winger): the creator's side of the tunnel can start afresh under this one (its call connection
+// came back: initRelay makes a new relay, a new epoch, reliable sessions from the first segment), and this side's
+// sessions, far past that, would never take a segment of the new ones nor be answered: the tunnel hangs until Winger
+// is restarted. A frame of the creator's new epoch (a newer creator speaks first on a new tunnel) or, from an older
+// creator that never speaks, what this side sent going unanswered that long, makes the joiner reconnect as a new
+// joiner (renewEpoch), and both ends start afresh. Once per tunnel.
+func (j *TelemostHeadlessJoiner) watchCreatorRestart(mt *rtc.MultiTrackTunnel, kcpTun *rtc.MultiTrackKCPTunnel) {
+	var once sync.Once
+	restart := func(why string) {
+		once.Do(func() {
+			j.logFn("telemost-joiner: %s, reconnecting as a new joiner", why)
+			go j.forceReconnect(why)
+		})
+	}
+	mt.SetOnPeerRestart(func() { restart("the creator's tunnel started afresh") })
+	go func() {
+		tick := time.NewTicker(2 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-j.stopCh:
+				return
+			case <-kcpTun.Done():
+				return
+			case <-tick.C:
+			}
+			if quiet := kcpTun.Unanswered(); quiet >= reliableUnansweredReconnect {
+				restart(fmt.Sprintf("the creator has not answered the reliable tunnel for %s", quiet.Round(time.Second)))
+				return
+			}
+		}
+	}()
+}
+
 // renewEpoch (winger): a reconnect starts this side's tunnel afresh (initPC makes a new one, its reliable layer from
 // the first segment). The creator must start afresh too: with the old epoch it keeps its reliable sessions, which take
 // every segment of the new ones as an old one already had, and nothing gets through either way until Winger is
@@ -543,6 +581,7 @@ func (j *TelemostHeadlessJoiner) initPC() {
 					flags = tunnel.ConfigKCPEveryTrack
 					j.logFn("telemost-joiner: reliable data on both of the creator's tracks")
 				}
+				j.watchCreatorRestart(mt, kcpTun)
 			}
 			if !j.configAck.acknowledged() {
 				trackCount := 1
