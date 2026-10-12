@@ -1,0 +1,47 @@
+# one-off: the real Hugging Face Spaces answer the way the family server asks them (no token: anonymous minutes)
+name: hf-probe
+on:
+  push:
+    paths: [".github/workflows/hf-probe.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Ask Wan 2.2 and LTX-2.3 for a video from a photo
+        run: |
+          python3 -m pip install --quiet requests pillow
+          python3 - <<'PY'
+          import io, json, time, requests
+          from PIL import Image
+          buf = io.BytesIO(); Image.new("RGB", (640, 480), (200, 150, 120)).save(buf, "JPEG"); img = buf.getvalue()
+          for host in ("https://zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space", "https://lightricks-ltx-2-3.hf.space"):
+              print("==", host, flush=True)
+              try:
+                  info = requests.get(host + "/gradio_api/info", timeout=60)
+                  ep = (info.json().get("named_endpoints") or {}).get("/generate_video") if info.ok else None
+                  print("info", info.status_code, json.dumps([p.get("label") or p.get("parameter_name") for p in (ep or {}).get("parameters", [])], ensure_ascii=False)[:600])
+                  r = requests.post(host + "/gradio_api/upload", files={"files": ("photo.jpg", img, "image/jpeg")}, timeout=60)
+                  print("upload", r.status_code, r.text[:200])
+                  f = {"path": r.json()[0], "orig_name": "photo.jpg", "meta": {"_type": "gradio.FileData"}}
+                  data = ([f, "gentle motion", 4, "blurry", 1.0, 1, 1, 42, True] if "wan2" in host
+                          else [f, "gentle motion", 1.0, False, 42, True, 512, 768])
+                  r = requests.post(host + "/gradio_api/call/generate_video", json={"data": data}, timeout=60)
+                  print("call", r.status_code, r.text[:200])
+                  eid = r.json()["event_id"]
+                  t = time.time()
+                  with requests.get(f"{host}/gradio_api/call/generate_video/{eid}", stream=True, timeout=(15, 300)) as s:
+                      for line in s.iter_lines(decode_unicode=True):
+                          if line:
+                              print("sse", round(time.time() - t), line[:400], flush=True)
+                          if line.startswith("data:") and line != "data: null":
+                              last = line
+                  out = json.loads(last[5:])
+                  if isinstance(out, list):
+                      v = out[0].get("video", out[0]) if isinstance(out[0], dict) else {"path": out[0]}
+                      url = v.get("url") or f"{host}/gradio_api/file={v.get('path')}"
+                      d = requests.get(url, timeout=120)
+                      print("video", d.status_code, len(d.content), d.content[4:8])
+              except Exception as e:
+                  print("error", type(e).__name__, str(e)[:300])
+          PY
