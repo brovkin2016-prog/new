@@ -390,9 +390,10 @@
     }
     function bridgeSheet(b) {
       // what this bridge's service needs again when it stops (a new WB sign-in, another password), and Winger's link
-      const link = b.link || "", kind = bridgeKind(b), w = wingerLink(b);
+      const link = b.link || "", w = wingerLink(b);
       const person = b.label.startsWith("👤");  // a person's own bridge: a copy of the owner's, nothing to sign in to
-      const wb = kind === "wb" && !person, dn = kind === "dion", bx = kind === "bitrix", vk = kind === "vk" && !person;
+      // by the bridge's name, not its link: a bridge that has lost its call (no link) needs the sign-in most
+      const wb = b.id.startsWith("wb-") && !person, dn = b.id.startsWith("dion-"), bx = b.id.startsWith("bitrix-"), vk = b.id.startsWith("vk-") && !person;
       sheet((b.ok ? "🟢 " : "🔴 ") + b.label, (box, close) => {
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: b.ok
           ? "Работает " + dur(b.since) + ". Winger подключается к нему сам, когда сервер напрямую недоступен."

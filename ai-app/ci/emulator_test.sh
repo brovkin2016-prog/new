@@ -125,10 +125,11 @@ adb shell cat /sdcard/ui.xml > "$OUT/vk-login.xml"
 adb logcat -d -s AIVK:V | tee "$OUT/vk-login.log"
 grep -q "login page opened" "$OUT/vk-login.log" || { echo "the VK sign-in window did not open"; exit 1; }
 grep -q "Готово" "$OUT/vk-login.xml" || { echo "the VK sign-in window has no «Готово»"; exit 1; }
-VKW=$(tr '>' '\n' < "$OUT/vk-login.xml" | grep -oE '(text|content-desc)="[^"]{2,60}"' | grep -vE 'Готово|="✕"|Войдите в VK' | head -12 | tr '\n' ' ')
-echo "VK page shows: ${VKW:-nothing}"
+# a WebView's words are not in the dump: the window itself measures the page (its text|its buttons and fields)
+VKC=$(grep -oE "page content [0-9]+\|[0-9]+" "$OUT/vk-login.log" | tail -1)
+echo "VK page: ${VKC:-not measured}"
 if grep -q "не открылся" "$OUT/vk-login.xml"; then echo "VK: the window explains why the page is not there"
-elif [ -z "$VKW" ]; then echo "white VK page and no explanation"; exit 1; fi
+elif ! echo "$VKC" | grep -qE "page content [1-9][0-9]*\|[1-9]"; then echo "white VK page and no explanation"; exit 1; fi
 for _ in 1 2 3 4; do  # Back: through the page's own steps, then the window closes
   adb shell input keyevent KEYCODE_BACK
   sleep 2

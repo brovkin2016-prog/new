@@ -51,7 +51,7 @@ final class VkLogin {
         s.setDomStorageEnabled(true);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
-        boolean[] finished = {false};
+        boolean[] finished = {false}, told = {false};
         TextView info = new TextView(a);
         info.setPadding(24, 10, 24, 10);
         info.setTextSize(13);
@@ -73,7 +73,13 @@ final class VkLogin {
         w.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                return false;  // VK's own sign-in steps stay in this window
+                String scheme = req.getUrl().getScheme();
+                if ("https".equals(scheme) || "http".equals(scheme)) return false;  // VK's own sign-in steps stay in this window
+                // «через приложение VK»: the sign-in would land in the VK app, not here
+                told[0] = true;
+                say(info, "Вход через приложение VK здесь не подходит. Закройте это предложение на странице VK (крестик) "
+                        + "и войдите по номеру телефона.");
+                return true;
             }
 
             @Override
@@ -81,12 +87,27 @@ final class VkLogin {
                 if (got[0] == null && signedIn()) {
                     Log.i("AIVK", "signed in");
                     info.setText("✅ Вход есть. Нажмите «Готово» — сервер поднимет мост VK.");
+                    return;
                 }
+                // the site draws itself with its scripts: if after a while there is nothing on it, say why
+                view.postDelayed(() -> {
+                    if (finished[0] || got[0] != null || told[0]) return;
+                    view.evaluateJavascript("(function(){var b=document.body;return b?(b.innerText||'').trim().length+'|'"
+                            + "+document.querySelectorAll('input,button,a').length:'0|0'})()", r -> {
+                        String v = r == null ? "" : r.replace("\"", "");
+                        Log.i("AIVK", "page content " + v);
+                        if (v.isEmpty() || v.startsWith("0|0") || v.equals("null")) {
+                            say(info, "Страница VK пустая — сайт не открылся. Если мобильный интернет работает по «белым "
+                                    + "спискам», попробуйте через Wi‑Fi или обычный VPN, потом откройте вход снова.");
+                        }
+                    });
+                }, 8000);
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest req, android.webkit.WebResourceError err) {
                 if (req.isForMainFrame()) {
+                    told[0] = true;
                     say(info, "VK не открылся: " + err.getDescription() + ". Попробуйте через Wi‑Fi или обычный VPN.");
                 }
             }
