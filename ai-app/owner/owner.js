@@ -1224,7 +1224,7 @@
     async function userBridge(u, on) {
       if (!on && !(await confirmBox(`Убрать мосты у «${u.name}»? Их звонки закроются, Winger этого человека останется без мостов.`, "Убрать"))) return;
       try {
-        const end = await panel({ op: "user_bridge", name: u.name, on }, (t) => toast(t, 230000));
+        const end = await panel({ op: "user_bridge", name: u.name, on }, (t) => toast(t, 410000));
         document.querySelectorAll(".toast").forEach((t) => t.remove());
         if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
         const drop = (end.dropped || []).length ? ` Без ${end.dropped.join(", ")}: второй звонок с вашего входа выбивал ваш мост.` : "";
