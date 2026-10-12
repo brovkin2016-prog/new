@@ -1,5 +1,5 @@
 # one-off: VK's «I am not a robot» through the bridge's own check page, in a real browser — what the page loads, what
-# fails, what the tick does (Winger's window showed the page blank)
+# fails, what the tick does (Winger's window showed the page blank) — a person's click and tap, here and on VK's own page
 name: vk-probe
 on:
   push:
@@ -58,7 +58,7 @@ jobs:
             } catch (e) { return String(u).slice(0, 100); }
           };
           (async () => {
-            const b = await chromium.launch({ channel: "chrome" });
+            const b = await chromium.launch({ channel: "chrome", args: ["--disable-blink-features=AutomationControlled"] });
             for (const [name, url] of [["proxy", process.argv[2]], ["direct", null]]) {
               const ctx = await b.newContext({ ...devices["Pixel 7"], locale: "ru-RU" });
               const page = await ctx.newPage();
@@ -75,21 +75,31 @@ jobs:
                 const u = new URL(page.url());
                 global.realUrl = "https://id.vk.ru" + u.pathname + u.search;
                 const html = await page.content();
-                console.log(name, "HTML", html.length, html.replace(/\s+/g, " ").slice(0, 3000));
+                console.log(name, "HTML", html.length, html.length);
               }
               await page.waitForTimeout(10000);
               console.log(name, "TITLE", await page.title());
               console.log(name, "TEXT", (await page.evaluate(() => (document.body ? document.body.innerText : ""))).replace(/\s+/g, " ").slice(0, 400));
-              await page.screenshot({ path: `/tmp/${name}.png` });
-              if (name === "proxy") {
-                const cb = await page.$('input[type=checkbox], [role=checkbox], button:has-text("робот"), label:has-text("робот"), [class*="heckbox"]');
-                console.log(name, "TICK element", !!cb);
-                if (cb) {
-                  await cb.click().catch((e) => console.log(name, "click", e.message));
-                  await page.waitForTimeout(15000);
-                  console.log(name, "AFTER", (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ").slice(0, 400));
-                  await page.screenshot({ path: `/tmp/${name}-after.png` });
-                }
+              const cands = await page.evaluate(() => [...document.querySelectorAll('[role=checkbox], input[type=checkbox], button, label, [tabindex]')].map((e) => {
+                const r = e.getBoundingClientRect();
+                return `${e.tagName} role=${e.getAttribute("role")} class=${String(e.className).slice(0, 60)} text=${(e.innerText || "").slice(0, 30)} box=${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)}x${Math.round(r.height)}`;
+              }));
+              console.log(name, "CANDIDATES", JSON.stringify(cands));
+              let box = null;
+              for (const loc of [page.getByRole("checkbox").first(), page.getByText("Я не робот", { exact: true }).first()]) {
+                if (await loc.count()) { box = await loc.boundingBox(); if (box) break; }
+              }
+              console.log(name, "TICK at", JSON.stringify(box));
+              if (box) {
+                const x = box.x + box.width / 2, y = box.y + box.height / 2;
+                console.log(name, "--- click");
+                await page.mouse.click(x, y);
+                await page.waitForTimeout(12000);
+                console.log(name, "AFTER click", (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ").slice(0, 300));
+                console.log(name, "--- tap");
+                await page.touchscreen.tap(x, y);
+                await page.waitForTimeout(12000);
+                console.log(name, "AFTER tap", (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ").slice(0, 300));
               }
               await ctx.close();
             }
