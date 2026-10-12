@@ -39,6 +39,13 @@ const (
 	kcpChannelRaw      byte = 0x01
 
 	KCPCarrierQueueDepth = kcpWaitSndFactor * kcpWindowCeiling
+
+	// winger: a session the far side may not hear (AddProbedSession) is deaf once what waits on it has had no answer
+	// this long while the far side answered on the first session more than kcpDeafMargin after its last answer. Long
+	// enough that resends after a short gap (their timeout grows with each) come back first.
+	kcpDeafAfter  = 10 * time.Second
+	kcpDeafMargin = 3 * time.Second
+	kcpProbeEvery = time.Second
 )
 
 func computeKCPWindow(fps, batch int) int {
@@ -63,6 +70,20 @@ type trackKCPSession struct {
 	kcpMu   sync.Mutex
 	kcp     *kcp.KCP
 	recvBuf []byte
+
+	// winger: a session the far side may not hear (AddProbedSession) takes connections only while the far side
+	// answers on it; a removed one takes none, and a sender waiting for room on it gives up
+	probed  bool
+	heard   atomic.Bool
+	removed atomic.Bool
+	lastIn  atomic.Int64 // unix ns: the far side's last segment on it
+	// updateLoop only
+	busySince time.Time // something has waited on it, unanswered, since then (zero: nothing waits)
+}
+
+// ready: new connections may go on it.
+func (s *trackKCPSession) ready() bool {
+	return !s.removed.Load() && (!s.probed || s.heard.Load())
 }
 
 func newTrackKCPSession(parent *MultiTrackKCPTunnel, vp8 *VP8DataTunnel, conv uint32, window int) *trackKCPSession {
@@ -158,6 +179,9 @@ type MultiTrackKCPTunnel struct {
 	currentWindow atomic.Int32
 	sendSessions  atomic.Int32 // winger: how many sessions this side sends on (0: all); the others only receive
 
+	probe          []byte    // winger: a frame the far side's relay takes as nothing new (AddProbedSession; t.mu)
+	lastFirstProbe time.Time // updateLoop only
+
 	sentMessages      atomic.Uint64
 	deliveredMessages atomic.Uint64
 	outputSegments    atomic.Uint64
@@ -216,8 +240,17 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 		return
 	}
 	index, pinned := t.connPin[connID]
+	if pinned && index == retiredPin {
+		// winger: closed with its session (retire): nothing more of it goes anywhere, the far side would get a stream
+		// with a piece missing; its own close is the last word of it
+		if msgType == tunnel.MsgClose {
+			delete(t.connPin, connID)
+		}
+		t.mu.Unlock()
+		return
+	}
 	if !pinned || index >= t.sendCount() {
-		index = int(connID % uint32(t.sendCount()))
+		index = t.pickSession(connID)
 		t.connPin[connID] = index
 	}
 	session := t.sessions[index]
@@ -226,6 +259,9 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 	if msgType == tunnel.MsgData {
 		sndCap := int(t.currentWindow.Load()) * kcpWaitSndFactor
 		for session.waitSnd() >= sndCap {
+			if !session.ready() {
+				return // winger: its session was removed or went deaf; the connection is closed with it
+			}
 			select {
 			case <-t.stopCh:
 				return
@@ -250,8 +286,7 @@ func (t *MultiTrackKCPTunnel) sendRaw(connID uint32, frame []byte) {
 		t.mu.Unlock()
 		return
 	}
-	index := int(connID % uint32(t.sendCount()))
-	session := t.sessions[index]
+	session := t.sessions[t.pickSession(connID)]
 	t.mu.Unlock()
 
 	segment := make([]byte, len(frame)+1)
@@ -278,11 +313,82 @@ func (t *MultiTrackKCPTunnel) SetSendSessions(n int) {
 	t.sendSessions.Store(int32(n))
 }
 
+// pickSession (t.mu held): the session a connection goes on. While every session it may send on is ready this is the
+// same spread as always (connID modulo their number); a session the far side does not hear is left out.
+func (t *MultiTrackKCPTunnel) pickSession(connID uint32) int {
+	n := t.sendCount()
+	ready := 0
+	for i := 0; i < n; i++ {
+		if t.sessions[i].ready() {
+			ready++
+		}
+	}
+	if ready == n || ready == 0 {
+		return int(connID % uint32(n))
+	}
+	k := int(connID % uint32(ready))
+	for i := 0; i < n; i++ {
+		if t.sessions[i].ready() {
+			if k == 0 {
+				return i
+			}
+			k--
+		}
+	}
+	return 0
+}
+
 // SessionCount: the reliable sessions now (one per track carrying them).
 func (t *MultiTrackKCPTunnel) SessionCount() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.sessions)
+}
+
+// ReadySessions: the sessions new connections may go on (a probed one only while the far side answers on it).
+func (t *MultiTrackKCPTunnel) ReadySessions() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for i := 0; i < t.sendCount(); i++ {
+		if t.sessions[i].ready() {
+			n++
+		}
+	}
+	return n
+}
+
+// retiredPin marks a connection closed with its session: what more it sends is dropped until its own close.
+const retiredPin = -1
+
+// retire (winger): the connections on this session are closed at both ends: the far side is told on a session it
+// hears, and this side's relay as if the far side had said so. Their later data is dropped, never carried on another
+// session, which would hand the far side a stream with a piece missing. Used when a session is removed or the far
+// side stops hearing it.
+func (t *MultiTrackKCPTunnel) retire(index int) {
+	t.mu.Lock()
+	var conns []uint32
+	for id, i := range t.connPin {
+		if i == index {
+			conns = append(conns, id)
+			t.connPin[id] = retiredPin
+		}
+	}
+	callback := t.onData
+	t.mu.Unlock()
+	for _, id := range conns {
+		frame := tunnel.EncodeFrame(id, tunnel.MsgClose, nil)
+		t.mu.Lock()
+		session := t.sessions[t.pickSession(id)]
+		t.mu.Unlock()
+		session.send(frame)
+		if callback != nil {
+			callback(frame)
+		}
+	}
+	if len(conns) > 0 && t.logFn != nil {
+		t.logFn("kcptunnel: %d connections closed with session %d", len(conns), index)
+	}
 }
 
 func (t *MultiTrackKCPTunnel) InjectSegment(payload []byte) {
@@ -321,6 +427,10 @@ func (t *MultiTrackKCPTunnel) handleDecodedSegment(payload []byte) {
 	}
 	t.inputSegments.Add(1)
 	t.wake()
+	session.lastIn.Store(time.Now().UnixNano())
+	if session.probed && session.heard.CompareAndSwap(false, true) && t.logFn != nil {
+		t.logFn("kcptunnel: session %d answered by the far side, in use", conv-kcpConvBase)
+	}
 	messages := session.input(body)
 	if callback == nil {
 		return
@@ -364,24 +474,53 @@ func (t *MultiTrackKCPTunnel) applyWindow(window int) {
 }
 
 func (t *MultiTrackKCPTunnel) AddSession(sub *VP8DataTunnel) {
+	t.addSession(sub, false)
+}
+
+// AddProbedSession: a session on a track the far side may not hear yet (winger: the Telemost creator's screenshare,
+// which the call forwards to the joiner only once the joiner's slot for it is bound, if ever). `probe` goes on it at
+// once, a frame the far side's relay takes as nothing new; connections go on it only once the far side answers on it,
+// and are closed should it stop answering while the far side still answers on the first session (see kcpDeafAfter).
+// The far side must keep a session for it (ConfigKCPEveryTrack).
+func (t *MultiTrackKCPTunnel) AddProbedSession(sub *VP8DataTunnel, probe []byte) {
+	t.mu.Lock()
+	t.probe = probe
+	t.mu.Unlock()
+	session := t.addSession(sub, true)
+	session.send(probe)
+	t.wake()
+}
+
+func (t *MultiTrackKCPTunnel) addSession(sub *VP8DataTunnel, probed bool) *trackKCPSession {
 	window := int(t.currentWindow.Load())
 	t.mu.Lock()
 	conv := uint32(kcpConvBase + len(t.sessions))
 	session := newTrackKCPSession(t, sub, conv, window)
+	session.probed = probed
 	t.sessions = append(t.sessions, session)
 	t.convMap[conv] = session
 	t.mu.Unlock()
+	return session
 }
 
+// RemoveLastSession: the last session goes; the connections on it are closed (retire) rather than carried on
+// another session without what it still held for them.
 func (t *MultiTrackKCPTunnel) RemoveLastSession() {
 	t.mu.Lock()
 	if len(t.sessions) <= 1 {
 		t.mu.Unlock()
 		return
 	}
-	last := t.sessions[len(t.sessions)-1]
-	t.sessions = t.sessions[:len(t.sessions)-1]
-	delete(t.convMap, last.conv)
+	index := len(t.sessions) - 1
+	last := t.sessions[index]
+	last.removed.Store(true)
+	t.mu.Unlock()
+	t.retire(index)
+	t.mu.Lock()
+	if index < len(t.sessions) && t.sessions[index] == last {
+		t.sessions = t.sessions[:index]
+		delete(t.convMap, last.conv)
+	}
 	t.mu.Unlock()
 }
 
@@ -401,6 +540,47 @@ func (t *MultiTrackKCPTunnel) handleInnerClose() {
 	t.mu.Unlock()
 	if callback != nil {
 		callback()
+	}
+}
+
+// watchProbed (updateLoop; winger): a probed session whose waiting segments go unanswered for kcpDeafAfter, while the
+// far side answers on the first session well after this one's last answer, is deaf (the call stopped forwarding its
+// track, or its data channel closed): its connections are closed and new ones go elsewhere until the far side answers
+// on it again (its resends get through). A first session with nothing waiting gets the probe now and then, so that a
+// far side with nothing to send still says whether it is there.
+func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, waiting int, now time.Time) {
+	if waiting == 0 || s.removed.Load() {
+		s.busySince = time.Time{}
+		return
+	}
+	if s.busySince.IsZero() {
+		s.busySince = now
+	}
+	if last := time.Unix(0, s.lastIn.Load()); last.After(s.busySince) {
+		s.busySince = last
+	}
+	if !s.heard.Load() || s == first {
+		return // not in use: nothing on it to close
+	}
+	quiet := now.Sub(s.busySince)
+	if quiet < kcpDeafMargin {
+		return
+	}
+	t.mu.Lock()
+	probe := t.probe
+	t.mu.Unlock()
+	if probe != nil && now.Sub(t.lastFirstProbe) >= kcpProbeEvery && first.waitSnd() == 0 {
+		t.lastFirstProbe = now
+		first.send(probe)
+	}
+	if quiet < kcpDeafAfter || !time.Unix(0, first.lastIn.Load()).After(s.busySince.Add(kcpDeafMargin)) {
+		return
+	}
+	if s.heard.CompareAndSwap(true, false) {
+		if t.logFn != nil {
+			t.logFn("kcptunnel: session %d unanswered for %s while the first is answered: not in use until it is", index, quiet.Round(time.Second))
+		}
+		t.retire(index)
 	}
 }
 
@@ -433,9 +613,14 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 			copy(sessions, t.sessions)
 			t.mu.Unlock()
 			pending := 0
-			for _, session := range sessions {
+			now := time.Now()
+			for i, session := range sessions {
 				session.update()
-				pending += session.waitSnd()
+				waiting := session.waitSnd()
+				pending += waiting
+				if session.probed {
+					t.watchProbed(i, session, sessions[0], waiting, now)
+				}
 			}
 			if pending > 0 {
 				idleTicks = 0

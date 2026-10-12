@@ -313,7 +313,8 @@ func simRun(t testing.TB, c simConfig) simResult {
 		}
 		jk = NewMultiTrackKCPTunnel(jmt, nil)
 		if c.dual {
-			ck.AddSession(share)
+			// as the creator does: the screenshare session takes connections once the joiner answers on it
+			ck.AddProbedSession(share, tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfigAck, nil))
 			jk.AddSession(pub)
 			jk.SetSendSessions(1)
 		}
@@ -363,6 +364,10 @@ func simRun(t testing.TB, c simConfig) simResult {
 			}
 		})
 	})
+	// the downloads start once the call is up: here, once the joiner has answered on every session (a round trip)
+	for deadline := time.Now().Add(3 * time.Second); ck != nil && ck.ReadySessions() < ck.SessionCount() && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	bulk := func(side tunnel.DataTunnel, conn uint32) {

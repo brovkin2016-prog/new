@@ -43,9 +43,10 @@ type SFURelay struct {
 	OnPubICE      func(*webrtc.ICECandidate)
 	OnSubICE      func(*webrtc.ICECandidate)
 
-	sharingDC *webrtc.DataChannel
-	shareSub  *rtc.VP8DataTunnel // winger: the screenshare track's tunnel, while it is on
-	kcpShare  bool               // winger: the joiner keeps a reliable session for it (ConfigKCPEveryTrack)
+	sharingDC   *webrtc.DataChannel
+	shareSub    *rtc.VP8DataTunnel // winger: the screenshare track's tunnel, while it is on
+	kcpShare    bool               // winger: the joiner keeps a reliable session for it (ConfigKCPEveryTrack)
+	shareSyncMu sync.Mutex         // winger: one syncShareSession at a time (the joiner's config, the data channel)
 
 	readBufSize int
 	tunFired    bool
@@ -110,15 +111,7 @@ func (r *SFURelay) AddSharingDataChannel() error {
 		sink.sendFrame(keyframe())
 		sub := rtc.NewVP8DataTunnelWithQueue(nil, r.obf, log.Printf, rtc.KCPCarrierQueueDepth)
 		sub.WriteFrame = sink.sendFrame
-		if r.mt == nil {
-			return
-		}
-		r.mt.AddSubTunnel(sub)
-		r.mu.Lock()
-		r.shareSub = sub
-		r.mu.Unlock()
-		r.syncShareSession()
-		log.Printf("[ss] screenshare sub-tunnel live, tracks=%d", r.mt.SubTunnelCount())
+		r.addShareSub(sub)
 	})
 	dc.OnClose(func() { log.Printf("[ss] creator 'sharing' DC closed") })
 	dc.OnError(func(e error) { log.Printf("[ss] creator 'sharing' DC error: %v", e) })
@@ -146,6 +139,19 @@ func (r *SFURelay) RemoveSharingDataChannel() {
 	}
 }
 
+// addShareSub: the sharing data channel is open; its track joins the tunnel.
+func (r *SFURelay) addShareSub(sub *rtc.VP8DataTunnel) {
+	if r.mt == nil {
+		return
+	}
+	r.mt.AddSubTunnel(sub)
+	r.mu.Lock()
+	r.shareSub = sub
+	r.mu.Unlock()
+	r.syncShareSession()
+	log.Printf("[ss] screenshare sub-tunnel live, tracks=%d", r.mt.SubTunnelCount())
+}
+
 // SetKCPOnShare: the joiner says it keeps a reliable session for the screenshare track (or, an older one, does not).
 func (r *SFURelay) SetKCPOnShare(on bool) {
 	r.mu.Lock()
@@ -155,8 +161,15 @@ func (r *SFURelay) SetKCPOnShare(on bool) {
 }
 
 // syncShareSession (winger): the reliable layer carries data on the screenshare track too — doubling what the joiner
-// downloads — only while that track is on and the joiner has a session for it; an older joiner would drop it.
+// downloads — only while that track is on and the joiner has a session for it; an older joiner would drop it. The
+// joiner's config (resent until acknowledged) and the data channel's opening come on different goroutines: one at a
+// time, or both would add a session and the second (a third conv) is one the joiner does not have. The session is
+// probed: the call forwards the screenshare to the joiner only once the joiner's slot for it is bound (by polling,
+// seconds later, or never), and until the joiner answers on it no connection goes there; should the joiner stop
+// answering, the connections on it are closed and new ones keep to the camera track.
 func (r *SFURelay) syncShareSession() {
+	r.shareSyncMu.Lock()
+	defer r.shareSyncMu.Unlock()
 	r.mu.Lock()
 	kcptun, _ := r.delivered.(*rtc.MultiTrackKCPTunnel)
 	want := r.kcpShare && r.shareSub != nil
@@ -168,8 +181,9 @@ func (r *SFURelay) syncShareSession() {
 	have := kcptun.SessionCount() > 1
 	switch {
 	case want && !have:
-		kcptun.AddSession(sub)
-		log.Printf("[ss] reliable data on the screenshare track too")
+		// the probe: "your config is taken", which every joiner's relay takes as nothing new
+		kcptun.AddProbedSession(sub, tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfigAck, nil))
+		log.Printf("[ss] reliable session on the screenshare track, in use once the joiner answers on it")
 	case !want && have:
 		kcptun.RemoveLastSession()
 		log.Printf("[ss] reliable data on the camera track only")
@@ -465,25 +479,29 @@ func (r *SFURelay) readTrack(track *webrtc.TrackRemote) {
 			log.Printf("[video] recv vp8 frame #%d %d bytes", recvCount, len(frameBuf))
 		}
 
-		res := r.obf.Decode(frameBuf)
+		r.handleVideoFrame(frameBuf)
 		frameBuf = frameBuf[:0]
 		frameValid = false
+	}
+}
 
-		if !res.HasFrame || res.SelfEcho {
-			continue
+// handleVideoFrame: one whole frame of the joiner's track. A new joiner (a new epoch) starts the tunnel afresh.
+func (r *SFURelay) handleVideoFrame(frame []byte) {
+	res := r.obf.Decode(frame)
+	if !res.HasFrame || res.SelfEcho {
+		return
+	}
+	if res.PeerRestart {
+		log.Printf("[video] peer restart detected, new epoch=0x%08x", res.PeerEpoch)
+		r.resetForNewPeer()
+		if r.OnPeerRestart != nil {
+			r.OnPeerRestart()
 		}
-		if res.PeerRestart {
-			log.Printf("[video] peer restart detected, new epoch=0x%08x", res.PeerEpoch)
-			r.resetForNewPeer()
-			if r.OnPeerRestart != nil {
-				r.OnPeerRestart()
-			}
-		}
-		if res.Keepalive || len(res.Payload) == 0 {
-			continue
-		}
-		if r.tun != nil && r.tun.OnData != nil {
-			r.tun.OnData(res.Payload)
-		}
+	}
+	if res.Keepalive || len(res.Payload) == 0 {
+		return
+	}
+	if r.tun != nil && r.tun.OnData != nil {
+		r.tun.OnData(res.Payload)
 	}
 }

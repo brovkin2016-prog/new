@@ -70,8 +70,9 @@ func msg(conn uint32, i int) []byte {
 }
 
 type pair struct {
-	creator, joiner *MultiTrackKCPTunnel
-	cam, share      *lossyWire
+	creator, joiner   *MultiTrackKCPTunnel
+	cam, share        *lossyWire
+	creatorShareTrack *VP8DataTunnel
 }
 
 // newPair: a creator with a camera and a screenshare track and a joiner with one track; creatorShare/joinerShare: each
@@ -111,7 +112,7 @@ func newPairDepth(t *testing.T, creatorShare, joinerShare bool, loss float64, de
 		jkcp.SetSendSessions(1)
 	}
 	t.Cleanup(func() { ckcp.Stop(); jkcp.Stop() })
-	return &pair{creator: ckcp, joiner: jkcp, cam: camW, share: shareW}
+	return &pair{creator: ckcp, joiner: jkcp, cam: camW, share: shareW, creatorShareTrack: share}
 }
 
 // run: the creator sends `down` messages over 16 connections, the joiner `up`; both arrive whole and in order.
@@ -166,6 +167,35 @@ func TestTelemostNewJoinerOldCreator(t *testing.T) {
 func TestTelemostOldJoinerCreatorWithoutFlag(t *testing.T) {
 	p := newPair(t, false, false, 0.02)
 	run(t, p, 1500, 400)
+}
+
+// a probed screenshare session (as the creator adds it) the joiner answers on carries its half; one the joiner does not
+// keep (or never gets: the call does not forward that track) carries nothing and nothing waits for it
+func TestTelemostProbedShareSession(t *testing.T) {
+	probe := tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfigAck, nil)
+	for _, joinerShare := range []bool{true, false} {
+		p := newPair(t, false, joinerShare, 0.02)
+		p.creator.AddProbedSession(p.creatorShareTrack, probe)
+		if joinerShare {
+			deadline := time.Now().Add(10 * time.Second)
+			for p.creator.ReadySessions() < 2 {
+				if time.Now().After(deadline) {
+					t.Fatal("the joiner never answered on the screenshare session")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		shareBefore, camBefore := p.share.count(), p.cam.count()
+		run(t, p, 2000, 200)
+		share, cam := p.share.count()-shareBefore, p.cam.count()-camBefore
+		t.Logf("joiner keeps the session %v: frames camera %d, screenshare %d, ready sessions %d", joinerShare, cam, share, p.creator.ReadySessions())
+		if joinerShare && share < cam/3 {
+			t.Fatalf("the screenshare track carried almost nothing (%d frames)", share)
+		}
+		if !joinerShare && p.creator.ReadySessions() != 1 {
+			t.Fatalf("a session the joiner never answered on is in use")
+		}
+	}
 }
 
 // the deeper queue: the reliable layer may put its whole window (the far side allows hundreds) on the track at once;
