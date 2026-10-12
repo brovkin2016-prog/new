@@ -36,8 +36,8 @@
     const scroll = el("div", { class: "scroll" });
     root.append(scroll);
     let part = store.get("accessPart", "server"), open = false;
-    const cache = { server: null, vpn: null, app: null, alerts: null };
-    const OPS = { server: "status", vpn: "users", app: "app_list" };
+    const cache = { server: null, vpn: null, app: null, claude: null, alerts: null };
+    const OPS = { server: "status", vpn: "users", app: "app_list", claude: "agent_state" };
     let data = null;
     const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
     function enter() {  // only the owner has this tab, on the owner's own phone: it opens at once, no fingerprint
@@ -49,7 +49,10 @@
       const want = part;
       if (!cache[want]) { draw(); scroll.append(el("div", { class: "status", style: "padding:20px" }, el("span", { class: "spin" }), "Загружаю…")); }
       try {
-        const [end, ev] = await Promise.all([panel({ op: OPS[want] }), want === "server" ? panel({ op: "alerts", since: 0 }) : null]);
+        const body = want === "claude" ? { op: OPS.claude, chat: claude.chat || undefined } : { op: OPS[want] };
+        const [end, ev, ag] = await Promise.all([panel(body), want === "server" ? panel({ op: "alerts", since: 0 }) : null,
+          want === "server" ? panel({ op: "agent_state" }).catch(() => null) : null]);
+        if (ag) cache.claudeOk = ag.t === "done" && !!ag.installed;
         if (end.t !== "done") throw new HttpError(500, end.text);
         cache[want] = end;
         if (ev && ev.t === "done") cache.alerts = ev.alerts.slice().reverse();
@@ -58,15 +61,17 @@
     }
     function draw() {
       scroll.innerHTML = "";
+      if (claude.composer) { claude.composer.remove(); claude.composer = null; }
       const seg = el("div", { class: "seg", style: "margin-bottom:12px" });
-      for (const [k, v] of [["server", "🖥 Сервер"], ["vpn", "🛡 VPN"], ["app", "🤖 Приложение"]]) {
-        seg.append(el("button", { class: k === part ? "on" : "", text: v, onclick: () => { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); } }));
+      for (const [k, v] of [["server", "🖥 Сервер"], ["vpn", "🛡 VPN"], ["app", "🤖 Приложение"], ["claude", "🛠 Claude"]]) {
+        seg.append(el("button", { class: k === part ? "on" : "", style: "padding:8px 4px", text: v, onclick: () => { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); } }));
       }
       scroll.append(seg);
       data = cache[part];
       if (!data) return;
       if (part === "app") return drawApp(data);
       if (part === "server") return drawServer(data);
+      if (part === "claude") return drawClaude(data);
       const on = data.users.filter((u) => u.online).length;
       const head = el("div", { class: "card" },
         el("div", { class: "row" }, el("div", { class: "grow" }, (data.vpn ? "🟢 VPN работает" : "🔴 VPN не работает") + " · " + data.host,
@@ -278,6 +283,206 @@
       }
       return card;
     }
+    // ---------- «🛠 Claude»: the owner's chat with Claude Code on this server ----------
+    // A message: Claude looks (files, services, journals) and answers; a change it only plans. «✅ Выполнить» carries the
+    // plan out after the server copies its files; the server checks itself after it and puts the copy back if it broke.
+    const claude = { chat: store.get("claudeChat", ""), box: null, head: null, composer: null, draft: "" };
+    const STEP_ICON = { Bash: "▶️", Read: "📄", Edit: "✏️", Write: "📝", Glob: "🔎", Grep: "🔎" };
+    const html = (t) => (A.md ? A.md(t) : String(t || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).replace(/\n/g, "<br>"));
+    const stepLine = (icon, what) => el("div", { style: "font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0;color:var(--muted)",
+      text: icon + " " + what });
+    function claudeMsg(m) {
+      const wrap = el("div", { class: "msg " + (m.role === "me" ? "me" : "ai") });
+      const b = el("div", { class: "bubble" + (m.err ? " err" : "") });
+      if (m.role === "me") b.textContent = m.text; else b.innerHTML = html(m.text);
+      wrap.append(b);
+      if (m.steps && m.steps.length) {
+        const det = el("details", { style: "font-size:13px;color:var(--muted);margin:2px 4px 0" }, el("summary", { text: `🔧 Что Claude делал: ${m.steps.length}` }));
+        for (const x of m.steps.slice(0, 60)) det.append(stepLine(STEP_ICON[x.tool] || "🔧", x.what));
+        wrap.append(det);
+      }
+      if (m.files && m.files.length) {
+        const det = el("details", { style: "font-size:13px;color:var(--muted);margin:2px 4px 0" }, el("summary", { text: `📝 Изменено файлов: ${m.files.length}` }));
+        for (const f of m.files) det.append(stepLine("·", f));
+        wrap.append(det);
+      }
+      if (m.note) wrap.append(el("div", { style: "font-size:13px;margin:4px 4px 0;color:" + (m.note.startsWith("↩️") ? "#b45309" : "var(--muted)"), text: m.note }));
+      return wrap;
+    }
+    function liveBubble() {
+      const wrap = el("div", { class: "msg ai" }), b = el("div", { class: "bubble" });
+      const steps = el("div"), text = el("div"), st = el("div", { class: "status", style: "font-size:14px;margin-top:4px" }, el("span", { class: "spin" }), el("span", { text: "Отправляю…" }));
+      b.append(steps, text, st);
+      wrap.append(b);
+      let raw = "";
+      const down = () => { scroll.scrollTop = scroll.scrollHeight; };
+      return {
+        el: wrap,
+        status: (t) => { st.lastChild.textContent = t; },
+        on: (ev) => {
+          if (ev.t === "chat") { claude.chat = ev.chat; store.set("claudeChat", ev.chat); }
+          else if (ev.t === "status") st.lastChild.textContent = ev.text;
+          else if (ev.t === "tool") { steps.append(stepLine(ev.icon || "🔧", ev.what)); st.lastChild.textContent = "Работаю…"; }
+          else if (ev.t === "out" && ev.err) steps.append(stepLine("⚠️", ev.text.slice(0, 300)));
+          else if (ev.t === "text") { raw += (raw ? "\n\n" : "") + ev.text; text.innerHTML = html(raw); }
+          else if (ev.t === "done" || ev.t === "error") st.remove();
+          down();
+        },
+      };
+    }
+    function claudeIntro() {
+      const hints = ["Всё ли в порядке с сервером?", "Почему мост не подключается?", "Сколько свободно места и памяти?", "Что было в событиях за сегодня?"];
+      return el("div", { class: "msg note" }, el("div", { class: "bubble", text: "Здесь Claude Code прямо на вашем сервере. Спросите — он посмотрит сам. "
+        + "Если нужно что-то поменять, сначала покажет план, а поменяет только после «✅ Выполнить»: сервер сначала сделает снимок файлов, "
+        + "после — проверит себя и при поломке вернёт как было." }),
+        el("div", { class: "hints", style: "margin-top:8px" }, ...hints.map((t) => el("button", { class: "hint", text: t, onclick: () => send(t) }))));
+    }
+    function drawClaude(d) {
+      if (!d.installed) {
+        scroll.append(el("div", { class: "card" }, el("h3", { text: "🛠 Claude на сервере" }),
+          el("p", { text: d.why || "Claude Code ещё не установлен." }),
+          el("small", { style: "color:var(--muted)", text: "Он ставится вместе с новой версией сервера: «🖥 Сервер» → «⬆️ Версия сервера» → «⬆️ Обновить»." })));
+        return;
+      }
+      claude.chat = d.chat;
+      store.set("claudeChat", d.chat);
+      claude.head = el("b", { text: d.title });
+      scroll.append(el("div", { class: "card", style: "padding:8px 12px" },
+        el("div", { class: "row", style: "min-height:40px;cursor:pointer", onclick: () => chatsSheet(d) },
+          el("div", { class: "grow" }, claude.head, el("small", { text: d.chats.length > 1 ? `Разговоров: ${d.chats.length} · выбрать ›` : "Один разговор — одна тема" })),
+          el("button", { class: "btn soft", text: "➕ Новый", onclick: (e) => { e.stopPropagation(); newChat(); } }))));
+      const box = claude.box = el("div", { class: "msgs", style: "padding:4px 2px 12px" });
+      if (!d.history.length) box.append(claudeIntro());
+      for (const m of d.history) box.append(claudeMsg(m));
+      scroll.append(box);
+      const acts = el("div", { class: "big-actions", style: "margin:0 0 10px" });
+      if (d.busy) {
+        if (d.busy_chat === d.chat) follow(d.events);
+        else acts.append(el("div", { class: "status", text: "⏳ Claude сейчас работает в другом разговоре" }));
+      } else {
+        if (d.can_run) acts.append(el("button", { class: "btn", text: "✅ Выполнить", onclick: runPlan }));
+        if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Откатить", onclick: () => undo(d) }));
+      }
+      if (acts.childNodes.length) scroll.append(acts);
+      scroll.append(el("div", { style: "font-size:12px;color:var(--muted);margin:0 4px 12px" },
+        "Модели: " + (d.engines.length ? d.engines.join(" → ") : "нет ключей") + " · ",
+        el("a", { href: "#", text: "🔑 Ключ OpenRouter", onclick: (e) => { e.preventDefault(); keySheet(d); } })));
+      const ta = el("textarea", { rows: 1, placeholder: d.busy ? "Claude работает… можно написать следующее" : "Что проверить или сделать?" });
+      ta.value = claude.draft;
+      ta.addEventListener("input", () => { claude.draft = ta.value; ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
+      const go = el("button", { class: "round main", text: d.busy ? "⏹" : "➤", title: d.busy ? "Стоп" : "Отправить", onclick: () => {
+        if (d.busy) return stopClaude();
+        const t = ta.value.trim();
+        if (t) { claude.draft = ""; ta.value = ""; send(t); }
+      } });
+      claude.composer = el("div", { class: "composer" }, el("div", { class: "inrow" }, ta, go));
+      root.append(claude.composer);
+      requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
+    }
+    async function talk(body, me) {  // a request to Claude with its steps shown as they come; the chat redrawn after it
+      if (!claude.box) return;
+      if (me) {
+        if (body.chat === "new") { claude.box.innerHTML = ""; if (claude.head) claude.head.textContent = me.slice(0, 40); }
+        claude.box.querySelectorAll(".msg.note").forEach((n) => n.remove());
+        claude.box.append(claudeMsg({ role: "me", text: me }));
+      }
+      const live = liveBubble();
+      claude.box.append(live.el);
+      scroll.scrollTop = scroll.scrollHeight;
+      try {
+        const end = await stream("/api/panel", body, live.on);
+        if (end.t === "error") toast("⚠️ " + end.text, 6000);
+      } catch (e) {
+        live.status("Связь прервалась — Claude работает дальше, жду…");
+        await waitFree();
+      }
+      reloadClaude();
+    }
+    async function waitFree() {  // the phone lost the line: the server goes on; look again until it is done
+      for (let i = 0; i < 180; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        try { const st = await panel({ op: "agent_state", chat: claude.chat }); if (st.t === "done" && !st.busy) return; } catch (e) { /* still away */ }
+      }
+    }
+    function follow(from) {  // the app was away while Claude worked: its steps from where they are now
+      talk({ op: "agent_follow", from: Math.max(0, (from || 0) - 1) });
+    }
+    function reloadClaude() {
+      if (part !== "claude") return;
+      cache.claude = null;
+      load();
+    }
+    function send(text) { talk({ op: "agent_ask", chat: claude.chat, text }, text); }
+    async function runPlan() {
+      if (!(await confirmBox("Claude поменяет сервер по плану выше. Сначала сервер сделает снимок файлов, а после проверит себя: если что-то сломается — сам вернёт как было.", "✅ Выполнить"))) return;
+      talk({ op: "agent_run", chat: claude.chat }, "✅ Выполнить");
+    }
+    async function undo(d) {
+      if (!(await confirmBox(`Вернуть файлы сервера, как они были до последнего «Выполнить» (${when(d.undo_ts)})?`, "↩️ Откатить"))) return;
+      talk({ op: "agent_undo", chat: claude.chat }, "↩️ Откатить");
+    }
+    async function stopClaude() {
+      try { await panel({ op: "agent_stop" }); } catch (e) { toast(problem(e)); }
+    }
+    async function newChat() {
+      try {
+        const st = await panel({ op: "agent_new" });
+        if (st.t !== "done") return toast("⚠️ " + st.text);
+        claude.chat = st.chat; cache.claude = st; draw();
+      } catch (e) { toast(problem(e)); }
+    }
+    function chatsSheet(d) {
+      sheet("💬 Разговоры с Claude", (box, close) => {
+        box.append(el("button", { class: "btn wide", style: "margin-bottom:10px", text: "➕ Новый разговор", onclick: () => { close(); newChat(); } }));
+        for (const c of d.chats) {
+          box.append(el("div", { class: "row", style: "cursor:pointer" + (c.id === d.chat ? ";font-weight:600" : ""),
+            onclick: async () => { close(); claude.chat = c.id; try { await panel({ op: "agent_select", chat: c.id }); } catch (e) { /* the list stays */ } reloadClaude(); } },
+          el("div", { class: "grow" }, (c.busy ? "⏳ " : "") + c.title, el("small", { text: c.upd ? when(c.upd) : "" })),
+          el("button", { class: "round ghost", style: "width:36px;height:36px;font-size:15px", text: "✏️", title: "Переименовать", onclick: async (e) => {
+            e.stopPropagation(); close();
+            const t = await ask("Название разговора", "Например: Мост VK", c.title);
+            if (t) { try { await panel({ op: "agent_rename", chat: c.id, title: t }); } catch (er) { toast(problem(er)); } reloadClaude(); }
+          } }),
+          el("button", { class: "round ghost", style: "width:36px;height:36px;font-size:15px;margin-left:6px", text: "🗑", title: "Удалить", onclick: async (e) => {
+            e.stopPropagation(); close();
+            if (!(await confirmBox(`Удалить разговор «${c.title}»? Изменения на сервере останутся.`, "Удалить"))) return;
+            try { const r = await panel({ op: "agent_delete", chat: c.id }); if (r.t !== "done") toast("⚠️ " + r.text); } catch (er) { toast(problem(er)); }
+            if (c.id === claude.chat) claude.chat = "";
+            reloadClaude();
+          } })));
+        }
+      });
+    }
+    function keySheet(d) {
+      sheet("🔑 Ключ OpenRouter", (box, close) => {
+        const inp = el("input", { class: "input", type: "password", placeholder: "sk-or-v1-…", autocomplete: "off" });
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: (d.own_key ? "Сейчас стоит ваш ключ. " : "Сейчас — ключ сервера. ")
+          + "Свой ключ (openrouter.ai → Keys) хранится только на сервере и идёт запасным после GLM. В чат его не присылайте." }),
+          inp, el("div", { style: "height:10px" }),
+          el("button", { class: "btn wide", text: "Сохранить", onclick: async () => {
+            const key = inp.value.trim();
+            if (!key) return;
+            try { const r = await panel({ op: "agent_key", key }); if (r.t !== "done") return toast("⚠️ " + r.text, 6000); close(); toast("✅ Ключ сохранён"); reloadClaude(); } catch (e) { toast(problem(e)); }
+          } }));
+        if (d.own_key) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "Убрать свой ключ", onclick: async () => {
+          try { await panel({ op: "agent_key", key: "" }); close(); toast("Свой ключ убран"); reloadClaude(); } catch (e) { toast(problem(e)); }
+        } }));
+      });
+    }
+    // «🛠 Разобрать с Claude» from the server's cards (only the owner has them): a new talk with the problem in it
+    async function toClaude(text) {
+      part = "claude"; store.set("accessPart", "claude"); refreshTop();
+      try {
+        const st = await panel({ op: "agent_state" });
+        if (st.t !== "done") return toast("⚠️ " + st.text, 6000);
+        cache.claude = st; draw();
+        if (!st.installed) return;
+        if (st.busy) return toast("Claude ещё работает над прошлым — отправьте, когда закончит", 5000);
+        talk({ op: "agent_ask", chat: "new", text: text.slice(0, 7900) }, text.slice(0, 7900));
+      } catch (e) { toast(problem(e)); }
+    }
+    const claudeBtn = (text, close) => el("button", { class: "btn line", text: "🛠 Разобрать с Claude",
+      onclick: () => { if (close) close(); toClaude(typeof text === "function" ? text() : text); } });
     function drawServer(d) {
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
@@ -302,9 +507,11 @@
       if (urgentHost) drawHosting(host);
       if (urgentUpdate) scroll.append(updateCard(u, "top"));
       if (fresh) scroll.append(eventsCard());
-      scroll.append(bridgesCard(d), diagCard());
+      const cl = !!cache.claudeOk;  // Claude on the server: memory, traffic, the week, Winger's journal and checks — ask it
+      scroll.append(bridgesCard(d), diagCard(cl));
       const more = store.get("serverMore", false);
-      scroll.append(el("button", { class: "btn line wide", style: "margin:0 0 12px", text: more ? "▲ Скрыть подробности" : "▼ Подробнее: память, трафик, журнал, копии",
+      scroll.append(el("button", { class: "btn line wide", style: "margin:0 0 12px",
+        text: more ? "▲ Скрыть подробности" : cl ? "▼ Подробнее: события, версия, копии" : "▼ Подробнее: память, трафик, журнал, копии",
         onclick: () => { store.set("serverMore", !more); draw(); } }));
       if (!more) return;
       const brOk = d.bridges.length - brBad.length;
@@ -318,7 +525,7 @@
       if (host && !urgentHost) drawHosting(host);
       if (u && u.ready) scroll.append(updateCard(u, urgentUpdate ? "extras" : "all"));
       // what takes the memory and the processor: the VPN and the assistant apart
-      if (d.services && d.services.length) {
+      if (d.services && d.services.length && !cl) {
         const mb = (v) => (v === null || v === undefined ? "—" : v >= 1024 ? (v / 1024).toFixed(1) + " ГБ" : v + " МБ");
         const pc = (v) => (v === null || v === undefined ? "—" : v < 1 ? "<1%" : Math.round(v) + "%");
         const card = el("div", { class: "card" }, el("h3", { text: "📊 Ресурсы" }));
@@ -341,9 +548,11 @@
           text: `Процессор — доля одного ядра за последнюю секунду (ядер: ${d.cpus}). Помощнику больше всего памяти нужно, пока он обрабатывает фото и голос.` }));
         scroll.append(card);
       }
-      scroll.append(weekCard(), wingerLogCard(), trafficCard());
+      if (!cl) scroll.append(weekCard(), wingerLogCard(), trafficCard());
+      else scroll.append(wingerLogCard(true), el("div", { style: "font-size:13px;color:var(--muted);margin:-4px 4px 12px",
+        text: "Память и нагрузку, трафик, итоги недели, скорость, проверку моста и почты спросите у Claude — раздел «🛠 Claude»." }));
       if (!fresh) scroll.append(eventsCard());
-      scroll.append(actionsCard(d));
+      scroll.append(actionsCard(d, cl));
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
     const BRIDGES = [
@@ -422,7 +631,17 @@
       });
     }
     // one tap: the server checks everything a fault hides in (VPN, bridges, MAX, Winger's journal) and copies the report
-    function diagCard() {
+    function diagCard(cl) {
+      if (cl) {
+        return el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🩺 Проверить сервер с Claude", onclick: async () => {
+          try {
+            const end = await panel({ op: "diag" }, (t) => toast(t, 60000));
+            document.querySelectorAll(".toast").forEach((t) => t.remove());
+            if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
+            toClaude("Вот отчёт проверки сервера. Посмотри, всё ли в порядке, и если что-то не так — найди причину и предложи исправление.\n\n" + end.text);
+          } catch (e) { toast(problem(e)); }
+        } });
+      }
       return el("div", { class: "card" }, el("h3", { text: "🩺 Проверка для Claude" }),
         el("small", { style: "color:var(--muted);display:block;margin:-4px 0 10px", text: "Сервер сам проверит VPN, мосты, MAX и журнал Winger "
           + "и скопирует отчёт — вставьте его в чат с Claude. Адресов и ключей в отчёте нет." }),
@@ -432,20 +651,27 @@
             document.querySelectorAll(".toast").forEach((t) => t.remove());
             if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
             copyText(end.text);
-            sheet("🩺 Проверка для Claude", (box) => box.append(
+            sheet("🩺 Проверка для Claude", (box, close) => box.append(
               el("div", { style: "font:11px/1.35 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card);border-radius:12px;padding:10px;margin-bottom:12px;max-height:50vh;overflow:auto", text: end.text }),
-              el("button", { class: "btn wide", text: "📋 Скопировать ещё раз", onclick: () => { copyText(end.text); toast("✅ Скопировано — вставьте в чат с Claude"); } })));
+              el("div", { class: "big-actions" }, claudeBtn("Разбери отчёт проверки сервера: что не так и как исправить?\n\n" + end.text, close),
+                el("button", { class: "btn line", text: "📋 Скопировать", onclick: () => { copyText(end.text); toast("✅ Скопировано"); } }))));
             toast("✅ Отчёт скопирован — вставьте в чат с Claude", 5000);
           } catch (e) { toast(problem(e)); }
         } }));
     }
     // Winger's journal from the owner's phone: why the bridge works or not, how fast, where the errors are — to copy for Claude
-    function wingerLogCard() {
+    function wingerLogCard(short) {
       const card = el("div", { class: "card" }, el("h3", { text: "📋 Журнал Winger" }), el("div", { class: "status", text: "…" }));
       panel({ op: "winger_log" }).then((w) => {
         card.lastChild.remove();
         if (w.t !== "done" || !w.at) {
           card.append(el("small", { style: "color:var(--muted)", text: "Ещё не приходил. Winger присылает его сам раз в полчаса — только с вашего телефона (по вашему VPN)." }));
+          return;
+        }
+        if (short) {
+          card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Получен " + when(w.at), el("small", { text: [w.device, w.app ? "Winger " + w.app : ""].filter(Boolean).join(" · ") })),
+            claudeBtn(() => "Разбери журнал Winger с моего телефона: почему мост или VPN работает плохо, и как исправить?\n\n"
+              + ["Журнал Winger (" + [w.device, w.app ? "Winger " + w.app : ""].filter(Boolean).join(", ") + "), получен " + when(w.at), "", ...w.lines].join("\n"))));
           return;
         }
         const m = w.summary || {};
@@ -460,8 +686,8 @@
           `Мост: подключался ${m.bridge_up}, рвался ${m.bridge_lost}, ошибок ${m.bridge_errors}; отклик ср. ${m.ping_avg || "—"} мс, макс. ${m.ping_max || "—"}; без ответа ${m.ping_failed}; переподключений ${m.retries}`,
           "", ...w.lines].join("\n");
         card.append(el("div", { class: "big-actions", style: "margin-top:8px" },
-          el("button", { class: "btn", text: "📋 Скопировать для Claude", onclick: () => { copyText(text()); toast("Скопировано — вставьте в чат с Claude", 4000); } }),
-          el("button", { class: "btn line", text: "📤 Поделиться", onclick: () => (navigator.share ? navigator.share({ text: text() }).catch(() => copyText(text())) : copyText(text())) })));
+          claudeBtn(() => "Разбери журнал Winger с моего телефона: почему мост или VPN работает плохо, и как исправить?\n\n" + text()),
+          el("button", { class: "btn line", text: "📋 Скопировать", onclick: () => { copyText(text()); toast("Скопировано", 4000); } })));
       }).catch(() => card.remove());
       return card;
     }
@@ -510,22 +736,26 @@
       if (!items.length) card.append(el("small", { style: "color:var(--muted)", text: "Пока тихо. О сбоях и починке напишу сюда и пришлю уведомление." }));
       const seen = store.get("alertsSeen", 0);
       for (const a of items.slice(0, 12)) {
-        card.append(el("div", { class: "event " + a.kind + (a.ts > seen && a.kind !== "log" ? " new" : "") },
+        card.append(el("div", { class: "event " + a.kind + (a.ts > seen && a.kind !== "log" ? " new" : ""), style: "cursor:pointer",
+          onclick: () => sheet("🔔 Событие", (box, close) => box.append(el("div", { style: "font-size:13px;color:var(--muted)", text: when(a.ts) }),
+            el("p", { text: a.text }), el("div", { class: "big-actions" }, claudeBtn(`Разбери событие сервера (${when(a.ts)}): «${a.text}». Что случилось и надо ли что-то исправить?`, close),
+              el("button", { class: "btn line", text: "📋 Скопировать", onclick: () => { copyText(a.text); toast("✅ Скопировано"); } })))) },
           el("small", { text: when(a.ts) }), el("div", { text: a.text })));
       }
       if (items.length) store.set("alertsSeen", items[0].ts);
       badge(0);
       return card;
     }
-    function actionsCard(d) {
+    function actionsCard(d, cl) {
       const st = d.selftest;
-      return el("div", { class: "card" }, el("h3", { text: "⚙️ Сервер" }),
-        el("button", { class: "btn line wide", text: "⚡ Скорость сервера", onclick: () => act({ op: "speed" }, null, (r) => toast(`⚡ Скорость сервера: ${r.mbit} Мбит/с`, 6000)) }),
-        el("button", { class: "btn line wide", style: "margin-top:8px", text: "🧪 Проверить мост", onclick: () => act({ op: "bridge_test" }, null, (r) => toast(r.selftest && r.selftest.ok ? `✓ Мост работает: ${r.selftest.mbit} Мбит/с` : "✗ Проверка не прошла", 5000)) }),
-        el("div", { style: "font-size:13px;color:var(--muted);margin:4px 2px 0", text: !st ? "Автопроверка моста: ещё не было"
+      const checks = cl ? [] : [
+        el("button", { class: "btn line wide", style: "margin-bottom:8px", text: "⚡ Скорость сервера", onclick: () => act({ op: "speed" }, null, (r) => toast(`⚡ Скорость сервера: ${r.mbit} Мбит/с`, 6000)) }),
+        el("button", { class: "btn line wide", text: "🧪 Проверить мост", onclick: () => act({ op: "bridge_test" }, null, (r) => toast(r.selftest && r.selftest.ok ? `✓ Мост работает: ${r.selftest.mbit} Мбит/с` : "✗ Проверка не прошла", 5000)) }),
+        el("div", { style: "font-size:13px;color:var(--muted);margin:4px 2px 8px", text: !st ? "Автопроверка моста: ещё не было"
           : st.ok ? `Последняя проверка ${when(st.ts)}: ✓ ${st.mbit} Мбит/с` : `Последняя проверка ${when(st.ts)}: ✗ ${st.err}` }),
-        el("button", { class: "btn line wide", style: "margin-top:8px", text: "✉️ Проверить почту для оповещений", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) }),
-        el("button", { class: "btn line wide", style: "margin-top:8px", text: "💾 Резервная копия сейчас", onclick: async () => {
+        el("button", { class: "btn line wide", style: "margin-bottom:8px", text: "✉️ Проверить почту для оповещений", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) })];
+      return el("div", { class: "card" }, el("h3", { text: "⚙️ Сервер" }), ...checks,
+        el("button", { class: "btn line wide", text: "💾 Резервная копия сейчас", onclick: async () => {
           if (await confirmBox("Сделать резервную копию сейчас? Через минуту-две она ляжет на Яндекс Диск (папка «Семейный сервер — копии»), а без Диска придёт на почту.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — на Яндекс Диск");
         } }),
         el("button", { class: "btn line wide danger", style: "margin-top:8px", text: "♻️ Перезагрузить сервер", onclick: async () => {
@@ -996,7 +1226,7 @@
       } catch (e) { /* quiet */ }
     }
     return { root, peek, redraw: () => open && draw(),
-      sub: () => ({ server: "состояние, мосты, события", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется приложением" })[part],
+      sub: () => ({ server: "состояние, мосты, события", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется приложением", claude: "Claude Code на вашем сервере" })[part],
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
       onShow: () => (open ? load() : enter()) };
   }

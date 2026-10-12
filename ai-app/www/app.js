@@ -588,7 +588,7 @@
   function ownerView(code) {
     try {
       if (typeof code === "function") {
-        return code({ Native, S, api, ask, blobOf, confirmBox, copyText, el, nativeCall, problem, refreshTop, shareBlob, sheet,
+        return code({ Native, S, api, ask, blobOf, confirmBox, copyText, el, md, nativeCall, problem, refreshTop, shareBlob, sheet,
           store, stream, toast, urlOf, viewer })();
       }
     } catch (e) { code = e; }
