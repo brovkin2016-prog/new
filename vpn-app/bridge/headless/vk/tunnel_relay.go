@@ -169,7 +169,7 @@ func (u *TunnelRelay) Init(iceServers []webrtc.ICEServer) error {
 		u.modeOnce.Do(func() {
 			u.mode = "video"
 			log.Println("[relay] === MODE: VIDEO ===")
-			u.tun = rtc.NewVP8DataTunnel(sampleTrack, u.obf, log.Printf)
+			u.tun = rtc.NewVP8DataTunnelWithQueue(sampleTrack, u.obf, log.Printf, rtc.KCPCarrierQueueDepth) // winger: room for the reliable window
 			u.tun.Start(0, 0)
 			var downlink tunnel.DataTunnel = u.tun
 			if u.screenDC != nil {

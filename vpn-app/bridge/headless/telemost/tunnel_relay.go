@@ -44,6 +44,8 @@ type SFURelay struct {
 	OnSubICE      func(*webrtc.ICECandidate)
 
 	sharingDC *webrtc.DataChannel
+	shareSub  *rtc.VP8DataTunnel // winger: the screenshare track's tunnel, while it is on
+	kcpShare  bool               // winger: the joiner keeps a reliable session for it (ConfigKCPEveryTrack)
 
 	readBufSize int
 	tunFired    bool
@@ -106,12 +108,16 @@ func (r *SFURelay) AddSharingDataChannel() error {
 	dc.OnOpen(func() {
 		log.Printf("[ss] creator 'sharing' DC open, registering screenshare sub-tunnel")
 		sink.sendFrame(keyframe())
-		sub := rtc.NewVP8DataTunnel(nil, r.obf, log.Printf)
+		sub := rtc.NewVP8DataTunnelWithQueue(nil, r.obf, log.Printf, rtc.KCPCarrierQueueDepth)
 		sub.WriteFrame = sink.sendFrame
 		if r.mt == nil {
 			return
 		}
 		r.mt.AddSubTunnel(sub)
+		r.mu.Lock()
+		r.shareSub = sub
+		r.mu.Unlock()
+		r.syncShareSession()
 		log.Printf("[ss] screenshare sub-tunnel live, tracks=%d", r.mt.SubTunnelCount())
 	})
 	dc.OnClose(func() { log.Printf("[ss] creator 'sharing' DC closed") })
@@ -127,12 +133,46 @@ func (r *SFURelay) AddSharingDataChannel() error {
 }
 
 func (r *SFURelay) RemoveSharingDataChannel() {
+	r.mu.Lock()
+	r.shareSub = nil
+	r.mu.Unlock()
+	r.syncShareSession() // its reliable session goes before its track
 	if r.mt != nil {
 		r.mt.RemoveLastSubTunnel()
 	}
 	if r.sharingDC != nil {
 		r.sharingDC.Close()
 		r.sharingDC = nil
+	}
+}
+
+// SetKCPOnShare: the joiner says it keeps a reliable session for the screenshare track (or, an older one, does not).
+func (r *SFURelay) SetKCPOnShare(on bool) {
+	r.mu.Lock()
+	r.kcpShare = on
+	r.mu.Unlock()
+	r.syncShareSession()
+}
+
+// syncShareSession (winger): the reliable layer carries data on the screenshare track too — doubling what the joiner
+// downloads — only while that track is on and the joiner has a session for it; an older joiner would drop it.
+func (r *SFURelay) syncShareSession() {
+	r.mu.Lock()
+	kcptun, _ := r.delivered.(*rtc.MultiTrackKCPTunnel)
+	want := r.kcpShare && r.shareSub != nil
+	sub := r.shareSub
+	r.mu.Unlock()
+	if kcptun == nil {
+		return
+	}
+	have := kcptun.SessionCount() > 1
+	switch {
+	case want && !have:
+		kcptun.AddSession(sub)
+		log.Printf("[ss] reliable data on the screenshare track too")
+	case !want && have:
+		kcptun.RemoveLastSession()
+		log.Printf("[ss] reliable data on the camera track only")
 	}
 }
 
@@ -171,7 +211,7 @@ func (r *SFURelay) Init(iceServers []webrtc.ICEServer) error {
 		if state == webrtc.PeerConnectionStateConnected {
 			if r.tun == nil {
 				log.Println("[relay] starting VP8 publish tunnel on pub PC connected")
-				r.tun = rtc.NewVP8DataTunnel(r.sampleTrack, r.obf, log.Printf)
+				r.tun = rtc.NewVP8DataTunnelWithQueue(r.sampleTrack, r.obf, log.Printf, rtc.KCPCarrierQueueDepth)
 				r.tun.Start(0, 0)
 				r.tunFired = false
 				r.mt = rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{r.tun})
@@ -222,7 +262,11 @@ func (r *SFURelay) activate(mt *rtc.MultiTrackTunnel, payload []byte) {
 	var delivered tunnel.DataTunnel = mt
 	useKCP := false
 	if !tunnel.LooksLikeRelayFrame(payload) {
-		delivered = rtc.NewMultiTrackKCPTunnel(mt, log.Printf)
+		kcptun := rtc.NewMultiTrackKCPTunnel(mt, log.Printf)
+		for kcptun.SessionCount() > 1 { // winger: the screenshare track's session only once this joiner says it has one
+			kcptun.RemoveLastSession()
+		}
+		delivered = kcptun
 		useKCP = true
 		log.Println("[relay] per-track kcp reliability active over video tunnel")
 	}
@@ -245,6 +289,7 @@ func (r *SFURelay) activate(mt *rtc.MultiTrackTunnel, payload []byte) {
 func (r *SFURelay) resetForNewPeer() {
 	r.mu.Lock()
 	r.tunFired = false
+	r.kcpShare = false // a new joiner says anew what it keeps
 	mt := r.mt
 	old := r.delivered
 	r.delivered = nil

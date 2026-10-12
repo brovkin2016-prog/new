@@ -56,6 +56,29 @@ func EncodeVP8Config(fps, batch, trackCount int) []byte {
 	return EncodeFrame(ControlConnID, MsgConfig, payload[:])
 }
 
+// winger: a 7th byte of feature flags after trackCount — older programs read the first six and ignore it.
+// ConfigKCPEveryTrack: the joiner keeps a reliable (KCP) session for each of the creator's tracks, so the creator may
+// carry reliable data on its second (screenshare) track too; without it a second track would only carry keepalives.
+const ConfigKCPEveryTrack byte = 0x01
+
+func EncodeVP8ConfigFlags(fps, batch, trackCount int, flags byte) []byte {
+	frame := EncodeVP8Config(fps, batch, trackCount)
+	if flags == 0 {
+		return frame
+	}
+	out := append(frame, flags)
+	binary.BigEndian.PutUint32(out[0:4], uint32(len(out)-4))
+	return out
+}
+
+// VP8ConfigFlags: the feature flags of a config payload (0 from older joiners).
+func VP8ConfigFlags(payload []byte) byte {
+	if len(payload) >= 7 {
+		return payload[6]
+	}
+	return 0
+}
+
 func DecodeVP8Config(payload []byte) (fps, batch, trackCount int, ok bool) {
 	if len(payload) < 4 {
 		return 0, 0, 0, false
@@ -70,7 +93,11 @@ func DecodeVP8Config(payload []byte) (fps, batch, trackCount int, ok bool) {
 }
 
 func SendVP8ConfigUntilAcked(acked, cancel, stopCh <-chan struct{}, tun DataTunnel, fps, batch, trackCount int, logFn func(string, ...any), logPrefix string) {
-	tun.SendData(EncodeVP8Config(fps, batch, trackCount))
+	SendVP8ConfigFlagsUntilAcked(acked, cancel, stopCh, tun, fps, batch, trackCount, 0, logFn, logPrefix)
+}
+
+func SendVP8ConfigFlagsUntilAcked(acked, cancel, stopCh <-chan struct{}, tun DataTunnel, fps, batch, trackCount int, flags byte, logFn func(string, ...any), logPrefix string) {
+	tun.SendData(EncodeVP8ConfigFlags(fps, batch, trackCount, flags))
 	ticker := time.NewTicker(configResendPeriod)
 	defer ticker.Stop()
 	for {
@@ -84,7 +111,7 @@ func SendVP8ConfigUntilAcked(acked, cancel, stopCh <-chan struct{}, tun DataTunn
 		case <-ticker.C:
 			logFn("%s: resending vp8 config fps=%d batch=%d trackCount=%d, no ack yet",
 				logPrefix, fps, batch, trackCount)
-			tun.SendData(EncodeVP8Config(fps, batch, trackCount))
+			tun.SendData(EncodeVP8ConfigFlags(fps, batch, trackCount, flags))
 		}
 	}
 }

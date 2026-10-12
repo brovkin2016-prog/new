@@ -83,6 +83,7 @@ type RelayBridge struct {
 
 	onPeerConfigMu sync.Mutex
 	onPeerConfig   func(fps, batch, trackCount int)
+	peerFlags      atomic.Uint32 // winger: the feature flags of the joiner's last config
 
 	onConfigAckMu sync.Mutex
 	onConfigAck   func()
@@ -92,6 +93,11 @@ func (rb *RelayBridge) SetOnPeerConfig(fn func(fps, batch, trackCount int)) {
 	rb.onPeerConfigMu.Lock()
 	rb.onPeerConfig = fn
 	rb.onPeerConfigMu.Unlock()
+}
+
+// PeerFlags: the feature flags the joiner sent with its last config (ConfigKCPEveryTrack…), 0 from older joiners.
+func (rb *RelayBridge) PeerFlags() byte {
+	return byte(rb.peerFlags.Load())
 }
 
 func (rb *RelayBridge) SetOnConfigAck(fn func()) {
@@ -231,7 +237,8 @@ func (rb *RelayBridge) handleTunnelData(data []byte) {
 				return
 			}
 			if rb.mode == "creator" {
-				rb.logFn("relay: peer requested vp8 pacing fps=%d batch=%d trackCount=%d", fps, batch, trackCount)
+				rb.peerFlags.Store(uint32(VP8ConfigFlags(payload)))
+				rb.logFn("relay: peer requested vp8 pacing fps=%d batch=%d trackCount=%d flags=%d", fps, batch, trackCount, rb.PeerFlags())
 				rb.currentTunnel().Reconfigure(fps, batch)
 				rb.send(ControlConnID, MsgConfigAck, nil)
 				rb.onPeerConfigMu.Lock()

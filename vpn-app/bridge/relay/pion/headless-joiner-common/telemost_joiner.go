@@ -501,14 +501,26 @@ func (j *TelemostHeadlessJoiner) initPC() {
 			j.reconnectAttempt.Store(0)
 			j.logFn("telemost-joiner: === VP8 TUNNEL CONNECTED ===")
 			j.Status.EmitStatus(common.StatusTunnelConnected)
-			j.vp8tunnel = rtc.NewVP8DataTunnel(j.sampleTrack, j.obf, j.logFn)
+			// winger: the reliable layer may put up to its window (hundreds of segments) on the track at once — the
+			// deeper queue (as WB Stream and Bitrix24 have) keeps them from being thrown away and sent again
+			j.vp8tunnel = rtc.NewVP8DataTunnelWithQueue(j.sampleTrack, j.obf, j.logFn, rtc.KCPCarrierQueueDepth)
 			vp8tun := j.vp8tunnel
 			vp8tun.Start(j.vp8FPS, j.vp8Batch)
 			var active tunnel.DataTunnel = vp8tun
+			var flags byte
 			if j.reliable {
 				mt := rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{vp8tun})
-				active = rtc.NewMultiTrackKCPTunnel(mt, j.logFn)
+				kcpTun := rtc.NewMultiTrackKCPTunnel(mt, j.logFn)
+				active = kcpTun
 				j.logFn("telemost-joiner: per-track kcp reliability active over video tunnel")
+				if j.dualTrack {
+					// winger: a second reliable session for what the creator sends on its screenshare track (both
+					// tracks then carry the download); this side keeps sending on the first, which every creator has
+					kcpTun.AddSession(vp8tun)
+					kcpTun.SetSendSessions(1)
+					flags = tunnel.ConfigKCPEveryTrack
+					j.logFn("telemost-joiner: reliable data on both of the creator's tracks")
+				}
 			}
 			if !j.configAck.acknowledged() {
 				trackCount := 1
@@ -516,8 +528,8 @@ func (j *TelemostHeadlessJoiner) initPC() {
 					trackCount = 2
 				}
 				acked, cancel := j.configAck.arm()
-				go tunnel.SendVP8ConfigUntilAcked(acked, cancel, j.stopCh, active,
-					vp8tun.FPS(), vp8tun.Batch(), trackCount, j.logFn, "telemost-joiner")
+				go tunnel.SendVP8ConfigFlagsUntilAcked(acked, cancel, j.stopCh, active,
+					vp8tun.FPS(), vp8tun.Batch(), trackCount, flags, j.logFn, "telemost-joiner")
 				j.logFn("telemost-joiner: pushed vp8 config to creator fps=%d batch=%d", vp8tun.FPS(), vp8tun.Batch())
 			}
 			if j.OnConnected != nil {

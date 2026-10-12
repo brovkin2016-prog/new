@@ -23,7 +23,11 @@ const (
 	// header - 24 XChaCha20 nonce - 16 Poly1305 tag - 1 channel tag.
 	kcpSegmentMTU     = 1200 - 1 - tunnel.InterframeHdrLen - 24 - 16 - 1
 	kcpReceiveBufSize = 128 * 1024
-	kcpStatsEvery     = 500
+	// winger: what one TCP read may take on the reliable way: a whole number of full segments (segment data = MTU
+	// - 24 KCP header) less the relay frame's own 9 bytes. A plain 1126-byte read made 1135 bytes, two segments of
+	// which the second carried 22 bytes and still took a packet of its own: half the call's packets nearly empty.
+	KCPReadBufSize = 29*(kcpSegmentMTU-24) - 4 - tunnel.WireHeaderLen
+	kcpStatsEvery  = 500
 
 	kcpWindowFloor      = 64
 	kcpWindowCeiling    = 512
@@ -152,6 +156,7 @@ type MultiTrackKCPTunnel struct {
 	nudge    chan struct{}
 
 	currentWindow atomic.Int32
+	sendSessions  atomic.Int32 // winger: how many sessions this side sends on (0: all); the others only receive
 
 	sentMessages      atomic.Uint64
 	deliveredMessages atomic.Uint64
@@ -211,8 +216,8 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 		return
 	}
 	index, pinned := t.connPin[connID]
-	if !pinned || index >= len(t.sessions) {
-		index = int(connID % uint32(len(t.sessions)))
+	if !pinned || index >= t.sendCount() {
+		index = int(connID % uint32(t.sendCount()))
 		t.connPin[connID] = index
 	}
 	session := t.sessions[index]
@@ -245,7 +250,7 @@ func (t *MultiTrackKCPTunnel) sendRaw(connID uint32, frame []byte) {
 		t.mu.Unlock()
 		return
 	}
-	index := int(connID % uint32(len(t.sessions)))
+	index := int(connID % uint32(t.sendCount()))
 	session := t.sessions[index]
 	t.mu.Unlock()
 
@@ -254,6 +259,30 @@ func (t *MultiTrackKCPTunnel) sendRaw(connID uint32, frame []byte) {
 	copy(segment[1:], frame)
 	t.rawSent.Add(1)
 	session.vp8.TrySendData(segment)
+}
+
+// sendCount: the sessions new data is spread over (t.mu held). A side that only receives on the others keeps its
+// sending where the far side surely listens.
+func (t *MultiTrackKCPTunnel) sendCount() int {
+	n := len(t.sessions)
+	if s := int(t.sendSessions.Load()); s > 0 && s < n {
+		return s
+	}
+	return n
+}
+
+// SetSendSessions: send only on the first n sessions (0: on all). winger: the Telemost joiner receives on a second
+// session (the creator's screenshare track) but sends on the first alone, so an older creator never gets a session it
+// does not have.
+func (t *MultiTrackKCPTunnel) SetSendSessions(n int) {
+	t.sendSessions.Store(int32(n))
+}
+
+// SessionCount: the reliable sessions now (one per track carrying them).
+func (t *MultiTrackKCPTunnel) SessionCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.sessions)
 }
 
 func (t *MultiTrackKCPTunnel) InjectSegment(payload []byte) {

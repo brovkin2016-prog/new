@@ -20,6 +20,7 @@ import (
 	"whitelist-bypass/relay/common"
 	tmapi "whitelist-bypass/relay/telemost"
 	"whitelist-bypass/relay/tunnel"
+	"whitelist-bypass/relay/tunnel/rtc"
 )
 
 const (
@@ -741,9 +742,15 @@ func (b *Bridge) initRelay() {
 		if b.activeBridge != nil {
 			b.activeBridge.Reset()
 		}
-		b.activeBridge = tunnel.NewRelayBridge(tun, "creator", common.VP8BufSize, log.Printf)
+		readBuf := common.VP8BufSize
+		if _, ok := tun.(*rtc.MultiTrackKCPTunnel); ok {
+			readBuf = rtc.KCPReadBufSize // winger: whole segments, none nearly empty
+		}
+		b.activeBridge = tunnel.NewRelayBridge(tun, "creator", readBuf, log.Printf)
 		b.activeBridge.SetUpstreamSocks(b.upstreamSocks, b.upstreamUser, b.upstreamPass)
+		bridge := b.activeBridge
 		b.activeBridge.SetOnPeerConfig(func(fps, batch, trackCount int) {
+			relay.SetKCPOnShare(bridge.PeerFlags()&tunnel.ConfigKCPEveryTrack != 0) // winger: before the track comes
 			if trackCount >= 2 {
 				b.enableScreenshare()
 			} else {
