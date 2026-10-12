@@ -51,7 +51,7 @@ final class VkLogin {
         s.setDomStorageEnabled(true);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
-        boolean[] finished = {false}, told = {false};
+        boolean[] finished = {false}, told = {false}, looked = {false};
         TextView info = new TextView(a);
         info.setPadding(24, 10, 24, 10);
         info.setTextSize(13);
@@ -64,6 +64,21 @@ final class VkLogin {
         ready.setAllCaps(false);
         close.setText("✕");
         String[] got = {null};
+        // the site draws itself with its scripts: if after a while there is nothing on it, say why — once, whether the
+        // page finished loading or still hangs
+        Runnable look = () -> {
+            if (finished[0] || got[0] != null || told[0] || looked[0]) return;
+            looked[0] = true;
+            w.evaluateJavascript("(function(){var b=document.body;return b?(b.innerText||'').trim().length+'|'"
+                    + "+document.querySelectorAll('input,button,a').length:'0|0'})()", r -> {
+                String v = r == null ? "" : r.replace("\"", "");
+                Log.i("AIVK", "page content " + v);
+                if (v.isEmpty() || v.startsWith("0|0") || v.equals("null")) {
+                    say(info, "Страница VK пустая — сайт не открылся. Если мобильный интернет работает по «белым "
+                            + "спискам», попробуйте через Wi‑Fi или обычный VPN, потом откройте вход снова.");
+                }
+            });
+        };
         Runnable finish = () -> {
             if (finished[0]) return;
             finished[0] = true;
@@ -89,19 +104,7 @@ final class VkLogin {
                     info.setText("✅ Вход есть. Нажмите «Готово» — сервер поднимет мост VK.");
                     return;
                 }
-                // the site draws itself with its scripts: if after a while there is nothing on it, say why
-                view.postDelayed(() -> {
-                    if (finished[0] || got[0] != null || told[0]) return;
-                    view.evaluateJavascript("(function(){var b=document.body;return b?(b.innerText||'').trim().length+'|'"
-                            + "+document.querySelectorAll('input,button,a').length:'0|0'})()", r -> {
-                        String v = r == null ? "" : r.replace("\"", "");
-                        Log.i("AIVK", "page content " + v);
-                        if (v.isEmpty() || v.startsWith("0|0") || v.equals("null")) {
-                            say(info, "Страница VK пустая — сайт не открылся. Если мобильный интернет работает по «белым "
-                                    + "спискам», попробуйте через Wi‑Fi или обычный VPN, потом откройте вход снова.");
-                        }
-                    });
-                }, 8000);
+                view.postDelayed(look, 8000);
             }
 
             @Override
@@ -144,6 +147,7 @@ final class VkLogin {
         d.show();
         Log.i("AIVK", "login page opened");
         w.loadUrl(SITE);
+        w.postDelayed(look, 15000);  // a page that never finishes loading is looked at too
     }
 
     private static void say(TextView info, String text) {

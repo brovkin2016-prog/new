@@ -53,17 +53,21 @@
         const [end, ev, ag] = await Promise.all([panel(body), want === "server" ? panel({ op: "alerts", since: 0 }) : null,
           want === "server" ? panel({ op: "agent_state" }).catch(() => null) : null]);
         if (ag) cache.claudeOk = ag.t === "done" && !!ag.installed;
-        if (end.t !== "done") throw new HttpError(500, end.text);
+        if (end.t !== "done" && want === "claude") { cache.claude = { t: "done", installed: false, why: end.text }; if (part === want) draw(); return; }
+        if (end.t !== "done") throw Object.assign(new Error(end.text || "Не получилось."), { said: true });
         cache[want] = end;
         if (ev && ev.t === "done") cache.alerts = ev.alerts.slice().reverse();
         if (part === want) draw();
-      } catch (e) { if (!cache[want]) { draw(); scroll.append(el("p", { class: "status", style: "padding:12px", text: problem(e) })); } else toast(problem(e)); }
+      } catch (e) {
+        const why = e.said ? "⚠️ " + e.message : problem(e);
+        if (!cache[want]) { draw(); scroll.append(el("p", { class: "status", style: "padding:12px", text: why })); } else toast(why);
+      }
     }
     function draw() {
       scroll.innerHTML = "";
       if (claude.composer) { claude.composer.remove(); claude.composer = null; }
       const seg = el("div", { class: "seg", style: "margin-bottom:12px" });
-      for (const [k, v] of [["server", "🖥 Сервер"], ["vpn", "🛡 VPN"], ["app", "🤖 Приложение"], ["claude", "🛠 Claude"]]) {
+      for (const [k, v] of [["server", "🖥 Сервер"], ["vpn", "🛡 VPN"], ["app", "🤖 Помощник"], ["claude", "🛠 Claude"]]) {
         seg.append(el("button", { class: k === part ? "on" : "", style: "padding:8px 4px", text: v, onclick: () => { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); } }));
       }
       scroll.append(seg);
@@ -76,26 +80,27 @@
       const head = el("div", { class: "card" },
         el("div", { class: "row" }, el("div", { class: "grow" }, (data.vpn ? "🟢 VPN работает" : "🔴 VPN не работает") + " · " + data.host,
           el("small", { text: data.stats ? `Людей: ${data.users.length}, сейчас в сети: ${on}` : `Людей: ${data.users.length}` }))));
-      if (data.vless !== null) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.vless ? "🟢" : "🔴") + " Запасной VLESS (TCP 443)",
-        el("small", { text: "Когда Hysteria режут, работает он" }))));
+      if (data.vless !== null) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.vless ? "🟢" : "🔴") + " Запасной вход в VPN (VLESS)",
+        el("small", { text: "Если основной вход блокируют: для iPhone и v2RayTun, ссылка — в карточке человека" }))));
       if (data.tg !== null && data.tg !== undefined) head.append(el("div", { class: "row" }, el("div", { class: "grow" }, (data.tg ? "🟢" : "🔴") + " Telegram без VPN",
-        el("small", { text: "Для iPhone и компьютеров: ссылка — в карточке человека и в ссылке «VPN и Telegram»" }))));
+        el("small", { text: "Для iPhone и компьютеров: ссылка — в карточке человека (нажмите на него в списке ниже)" }))));
       scroll.append(head, diskRow(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
         el("div", { class: "big-actions", style: "margin:0 0 12px" },
-          el("button", { class: "btn line", text: "🔗 Winger для Android (24 ч)", onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }),
-          el("button", { class: "btn line", text: "💻 Winger для Windows (24 ч)", onclick: () => makeLink({ op: "dl_winapp" }, "Winger для Windows") })));
-      const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан" }));
+          el("button", { class: "btn line", text: "🔗 Только Winger для Android — без подключения", onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }),
+          el("button", { class: "btn line", text: "💻 Только Winger для Windows — без подключения", onclick: () => makeLink({ op: "dl_winapp" }, "Winger для Windows") })));
+      const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан VPN" }),
+        el("small", { style: "display:block;color:var(--muted);margin:-4px 0 6px", text: "Это только VPN. Помощник выдаётся отдельно — в «🤖 Помощник»." }));
       for (const u of data.users) {
         list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
           el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
           el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
-            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}` : "")
+            el("small", { text: (u.online ? `в сети, подключений: ${u.online}` : "не в сети") + (u.tx || u.rx ? ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)} с перезапуска VPN` : "")
               + (u.until ? " · ⏰ гость до " + when(u.until) : "") + (u.bridge ? " · 🌉 мост" : "") })),
           u.owner ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delVpn(u.name); } }),
           "›"));
       }
       scroll.append(list, el("div", { style: "font-size:13px;color:var(--muted);padding:0 4px 12px",
-        text: "Удалить — 🗑 в строке человека: его VPN сразу перестанет работать. Все добавления и удаления видны в «🖥 Сервер» → «События»." }));
+        text: "Удалить — 🗑 в строке человека: его VPN сразу перестанет работать. Все добавления и удаления видны в «🖥 Сервер» → «▼ Подробнее» → «🔔 События»." }));
     }
     // a temporary link (24 h) for downloading an app or connecting the VPN: copied and sent however the owner likes
     // ---- links that open everywhere in Russia: a folder on the owner's Yandex Disk, deleted after 24 hours ----
@@ -108,7 +113,7 @@
           el("div", { class: "grow" }, d.on ? "📦 Ссылки — на Яндекс Диске ✓" : "📦 Для ссылок подключите Яндекс Диск",
             el("small", { text: d.on ? `Открываются в любом браузере в России, сами удаляются через 24 ч. Аккаунт: ${d.login || "—"}`
               : "Ссылки на 24 часа кладутся на ваш Яндекс Диск — так они открываются в любом браузере. Займёт минуту." })),
-          el("button", { class: "btn" + (d.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: d.on ? "⚙️" : "Подключить",
+          el("button", { class: "btn" + (d.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: d.on ? "Настроить" : "Подключить",
             onclick: () => diskSetup(d, fill) })));
       };
       diskRows.add((d) => (row.isConnected ? fill(d) : null));
@@ -211,7 +216,7 @@
     // part: "top" — the version and its buttons (on top when it needs the owner), "extras" — the night switch and the key
     // (under «Подробнее»), "all" — both (under «Подробнее» when nothing waits)
     function updateCard(u, part) {
-      if (part === "extras") return updateExtras(u, el("div", { class: "card" }, el("h3", { text: "⬆️ Обновления сервера" })));
+      if (part === "extras") return updateExtras(u, el("div", { class: "card" }, el("h3", { text: "🌙 Автообновление сервера" })));
       const card = el("div", { class: "card" + (u.new ? " bad" : "") }, el("h3", { text: "⬆️ Версия сервера" }));
       const p = u.progress || {};
       const running = p.state === "running" && Date.now() / 1000 - (p.at || 0) < 3600;
@@ -247,7 +252,7 @@
         } }));
       }
       if (!running) {
-        row.append(el("button", { class: "btn line", text: "🔎 Проверить", onclick: async () => {
+        row.append(el("button", { class: "btn line", text: "🔎 Есть ли новее?", onclick: async () => {
           try {
             const end = await panel({ op: "server_check" }, (t) => toast(t, 30000));
             document.querySelectorAll(".toast").forEach((t) => t.remove());
@@ -264,7 +269,7 @@
     function updateExtras(u, card, keyOnly) {
       // new versions go in by themselves at night (checked after, the old one back if anything is wrong)
       if (!keyOnly) card.append(el("div", { class: "row", style: "margin-top:6px" },
-        el("div", { class: "grow" }, "🌙 Ставить новые версии само ночью",
+        el("div", { class: "grow" }, "🌙 Ставить новые версии сами ночью",
           el("small", { text: u.auto ? "Около 4 ч утра. После установки — проверка; если что-то не так, вернётся прежняя версия."
             : "Выключено: новые версии — только кнопкой «⬆️ Обновить»." })),
         el("button", { class: "btn" + (u.auto ? " line" : ""), style: "flex:none;padding:8px 14px", text: u.auto ? "Выключить" : "Включить",
@@ -361,12 +366,12 @@
         else acts.append(el("div", { class: "status", text: "⏳ Claude сейчас работает в другом разговоре" }));
       } else {
         if (d.can_run) acts.append(el("button", { class: "btn", text: "✅ Выполнить", onclick: runPlan }));
-        if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Откатить", onclick: () => undo(d) }));
+        if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Вернуть как было", onclick: () => undo(d) }));
       }
       if (acts.childNodes.length) scroll.append(acts);
       scroll.append(el("div", { style: "font-size:12px;color:var(--muted);margin:0 4px 12px" },
         "Модели: " + (d.engines.length ? d.engines.join(" → ") : "нет ключей") + " · ",
-        el("a", { href: "#", text: "🔑 Ключ OpenRouter", onclick: (e) => { e.preventDefault(); keySheet(d); } })));
+        el("a", { href: "#", text: "🔑 Запасной ключ OpenRouter", onclick: (e) => { e.preventDefault(); keySheet(d); } })));
       const ta = el("textarea", { rows: 1, placeholder: d.busy ? "Claude работает… можно написать следующее" : "Что проверить или сделать?" });
       ta.value = claude.draft;
       ta.addEventListener("input", () => { claude.draft = ta.value; ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
@@ -418,8 +423,8 @@
       talk({ op: "agent_run", chat: claude.chat }, "✅ Выполнить");
     }
     async function undo(d) {
-      if (!(await confirmBox(`Вернуть файлы сервера, как они были до последнего «Выполнить» (${when(d.undo_ts)})?`, "↩️ Откатить"))) return;
-      talk({ op: "agent_undo", chat: claude.chat }, "↩️ Откатить");
+      if (!(await confirmBox(`Вернуть файлы сервера, как они были до последнего «Выполнить» (${when(d.undo_ts)})?`, "↩️ Вернуть как было"))) return;
+      talk({ op: "agent_undo", chat: claude.chat }, "↩️ Вернуть как было");
     }
     async function stopClaude() {
       try { await panel({ op: "agent_stop" }); } catch (e) { toast(problem(e)); }
@@ -481,7 +486,7 @@
         talk({ op: "agent_ask", chat: "new", text: text.slice(0, 7900) }, text.slice(0, 7900));
       } catch (e) { toast(problem(e)); }
     }
-    const claudeBtn = (text, close) => el("button", { class: "btn line", text: "🛠 Разобрать с Claude",
+    const claudeBtn = (text, close) => !cache.claudeOk ? null : el("button", { class: "btn line", text: "🛠 Разобрать с Claude",
       onclick: () => { if (close) close(); toClaude(typeof text === "function" ? text() : text); } });
     function drawServer(d) {
       const bad = [];
@@ -511,7 +516,7 @@
       scroll.append(bridgesCard(d), diagCard(cl));
       const more = store.get("serverMore", false);
       scroll.append(el("button", { class: "btn line wide", style: "margin:0 0 12px",
-        text: more ? "▲ Скрыть подробности" : cl ? "▼ Подробнее: события, версия, копии" : "▼ Подробнее: память, трафик, журнал, копии",
+        text: more ? "▲ Скрыть подробности" : cl ? "▼ Подробнее: события, хостинг, версия, перезагрузка" : "▼ Подробнее: события, память, трафик, хостинг, перезагрузка",
         onclick: () => { store.set("serverMore", !more); draw(); } }));
       if (!more) return;
       const brOk = d.bridges.length - brBad.length;
@@ -714,7 +719,7 @@
       return card;
     }
     function trafficCard() {
-      const card = el("div", { class: "card" }, el("h3", { text: "📊 Трафик" }), el("div", { class: "status", text: "…" }));
+      const card = el("div", { class: "card" }, el("h3", { text: "📊 Трафик с перезапуска VPN" }), el("div", { class: "status", text: "…" }));
       panel({ op: "traffic" }).then((t) => {
         if (t.t !== "done") return;
         card.lastChild.remove();
@@ -754,14 +759,15 @@
         el("div", { style: "font-size:13px;color:var(--muted);margin:4px 2px 8px", text: !st ? "Автопроверка моста: ещё не было"
           : st.ok ? `Последняя проверка ${when(st.ts)}: ✓ ${st.mbit} Мбит/с` : `Последняя проверка ${when(st.ts)}: ✗ ${st.err}` }),
         el("button", { class: "btn line wide", style: "margin-bottom:8px", text: "✉️ Проверить почту для оповещений", onclick: () => act({ op: "mail_test" }, null, (r) => toast("✉️ Письмо ушло" + (r.to ? " на " + r.to : ""), 5000)) })];
-      return el("div", { class: "card" }, el("h3", { text: "⚙️ Сервер" }), ...checks,
+      return el("div", { class: "card" }, el("h3", { text: "🔧 Действия с сервером" }), ...checks,
         el("button", { class: "btn line wide", text: "💾 Резервная копия сейчас", onclick: async () => {
           if (await confirmBox("Сделать резервную копию сейчас? Через минуту-две она ляжет на Яндекс Диск (папка «Семейный сервер — копии»), а без Диска придёт на почту.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — на Яндекс Диск");
         } }),
         el("button", { class: "btn line wide danger", style: "margin-top:8px", text: "♻️ Перезагрузить сервер", onclick: async () => {
           if (await confirmBox("Перезагрузить сервер? VPN, мосты и помощник пропадут примерно на минуту.", "Перезагрузить")) act({ op: "reboot" }, "♻️ Перезагружаюсь, вернусь через минуту");
         } }),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: d.mail ? "Сбои приходят уведомлением и письмом на почту." : "Почта для оповещений не настроена." }));
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: (d.mail ? "Сбои приходят уведомлением и письмом на почту" : "Сбои приходят уведомлением (почта для оповещений не настроена)")
+          + " и в MAX, если включено: «🤖 Помощник» → «🔔 Тревоги сервера в MAX»." }));
     }
     // the hosting: how many days the balance lasts, and when to pay (the balance is entered after a top-up)
     function drawHosting(h) {
@@ -948,15 +954,16 @@
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
       scroll.append(diskRow(), maxCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
-        el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Ссылка на ИИ-приложение (24 ч)",
+        el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Только приложение помощника — без входа (24 ч)",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
-      const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется приложением" }));
+      const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется помощником" }),
+        el("small", { style: "display:block;color:var(--muted);margin:-4px 0 6px", text: "Это только помощник. VPN выдаётся отдельно — в «🛡 VPN»." }));
       for (const u of d.users) {
         const now = u.seen && Date.now() / 1000 - u.seen < 900;
         list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => person(u.id) },
           el("span", { style: "font-size:20px", text: u.off ? "⏸" : now ? "🟢" : "⚪" }),
           el("div", { class: "grow" }, u.name + (u.id === d.me ? " · вы" : ""),
-            el("small", { text: u.off ? "доступ отключён" : !u.seen ? "ещё не входил(а)" + (u.codes ? " · код отправлен" : "")
+            el("small", { text: u.off ? "доступ отключён" : !u.seen ? "ещё не входил(а)" + (u.codes ? " · код создан — отправьте ссылку из карточки" : "")
               : (now ? "сейчас в приложении" : "был(а) " + ago(u.seen) + " назад") + (u.devices > 1 ? ` · телефонов: ${u.devices}` : "") })),
           u.id === d.me ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delPerson(u); } }),
           "›"));
@@ -990,7 +997,7 @@
       try {
         const end = await panel({ op: "max_code", id: u.id });
         if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
-        if (!end.on) { toast("Сначала подключите бота MAX: «Приложение» → «💬 Помощник в MAX»", 5000); return; }
+        if (!end.on) { toast("Сначала подключите бота MAX: «🤖 Помощник» → «💬 Помощник в MAX»", 5000); return; }
         sheet("💬 MAX — " + u.name, (box) => box.append(
           el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: end.link
             ? "Отправьте приглашение человеку: он откроет ссылку — MAX сам откроет помощника и подключит его. Одноразовое."
@@ -1009,13 +1016,13 @@
             el("small", { text: m.on ? (m.error === "token" ? "⚠️ MAX не принимает токен — подключите заново."
               : `Подключено людей: ${m.people.length}. Код для человека — в его карточке ниже.`)
               : "Родные пишут и говорят с помощником прямо в MAX — работает и при «белых списках»." })),
-          el("button", { class: "btn" + (m.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.on ? "⚙️" : "Подключить", onclick: () => maxSetup(m, fill) })));
+          el("button", { class: "btn" + (m.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.on ? "Настроить" : "Подключить", onclick: () => maxSetup(m, fill) })));
         if (m.on) {  // the server's news to the owner's MAX: problems, fixes, new versions, the hosting's money
           card.append(el("div", { class: "row" },
             el("div", { class: "grow" }, "🔔 Тревоги сервера в MAX",
               el("small", { text: !m.owner_linked ? "Свяжите свой MAX: «💬 Пригласить в MAX» в своей карточке ниже."
                 : m.alerts ? "Сбои, починки, новые версии, оплата хостинга. О VPN в MAX ни слова — только «посмотрите в приложении»."
-                  : "Выключено: всё только здесь, в «Событиях»." })),
+                  : "Выключено: всё только в «🖥 Сервер» → «🔔 События»." })),
             el("button", { class: "btn" + (m.alerts ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.alerts ? "Выключить" : "Включить",
               onclick: async () => {
                 const end = await panel({ op: "max_alerts", on: !m.alerts }).catch(() => null);
@@ -1033,7 +1040,7 @@
           el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Тот же помощник, что в приложении, но в MAX: вопросы, голосовые, фото, "
             + "документы, проверка сообщений на мошенников (вам придёт уведомление), напоминания. Без слов о VPN." }),
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-            el("li", { text: "В MAX для партнёров (нужен подтверждённый профиль ИП или самозанятого) создайте чат-бота." }),
+            el("li", { text: "На платформе «MAX для партнёров» (нужен подтверждённый профиль ИП или самозанятого): «Чат-боты» → создайте бота → «Интеграция» → «Получить токен»." }),
             el("li", { text: "Скопируйте токен бота и вставьте сюда." }),
             el("li", { text: "Людям — «💬 Пригласить в MAX» в их карточке: они откроют ссылку и смогут писать. Или сами: «☰ Ещё» → «💬 Помощник в MAX»." })),
           m.on ? el("div", { style: "margin-bottom:10px", text: `Сейчас: @${m.bot || "бот"}. Подключены: ${m.people.map((p) => p.name).join(", ") || "пока никто"}` }) : "",
@@ -1072,7 +1079,7 @@
       const mine = u.id === d.me;
       const t = u.today || {};
       const lim = () => "";  // no limits in the family app
-      sheet((u.off ? "⏸ " : "🤖 ") + u.name, (box, close) => {
+      sheet((u.off ? "⏸ " : "👤 ") + u.name, (box, close) => {
         const act = (label, fn, cls) => el("button", { class: "btn wide " + (cls || "line"), style: "margin-top:8px", text: label, onclick: async () => { close(); await fn(); } });
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 6px",
           text: (u.off ? "Доступ отключён" : !u.seen ? "Ещё не входил(а)" : "Был(а) " + ago(u.seen) + " назад") + ` · телефонов: ${u.devices}` }),
@@ -1081,7 +1088,7 @@
             () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""),
           act("💬 Пригласить в MAX", () => maxCode(u)));
         if (mine) {
-          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — ссылка выше; если потеряли все телефоны — на экране входа «✉️ Я владелец — прислать код на почту»." }));
+          box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — ссылка выше; если потеряли все телефоны — на экране входа 5 раз нажмите на звёздочку ✦, появится «✉️ Я владелец — прислать код на почту»." }));
           return;
         }
         box.append(act(u.off ? "▶️ Включить доступ" : "⏸ Отключить доступ", () => appOp({ op: "app_set", id: u.id, off: !u.off }, u.off ? "▶️ Доступ включён" : "⏸ Доступ отключён")),
@@ -1122,7 +1129,7 @@
       });
     }
     async function rekey(u) {
-      if (!(await confirmBox(`Новый ключ для «${u.name}»? Старое подключение сразу перестанет работать (например, если телефон потерян или ссылка ушла не тому). Потом отправьте человеку новую ссылку.`, "Сменить ключ"))) return;
+      if (!(await confirmBox(`Сменить подключение для «${u.name}»? Старое подключение сразу перестанет работать (например, если телефон потерян или ссылка ушла не тому). Потом отправьте человеку новую ссылку.`, "Сменить ключ"))) return;
       toast("⏳ Меняю ключ…", 20000);
       try {
         const end = await panel({ op: "rekey", name: u.name });
@@ -1153,12 +1160,20 @@
       }
       sheet("👤 " + u.name + (u.owner ? " 👑" : ""), (box, close) => {
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
-          text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)}`
+          text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)} с перезапуска VPN`
             + (u.until ? ` · ⏰ гость до ${when(u.until)}, потом выключится сам` : "") }));
         const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"], ["vless", "VLESS", "запасной, когда режут UDP"],
           ["tg", "Telegram", "Telegram без VPN: iPhone, компьютер, любой телефон (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
         const chips = el("div", { class: "chips", style: "margin-bottom:10px" });
+        if (u.links.hy2) {
+          // Winger made for this person: the connection is inside, they only press the big button
+          box.append(el("button", { class: "btn wide", text: "📲 Ссылка для человека: Winger уже с VPN (на сутки)",
+            onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); } }),
+            el("small", { style: "display:block;color:var(--muted);margin:6px 0 10px", text: "Человек откроет ссылку, поставит Winger и нажмёт одну кнопку. Там же — Telegram без VPN." }));
+        }
+        const raw = el("details", { style: "margin-bottom:6px" }, el("summary", { style: "cursor:pointer;color:var(--muted);font-size:14px;padding:6px 0",
+          text: "Для других программ (iPhone, v2RayTun, Telegram-прокси) ›" }));
         const pick = (k) => {
           chips.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.k === k[0]));
           const link = u.links[k[0]];
@@ -1176,14 +1191,11 @@
               el("button", { class: "btn line", text: "📋 Копировать", onclick: () => copyText(link) })));
         };
         for (const k of kinds) chips.append(el("button", { class: "chip", "data-k": k[0], text: k[1], onclick: () => pick(k) }));
-        if (kinds.length > 1) box.append(chips);
-        box.append(pane);
+        if (kinds.length > 1) raw.append(chips);
+        raw.append(pane);
+        box.append(u.links.hy2 ? raw : pane);
+        if (!u.links.hy2 && kinds.length > 1) pane.before(chips);
         pick(kinds[0]);
-        if (u.links.hy2) {
-          // Winger made for this person: the connection is inside, they only press the big button
-          box.append(el("button", { class: "btn wide", style: "margin-top:14px", text: "📲 Winger с подключением + Telegram — ссылка (24 ч)",
-            onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); } }));
-        }
         if (!u.owner) {
           const mine = u.bridges || [], has = mine.length > 0;
           const links = mine.map(wingerLink).filter(Boolean);
@@ -1202,7 +1214,7 @@
           }
         }
         box.append(el("div", { class: "big-actions", style: "margin-top:8px" },
-          el("button", { class: "btn line", text: "🔄 Новый ключ", onclick: () => { close(); rekey(u); } }),
+          el("button", { class: "btn line", text: "🔄 Сменить подключение", onclick: () => { close(); rekey(u); } }),
           u.owner ? null : el("button", { class: "btn line", text: u.until ? "⏰ Срок" : "⏰ Сделать гостем", onclick: () => { close(); guestDays(u); } })));
         if (!u.owner) {
           box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));

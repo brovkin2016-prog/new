@@ -1301,7 +1301,7 @@
         el("div", { class: "row" }, el("div", { class: "grow" }, "Вы вошли как", el("small", { text: me.name }))),
         el("div", { class: "row" }, el("div", { class: "grow" }, "Тема"), theme));
       if (Native && Native.version) {
-        appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия", el("small", { text: Native.version() })),
+        appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия приложения", el("small", { text: Native.version() })),
           el("button", { class: "act", text: "Проверить обновление", onclick: () => Native.checkUpdate(true) })));
         const p = Native.netInfo ? Native.netInfo() : "";
         if (p) appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Связь с сервером",
