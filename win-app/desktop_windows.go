@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -101,6 +102,8 @@ func api(path string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r.Body, 1<<20))
 }
 
+var captchaInState = regexp.MustCompile(`"captcha":"(http://127\.0\.0\.1:[0-9]{2,5}/)"`)
+
 // runTray: the icon by the clock — one per person (a second start just leaves).
 func runTray() error {
 	name, _ := windows.UTF16PtrFromString(`Local\WingerTray`)
@@ -117,10 +120,15 @@ func runTray() error {
 		toggle := systray.AddMenuItem("Включить VPN", "")
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Убрать значок", "VPN продолжит работать")
-		on := false
+		on, shown := false, ""
 		go func() {
 			for {
 				b, err := api("state")
+				// VK's «I am not a robot» page, once per page: the person sees it without opening the window
+				if m := captchaInState.FindSubmatch(b); err == nil && m != nil && string(m[1]) != shown {
+					shown = string(m[1])
+					_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", shown).Start()
+				}
 				now := err == nil && strings.Contains(string(b), `"phase":"on"`)
 				busy := err == nil && (strings.Contains(string(b), `"phase":"connecting"`) || strings.Contains(string(b), `"phase":"retrying"`))
 				if now != on || busy {

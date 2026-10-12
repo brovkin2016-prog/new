@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +27,8 @@ type Relay struct {
 
 // StartRelay runs the relay for this bridge; tunnel: "dc" or "video" for WB Stream and Bitrix24.
 func StartRelay(path string, p *Profile, tunnel string, socksPort int, home string, onLost func()) (*Relay, error) {
-	join, _ := json.Marshal(p.JoinParams(tunnel))
+	params, _ := json.Marshal(p.JoinParams(tunnel))
+	join := p.JoinVerb() + string(params)
 	cmd := exec.Command(path, "--mode", p.RelayMode(), "--ws-port", itoa(FreePort()),
 		"--socks-host", "127.0.0.1", "--socks-port", itoa(socksPort))
 	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
@@ -44,7 +46,7 @@ func StartRelay(path string, p *Profile, tunnel string, socksPort int, home stri
 		return nil, err
 	}
 	r := &Relay{cmd: cmd, connected: make(chan struct{}), ended: make(chan struct{})}
-	go r.read(stdout, stdin, string(join), onLost)
+	go r.read(stdout, stdin, join, onLost)
 	go func() {
 		_ = cmd.Wait()
 		close(r.ended)
@@ -72,8 +74,14 @@ func (r *Relay) read(out io.Reader, in io.Writer, join string, onLost func()) {
 			Logf("bridge: %s", st)
 			switch {
 			case st == "READY":
-				_, _ = io.WriteString(in, "JOIN:"+join+"\n")
+				_, _ = io.WriteString(in, join+"\n")
+			case strings.HasPrefix(st, "CAPTCHA:"):
+				// VK wants a person first: the check is a page of the relay's own here; the window and the icon open it
+				if u := strings.TrimSpace(st[8:]); captchaPage.MatchString(u) {
+					SetCaptcha(u)
+				}
 			case st == "TUNNEL_CONNECTED":
+				SetCaptcha("")
 				once.Do(func() { close(r.connected) })
 			case st == "TUNNEL_LOST" || st == "RECONNECTING":
 				if onLost != nil {
@@ -91,6 +99,29 @@ func (r *Relay) read(out io.Reader, in io.Writer, join string, onLost func()) {
 			Logf("relay: %s", line)
 		}
 	}
+}
+
+var (
+	captchaPage = regexp.MustCompile(`^http://127\.0\.0\.1:[0-9]{2,5}/$`)
+	captchaMu   sync.Mutex
+	captchaURL  string
+)
+
+// SetCaptcha: VK's «I am not a robot» page of the bridge program, waiting for the person ("" when none).
+func SetCaptcha(u string) {
+	captchaMu.Lock()
+	defer captchaMu.Unlock()
+	if u != "" && u != captchaURL {
+		Logf("bridge: VK asks to confirm a person (captcha) — the window shows it")
+	}
+	captchaURL = u
+}
+
+// Captcha is the page waiting for the person, or "".
+func Captcha() string {
+	captchaMu.Lock()
+	defer captchaMu.Unlock()
+	return captchaURL
 }
 
 func (r *Relay) setErr(s string) {
@@ -136,6 +167,7 @@ func (r *Relay) Alive() bool {
 
 // Stop ends it.
 func (r *Relay) Stop() {
+	SetCaptcha("")
 	if r != nil && r.cmd.Process != nil {
 		_ = r.cmd.Process.Kill()
 	}

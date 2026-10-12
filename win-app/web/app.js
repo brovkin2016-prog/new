@@ -37,6 +37,15 @@ function draw(s) {
   $("#power").className = "power" + (on ? " on" : wait ? " wait" : "");
   $("#state").textContent = PHASE[st.phase] + (on && active ? (active.bridge ? " · мост " + active.service : " · сервер") : "");
   $("#note").textContent = st.note || (on ? (st.auto ? "Выбрано само: выбранный сервер не отвечает. " : "") + (st.ping ? "Отклик " + st.ping + " мс" : "") : "");
+  // VK wants a person before it lets the bridge in: its check, a page of the bridge program on this computer
+  const cap = /^http:\/\/127\.0\.0\.1:\d{2,5}\/$/.test(s.captcha || "") ? s.captcha : "";
+  let capBox = $("#captcha");
+  if (cap && !capBox) {
+    capBox = el("div", { id: "captcha", class: "card" }, el("b", { text: "VK просит подтвердить, что вы не робот" }),
+      el("small", { text: "Пройдите проверку — после неё мост VK подключится сам." }),
+      el("button", { class: "btn wide", text: "✅ Я не робот — открыть проверку", onclick: () => window.open(cap, "_blank") }));
+    $("#note").after(capBox);
+  } else if (!cap && capBox) capBox.remove();
   const list = $("#conns"); list.innerHTML = "";
   if (!s.conns.length) list.append(el("div", { class: "row" }, el("div", { class: "grow", text: "Пока ни одного — вставьте ссылку из сообщения." })));
   s.conns.forEach((c, i) => {

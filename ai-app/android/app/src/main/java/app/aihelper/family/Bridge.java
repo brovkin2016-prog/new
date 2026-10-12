@@ -58,6 +58,12 @@ final class Bridge {
         act.runOnUiThread(() -> WbLogin.open(act, t -> call(id, t != null, t == null ? "cancel" : t)));
     }
 
+    // the owner's VK account for the bridge over VK calls: signed in once on VK's own page (see VkLogin)
+    @JavascriptInterface
+    public void vkLogin(String id) {
+        act.runOnUiThread(() -> VkLogin.open(act, c -> call(id, c != null, c == null ? "cancel" : c)));
+    }
+
     @JavascriptInterface
     public void hostingBalance(String id) {
         String ua = WebSettings.getDefaultUserAgent(act);

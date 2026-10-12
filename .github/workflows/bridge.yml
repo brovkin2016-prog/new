@@ -1,4 +1,4 @@
-# Builds the family server's bridge programs — the whitelist-bypass creators for Telemost, WB Stream, DION and Bitrix24
+# Builds the family server's bridge programs — the whitelist-bypass creators for Telemost, WB Stream, DION, Bitrix24 and VK
 # (MIT, v0.4.4 source in vpn-app/bridge with our fix: a stray frame no longer looks like a restarted peer) — for Linux,
 # and publishes them as bridge-bins-N with their SHA-256. The server installer takes a pinned one and checks it.
 name: bridge
@@ -29,17 +29,18 @@ jobs:
         working-directory: vpn-app/bridge
         run: |
           set -e
-          go test ./relay/tunnel/ -run '^TestStrayFrameIsNotPeerRestart$' -v | tee /tmp/fix-test.log
+          go test ./relay/tunnel/ -run '^(TestStrayFrameIsNotPeerRestart|TestJoinerAsksCreatorForRate)$' -v | tee /tmp/fix-test.log
           grep -q -- "--- PASS: TestStrayFrameIsNotPeerRestart" /tmp/fix-test.log
+          grep -q -- "--- PASS: TestJoinerAsksCreatorForRate" /tmp/fix-test.log
           mkdir -p /tmp/rel
           for arch in amd64 arm64; do
-            for p in telemost wbstream dion bitrix; do
+            for p in telemost wbstream dion bitrix vk; do
               CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" \
                 -o "/tmp/rel/headless-$p-creator-linux-$arch" "./headless/$p"
             done
           done
           # each one starts and knows the flags the server gives it
-          for p in telemost wbstream dion bitrix; do
+          for p in telemost wbstream dion bitrix vk; do
             out=$("/tmp/rel/headless-$p-creator-linux-amd64" --help 2>&1 || true)
             for f in -cookies -resources -write-file; do printf '%s' "$out" | grep -q -- "$f" || { echo "$p: no $f"; exit 1; }; done
           done
@@ -50,4 +51,4 @@ jobs:
         run: |
           gh release create "bridge-bins-${{ github.run_number }}" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
             --title "Bridge programs ${{ github.run_number }}" \
-            --notes "whitelist-bypass v0.4.4 creators (MIT) with the stray-frame fix, for the family server (pinned by SHA-256 in its installer)."
+            --notes "whitelist-bypass v0.4.4 creators (MIT; Telemost, WB Stream, DION, Bitrix24, VK) with the stray-frame fix, for the family server (pinned by SHA-256 in its installer)."

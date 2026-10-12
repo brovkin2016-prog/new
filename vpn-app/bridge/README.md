@@ -8,7 +8,7 @@ A second change, on the phone's side only: DION's joiner may be given `vp8Fps`/`
 asks the creator to send at that rate (the creator's side has always answered such a request, it was only never
 asked: DION stayed at 24 × 10 packets a second towards the phone); `config_flow_test.go` covers the asking.
 
-`headless/telemost`, `headless/wbstream`, `headless/dion`, `headless/bitrix` are the same version's creators (the
+`headless/telemost`, `headless/wbstream`, `headless/dion`, `headless/bitrix`, `headless/vk` are the same version's creators (the
 server side of each bridge), unchanged; built with the fixed relay they carry the fix too. The `bridge` workflow
 builds them for Linux and publishes them as `bridge-bins-N`; the family server's installer takes a pinned one.
 

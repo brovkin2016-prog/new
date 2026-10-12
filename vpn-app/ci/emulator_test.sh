@@ -358,6 +358,23 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 sleep 3
 echo "bridge DION: relay started with the higher speed to ask for"
 adb shell "am start -n $ACT --es test_remove МостDION" >/dev/null; sleep 1
+
+# VK: the phone gets into the call as a guest by itself (the relay's «AUTH:»), asking the app for VK's addresses; the
+# call is made up here, so VK refuses it later — the point is that everything up to the call works
+step "VK: the relay signs in to the call as a guest by itself and asks for VK's address"
+VK='winger-bridge://vk?link=https%3A%2F%2Fvk.com%2Fcall%2Fjoin%2Fabcdefghij0123456789&mode=dc#МостVK'
+adb logcat -c
+adb shell "am start -n $ACT --es test_bridge '$VK' --ez test_connect true" >/dev/null
+for _ in $(seq 1 40); do adb logcat -d -s AIVPN:V | grep -q "bridge: resolve login.vk" && break; sleep 1; done
+sleep 3
+adb logcat -d -s AIVPN:V | grep -E "bridge|relay" | head -16 | tee "$OUT/bridge-vk.log"
+grep -q "bridge: READY" "$OUT/bridge-vk.log" || fail "the VK relay did not start"
+grep -q "vk-auth: appID=" "$OUT/bridge-vk.log" || fail "the VK relay did not take the call's settings (AUTH:)"
+grep -qE "bridge: resolve login\.vk\.(ru|com) -> [0-9.]+" "$OUT/bridge-vk.log" || fail "the VK relay got no address from the app"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+sleep 3
+echo "bridge VK: relay started, guest sign-in begun, addresses answered"
+adb shell "am start -n $ACT --es test_remove МостVK" >/dev/null; sleep 1
 adb shell am start -n $ACT --es test_remove Запасной >/dev/null; sleep 1
 
 # the release build as the family server makes it: the icon picture swapped, re-aligned, signed; it must install

@@ -39,6 +39,16 @@ func TestBridgeLinks(t *testing.T) {
 		wb.JoinParams("video")["tunnelMode"] != "video" {
 		t.Fatalf("wb %+v", wb)
 	}
+	vk, err := ParseLink("winger-bridge://vk?link=https%3A%2F%2Fvk.com%2Fcall%2Fjoin%2Fabcdefghij0123456789&mode=dc#V")
+	if err != nil || vk.RelayMode() != "vk-headless-joiner" || vk.JoinVerb() != "AUTH:" || vk.Service() != "VK" {
+		t.Fatalf("vk %v %+v", err, vk)
+	}
+	if j := vk.JoinParams(vk.TunnelMode); j["joinLink"] != "https://vk.com/call/join/abcdefghij0123456789" || j["tunnelMode"] != "dc" {
+		t.Fatalf("vk params %v", j)
+	}
+	if _, err := ParseLink("winger-bridge://vk?link=https%3A%2F%2Fevil.com%2Fcall%2Fjoin%2Fabcdefghij0123456789#V"); err == nil {
+		t.Fatal("a VK bridge to another site must not be taken")
+	}
 	dn, _ := ParseLink("winger-bridge://dion?room=dion%3A%2F%2Fslug5678#D")
 	if j := dn.JoinParams("video"); j["roomId"] != "dion://slug5678" || j["vp8Fps"] != nil {
 		t.Fatalf("dion at its own speed %v", j)

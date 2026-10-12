@@ -101,6 +101,7 @@ final class Profile {
      *   winger-bridge://wbstream?room=wbstream%3A%2F%2F…&mode=dc#name      (WB Stream; dc is quicker, video the fallback)
      *   winger-bridge://dion?room=dion%3A%2F%2F…#name
      *   winger-bridge://bitrix?link=https%3A%2F%2F…bitrix24.ru%2Fvideo%2F…&mode=dc#name
+     *   winger-bridge://vk?link=https%3A%2F%2Fvk.com%2Fcall%2Fjoin%2F…&mode=dc#name      (VK: the phone joins as a guest)
      */
     private static Profile parseBridge(String s) {
         try {
@@ -129,6 +130,11 @@ final class Profile {
                     if (join == null || !join.matches("https://[0-9A-Za-z-]{2,63}\\.bitrix24\\.(ru|by|kz|com)/video/[0-9A-Za-z_-]{2,64}")) return null;
                     label = "Мост Битрикс24";
                     break;
+                case "vk":
+                    join = u.getQueryParameter("link");
+                    if (join == null || !join.matches("https://vk\\.(com|ru)/call/join/[0-9A-Za-z_-]{10,200}")) return null;
+                    label = "Мост VK";
+                    break;
                 default:
                     return null;
             }
@@ -150,7 +156,8 @@ final class Profile {
             String mode = u.getQueryParameter("mode");
             // DION by itself sends 24 × 10 packets a second to the phone (~250 KB/s): twice that is asked first, and
             // its own speed again when that does not carry (as WB Stream's and Bitrix24's video after their data channel)
-            if (plat.equals("wbstream") || plat.equals("bitrix") || plat.equals("dion")) p.tunnelMode = "video".equals(mode) ? "video" : "dc";
+            if (plat.equals("wbstream") || plat.equals("bitrix") || plat.equals("dion") || plat.equals("vk"))
+                p.tunnelMode = "video".equals(mode) ? "video" : "dc";
             String frag = u.getFragment();
             p.name = frag != null && !frag.trim().isEmpty() ? frag.trim() : label;
             return p;
@@ -183,9 +190,14 @@ final class Profile {
             if ("dc".equals(tunnel)) j.put("vp8Fps", fps).put("vp8Batch", batch);  // nothing: DION's own speed
         } else {
             j.put("vp8Fps", fps).put("vp8Batch", batch).put("reliable", reliable).put("dualTrack", dualTrack);
-            if (platform.equals("wbstream") || platform.equals("bitrix")) j.put("tunnelMode", tunnel);
+            if (platform.equals("wbstream") || platform.equals("bitrix") || platform.equals("vk")) j.put("tunnelMode", tunnel);
         }
         return j.toString();
+    }
+
+    /** How the relay is given its settings: VK's joiner first gets in as a guest by itself («AUTH:»), the others «JOIN:». */
+    String joinVerb() {
+        return platform.equals("vk") ? "AUTH:" : "JOIN:";
     }
 
     /** The bridge's way in the journal: "dc"/"video", or DION's "fast"/"usual". */

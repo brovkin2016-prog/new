@@ -530,6 +530,8 @@ public final class VpnSvc extends VpnService {
                 return "DION";
             case "bitrix":
                 return "Битрикс24";
+            case "vk":
+                return "VK";
             default:
                 return "звонок Телемоста";
         }
@@ -546,7 +548,7 @@ public final class VpnSvc extends VpnService {
         lastError = null;
         connected = new CountDownLatch(1);
         try {
-            String join = p.joinParams(tunnel);
+            String join = p.joinVerb() + p.joinParams(tunnel);
             ProcessBuilder pb = new ProcessBuilder(getApplicationInfo().nativeLibraryDir + "/librelay.so",
                     "--mode", p.relayMode(), "--ws-port", String.valueOf(freePort()),
                     "--socks-host", "127.0.0.1", "--socks-port", String.valueOf(socksPort))
@@ -637,9 +639,12 @@ public final class VpnSvc extends VpnService {
                     String st = line.substring(7).trim();
                     Diag.i(this, "bridge: " + st);
                     if (st.equals("READY")) {
-                        w.write("JOIN:" + join + "\n");
+                        w.write(join + "\n");
                         w.flush();
+                    } else if (st.startsWith("CAPTCHA:")) {
+                        captcha(st.substring(8).trim());  // VK wants a person: «I am not a robot», shown on this phone
                     } else if (st.equals("TUNNEL_CONNECTED")) {
+                        captchaDone();
                         up.countDown();
                     } else if (st.equals("TUNNEL_LOST") || st.equals("RECONNECTING")) {
                         if (up.getCount() == 0 && mine()) {
@@ -661,6 +666,44 @@ public final class VpnSvc extends VpnService {
         }
         chatter(n, since);
         up.countDown();
+    }
+
+    private static final int CAPTCHA_NOTE = 7002;
+
+    /**
+     * VK lets the bridge into its call as a guest, but now and then asks for «I am not a robot» first. The bridge's
+     * program shows that check on a page of its own on this phone (127.0.0.1): a notice opens it in the browser; once
+     * it is passed the bridge goes on by itself.
+     */
+    private void captcha(String url) {
+        if (!url.matches("http://127\\.0\\.0\\.1:[0-9]{2,5}/")) return;  // only the bridge program's own page
+        Diag.i(this, "bridge: VK asks to confirm a person (captcha), a notice is shown");
+        State.set(State.Phase.CONNECTING, "VK просит подтвердить, что вы не робот: нажмите на уведомление «Мост VK».");
+        update();
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        Notification.Builder b;
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (nm.getNotificationChannel("captcha") == null) {
+                nm.createNotificationChannel(new NotificationChannel("captcha", "Подтверждения для моста", NotificationManager.IMPORTANCE_HIGH));
+            }
+            b = new Notification.Builder(this, "captcha");
+        } else {
+            b = new Notification.Builder(this);
+        }
+        Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent open = PendingIntent.getActivity(this, 8, view, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        nm.notify(CAPTCHA_NOTE, b.setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle("Мост VK: подтвердите, что вы не робот")
+                .setContentText("Нажмите — откроется проверка VK, после неё мост подключится сам")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build());
+    }
+
+    private void captchaDone() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(CAPTCHA_NOTE);
     }
 
     /** The counted connections since the last time, as one line of the journal. */

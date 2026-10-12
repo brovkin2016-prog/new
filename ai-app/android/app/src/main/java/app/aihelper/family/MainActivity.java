@@ -172,6 +172,11 @@ public class MainActivity extends Activity {
             WbLogin.open(this, t -> android.util.Log.i("AIWB", "login done " + (t != null)));
             return;
         }
+        if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_vk", false)) {  // the emulator test only
+            i.removeExtra("test_vk");
+            VkLogin.open(this, c -> android.util.Log.i("AIVK", "login done " + (c != null)));
+            return;
+        }
         if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_install", false)) {  // the emulator test only
             i.removeExtra("test_install");
             Updater.testInstall(this);

@@ -91,6 +91,7 @@ var bridgeRooms = map[string]*regexp.Regexp{
 	"wbstream": regexp.MustCompile(`^wbstream://[0-9A-Za-z_-]{6,64}$`),
 	"dion":     regexp.MustCompile(`^dion://[0-9A-Za-z_-]{4,64}$`),
 	"bitrix":   regexp.MustCompile(`^https://[0-9A-Za-z-]{2,63}\.bitrix24\.(?:ru|by|kz|com)/video/[0-9A-Za-z_-]{2,64}$`),
+	"vk":       regexp.MustCompile(`^https://vk\.(?:com|ru)/call/join/[0-9A-Za-z_-]{10,200}$`),
 }
 
 // parseBridge reads winger-bridge://telemost?link=…&fps=24&batch=45&reliable=1&dual=0#name,
@@ -111,7 +112,7 @@ func parseBridge(s string) (*Profile, error) {
 	p.Platform = strings.ToLower(strings.TrimSuffix(rest, "/"))
 	q := queryOf(query)
 	switch p.Platform {
-	case "telemost", "bitrix":
+	case "telemost", "bitrix", "vk":
 		p.JoinLink = q["link"]
 	case "wbstream", "dion":
 		p.JoinLink = q["room"]
@@ -132,7 +133,7 @@ func parseBridge(s string) (*Profile, error) {
 	p.Batch = number(q["batch"], batch, 1, 200)
 	p.Reliable = q["reliable"] != "0"
 	p.DualTrack = q["dual"] == "1"
-	if p.Platform == "wbstream" || p.Platform == "bitrix" || p.Platform == "dion" { // DION: "dc" its higher speed
+	if p.Platform == "wbstream" || p.Platform == "bitrix" || p.Platform == "dion" || p.Platform == "vk" { // DION: "dc" its higher speed
 		p.TunnelMode = "dc"
 		if q["mode"] == "video" {
 			p.TunnelMode = "video"
@@ -191,6 +192,8 @@ func (p *Profile) Service() string {
 		return "DION"
 	case "bitrix":
 		return "Битрикс24"
+	case "vk":
+		return "VK"
 	default:
 		return "Телемост"
 	}
@@ -217,6 +220,14 @@ func (p *Profile) RelayMode() string {
 	return p.Platform + "-headless-joiner"
 }
 
+// JoinVerb is how the relay is given the settings: VK's joiner first gets into the call as a guest by itself («AUTH:»).
+func (p *Profile) JoinVerb() string {
+	if p.Platform == "vk" {
+		return "AUTH:"
+	}
+	return "JOIN:"
+}
+
 // JoinParams is what the relay is told on «JOIN:» for this service (the call, the name in it, the tunnel's settings).
 func (p *Profile) JoinParams(tunnel string) map[string]any {
 	j := map[string]any{"displayName": "Участник"}
@@ -231,7 +242,7 @@ func (p *Profile) JoinParams(tunnel string) map[string]any {
 		}
 	} else {
 		j["vp8Fps"], j["vp8Batch"], j["reliable"], j["dualTrack"] = p.FPS, p.Batch, p.Reliable, p.DualTrack
-		if p.Platform == "wbstream" || p.Platform == "bitrix" {
+		if p.Platform == "wbstream" || p.Platform == "bitrix" || p.Platform == "vk" {
 			j["tunnelMode"] = tunnel
 		}
 	}

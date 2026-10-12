@@ -74,7 +74,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 				Active: status.Phase != "off" && status.Active == p.Link})
 		}
 		reply(w, map[string]any{"status": status, "conns": conns, "onlyApps": s.OnlyApps, "apps": s.Apps,
-			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo()})
+			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo(), "captcha": Captcha()})
 	})
 	mux.HandleFunc("/api/connect", func(w http.ResponseWriter, r *http.Request) {
 		if err := eng.Connect(); err != nil {

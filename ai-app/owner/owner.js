@@ -348,6 +348,7 @@
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
     const BRIDGES = [
       ["wb", "⚡ WB Stream", "Самый быстрый. Нужен только ваш номер телефона: код придёт по СМС от WB."],
+      ["vk", "VK Звонки", "Нужен ваш аккаунт VK: войдёте один раз по номеру телефона."],
       ["dion", "DION", "Нужна бесплатная учётная запись на dion.vc (почта и пароль)."],
       ["bitrix", "Битрикс24", "Нужен свой бесплатный портал на bitrix24.ru (почта не Gmail)."],
     ];
@@ -375,7 +376,8 @@
       return kind === "tm" ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
         : kind === "wb" ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
         : kind === "dion" ? "winger-bridge://dion?room=" + enc + "#" + name
-        : kind === "bitrix" ? "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name : "";
+        : kind === "bitrix" ? "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
+        : kind === "vk" ? "winger-bridge://vk?link=" + enc + "&mode=dc#" + name : "";
     }
     function bridgeKind(b) {
       const link = b.link || "";
@@ -383,19 +385,21 @@
       if (b.id.startsWith("wb-") && /^wbstream:\/\/[0-9A-Za-z_-]{6,64}$/.test(link)) return "wb";
       if (b.id.startsWith("dion-") && /^dion:\/\/[0-9A-Za-z_-]{4,64}$/.test(link)) return "dion";
       if (b.id.startsWith("bitrix-") && /^https:\/\/[0-9A-Za-z-]{2,63}\.bitrix24\.(ru|by|kz|com)\/video\/[0-9A-Za-z_-]{2,64}$/.test(link)) return "bitrix";
+      if (b.id.startsWith("vk-") && /^https:\/\/vk\.(com|ru)\/call\/join\/[0-9A-Za-z_-]{10,200}$/.test(link)) return "vk";
       return "";
     }
     function bridgeSheet(b) {
       // what this bridge's service needs again when it stops (a new WB sign-in, another password), and Winger's link
       const link = b.link || "", kind = bridgeKind(b), w = wingerLink(b);
       const person = b.label.startsWith("👤");  // a person's own bridge: a copy of the owner's, nothing to sign in to
-      const wb = kind === "wb" && !person, dn = kind === "dion", bx = kind === "bitrix";
+      const wb = kind === "wb" && !person, dn = kind === "dion", bx = kind === "bitrix", vk = kind === "vk" && !person;
       sheet((b.ok ? "🟢 " : "🔴 ") + b.label, (box, close) => {
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: b.ok
           ? "Работает " + dur(b.since) + ". Winger подключается к нему сам, когда сервер напрямую недоступен."
-          : "Сейчас не работает (" + (UNIT[b.state] || b.state) + "). Сначала — перезапуск" + (wb ? "; не помог — войдите в WB заново." : dn || bx ? "; не помог — проверьте почту и пароль." : ".") }),
+          : "Сейчас не работает (" + (UNIT[b.state] || b.state) + "). Сначала — перезапуск" + (wb ? "; не помог — войдите в WB заново." : vk ? "; не помог — войдите в VK заново." : dn || bx ? "; не помог — проверьте почту и пароль." : ".") }),
           el("button", { class: "btn wide", text: "🔄 Перезапустить", onclick: () => { close(); act({ op: "bridge_restart", id: b.id }, "🔄 Перезапускаю мост…"); } }));
         if (wb) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Войти в WB заново", onclick: () => { close(); wbBridge(); } }));
+        if (vk) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Войти в VK заново", onclick: () => { close(); vkBridge(); } }));
         if (dn || bx) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔑 Сменить почту или пароль", onclick: () => { close(); acctBridge(dn ? "dion" : "bitrix"); } }));
         if (w) {
           box.append(el("a", { class: "btn line wide", href: w, style: "text-decoration:none;text-align:center;display:block;margin-top:8px", text: "📲 Добавить в Winger сейчас" }),
@@ -411,7 +415,7 @@
           ? "Обычно хватает одного моста. Ещё один пригодится, если имеющийся медленный или перестал подключаться."
           : "Выберите, через какой сервис поднять мост. Достаточно одного." }));
         for (const [p, name, need] of missing) {
-          box.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => { close(); p === "wb" ? wbBridge() : acctBridge(p); } },
+          box.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => { close(); p === "wb" ? wbBridge() : p === "vk" ? vkBridge() : acctBridge(p); } },
             el("div", { class: "grow" }, el("b", { text: name }), el("small", { text: need })), "›"));
         }
       });
@@ -598,6 +602,48 @@
         if (end.t !== "done") toast("⚠️ " + end.text, 6000);
         else { if (done) done(end); setTimeout(load, 1500); }
       } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
+    }
+    // the bridge over VK calls: sign in to VK once (in the app — or a cookies file in a browser), the server starts a
+    // VK call of its own, Winger gets it by itself and joins it as a guest
+    function vkBridge() {
+      sheet("🌉 Мост через VK Звонки", (box, close) => {
+        const go = async (cookies) => {
+          close();
+          try {
+            const end = await panel({ op: "bridge_vk", cookies }, (t) => toast(t, 150000));
+            document.querySelectorAll(".toast").forEach((t) => t.remove());
+            if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
+            toast("✅ Мост VK работает — Winger возьмёт его сам", 6000);
+            load();
+          } catch (e) { toast(problem(e)); }
+        };
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Мост через видеозвонки VK. "
+          + "Нужен один раз войти в VK — дальше сервер держит звонок сам. Вход хранится только на вашем сервере." }));
+        if (window.AIBridge && window.AIBridge.vkLogin) {
+          box.append(el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
+            el("li", { text: "Нажмите «Войти в VK» — откроется страница VK." }),
+            el("li", { text: "Войдите своим номером телефона и кодом — как обычно в VK." }),
+            el("li", { text: "Нажмите «Готово» вверху. Через 1–2 минуты мост заработает." }),
+            el("li", { text: "Winger получит мост сам. Если VK спросит «я не робот» — придёт уведомление, нажмите его." })),
+          el("button", { class: "btn wide", text: "🔑 Войти в VK", onclick: async () => {
+            const r = await nativeCall("vkLogin");
+            if (!r.ok) { toast("Вход в VK не закончен", 4000); return; }
+            go(r.text);
+          } }));
+        } else {  // a browser: a cookies file of vk.ru ([{name, value}, …]) instead of the sign-in
+          const file = el("input", { type: "file", accept: ".json,application/json", style: "display:none" });
+          file.onchange = async () => {
+            try {
+              const js = JSON.parse(await file.files[0].text());
+              const list = (Array.isArray(js) ? js : js.cookies || []).filter((x) => x && x.name && typeof x.value === "string")
+                .map((x) => ({ name: x.name, value: x.value }));
+              if (!list.some((x) => x.name === "remixsid")) { toast("⚠️ В файле нет входа VK (remixsid)", 6000); return; }
+              go(JSON.stringify(list));
+            } catch (e) { toast("⚠️ Это не файл cookies VK", 5000); }
+          };
+          box.append(file, el("button", { class: "btn wide", text: "📂 Файл cookies VK", onclick: () => file.click() }));
+        }
+      });
     }
     // the quick bridge over WB Stream: sign in to WB once (in the app — or the creator's cookies file in a browser),
     // the server starts the bridge, Winger gets it by itself
