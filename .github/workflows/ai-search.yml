@@ -1,0 +1,21 @@
+name: ai-search
+
+# The AI helper's internet search (ai-app/server/websearch.py): the pages' shapes and the guard against internal
+# addresses offline, then the real search pages from a machine on the open internet, as the family server is.
+on:
+  push:
+    paths: ["ai-app/server/**", ".github/workflows/ai-search.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Search and read pages, no key needed
+        working-directory: ai-app/server
+        run: python3 websearch_test.py --live

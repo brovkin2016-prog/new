@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -50,7 +51,12 @@ func openApp() error {
 	self, _ := os.Executable()
 	if !serviceInstalled() || !strings.EqualFold(filepath.Clean(self), filepath.Clean(installedExe())) && newerThanInstalled(self) {
 		if err := elevate(self, "--install"); err != nil {
-			message("Чтобы Winger мог включать VPN, Windows один раз спросит разрешение. Запустите Winger ещё раз и нажмите «Да».")
+			switch {
+			case errors.Is(err, errDeclined):
+				message("Чтобы Winger мог включать VPN, Windows один раз спросит разрешение. Запустите Winger ещё раз и нажмите «Да».")
+			case !errors.Is(err, errInstallSaid): // the install itself has told what went wrong
+				message("Winger не установился: " + err.Error())
+			}
 			return err
 		}
 	}
@@ -80,17 +86,61 @@ func serviceInstalled() bool {
 	return true
 }
 
-// elevate runs this program with the system's rights (Windows asks the person once) and waits for it.
+// elevate runs this program with the system's rights (Windows asks the person once: «Да») and waits for it — through
+// Windows itself, with no PowerShell in between (antivirus programs dislike a hidden PowerShell from an unknown program).
 func elevate(exe string, arg string) error {
-	ps := fmt.Sprintf("$p = Start-Process -FilePath '%s' -ArgumentList '%s' -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
-		strings.ReplaceAll(exe, "'", "''"), arg)
-	cmd := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps)
-	hideWindow(cmd)
-	if err := cmd.Run(); err != nil {
-		return errDeclined
+	verb, _ := windows.UTF16PtrFromString("runas")
+	file, _ := windows.UTF16PtrFromString(exe)
+	args, _ := windows.UTF16PtrFromString(arg)
+	dir, _ := windows.UTF16PtrFromString(filepath.Dir(exe))
+	info := shellExecuteInfo{fMask: seeMaskNoCloseProcess | seeMaskNoAsync, lpVerb: verb, lpFile: file,
+		lpParameters: args, lpDirectory: dir, nShow: windows.SW_SHOWNORMAL}
+	info.cbSize = uint32(unsafe.Sizeof(info))
+	if r, _, err := procShellExecuteEx.Call(uintptr(unsafe.Pointer(&info))); r == 0 {
+		if errors.Is(err, windows.ERROR_CANCELLED) {
+			return errDeclined
+		}
+		return fmt.Errorf("Windows не дал запустить установку (%v)", err)
+	}
+	if info.hProcess == 0 {
+		return nil
+	}
+	defer windows.CloseHandle(info.hProcess)
+	_, _ = windows.WaitForSingleObject(info.hProcess, windows.INFINITE)
+	var code uint32
+	if err := windows.GetExitCodeProcess(info.hProcess, &code); err == nil && code != 0 {
+		return errInstallSaid
 	}
 	return nil
 }
+
+var errInstallSaid = errors.New("установка не удалась")
+
+const (
+	seeMaskNoCloseProcess = 0x00000040
+	seeMaskNoAsync        = 0x00000100
+)
+
+// shellExecuteInfo is Windows' SHELLEXECUTEINFOW.
+type shellExecuteInfo struct {
+	cbSize         uint32
+	fMask          uint32
+	hwnd           windows.Handle
+	lpVerb         *uint16
+	lpFile         *uint16
+	lpParameters   *uint16
+	lpDirectory    *uint16
+	nShow          int32
+	hInstApp       windows.Handle
+	lpIDList       uintptr
+	lpClass        *uint16
+	hkeyClass      windows.Handle
+	dwHotKey       uint32
+	hIconOrMonitor windows.Handle
+	hProcess       windows.Handle
+}
+
+var procShellExecuteEx = windows.NewLazySystemDLL("shell32.dll").NewProc("ShellExecuteExW")
 
 func install() error {
 	self, err := os.Executable()

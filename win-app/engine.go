@@ -194,7 +194,11 @@ func (e *Engine) run(g int) {
 			e.tunnel = "video" // the data channel does not carry here: the call's video does, a little slower
 			e.mu.Unlock()
 			fails = 0
-			Logf("bridge: the data channel does not carry, trying the video")
+			if p.Platform == "dion" {
+				Logf("bridge: DION does not carry at the higher speed, back to its usual one")
+			} else {
+				Logf("bridge: the data channel does not carry, trying the video")
+			}
 			continue
 		}
 		if fails >= 2 {

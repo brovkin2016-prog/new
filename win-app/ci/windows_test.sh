@@ -9,7 +9,7 @@ mkdir -p "$OUT"
 step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }
 # a log's end as a note in the run's summary (readable from outside even when the release with the logs is not made)
 note() { [ -s "$1" ] && echo "::warning title=$(basename "$1")::$(tail -c 2500 "$1" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; }
-fail() { echo "FAIL: $*"; for f in "$OUT"/network.txt "$OUT"/selftest*.log "$OUT"/hysteria.log "$OUT"/bridge.log "$OUT"/service.txt "$OUT"/service-journal.log; do note "$f"; done
+fail() { echo "FAIL: $*"; for f in "$OUT"/network.txt "$OUT"/double-click.txt "$OUT"/selftest*.log "$OUT"/hysteria.log "$OUT"/bridge.log "$OUT"/service.txt "$OUT"/service-journal.log; do note "$f"; done
   echo "::error::$*"; exit 1; }
 CURL=C:/Windows/System32/curl.exe  # handed to Winger too, so a Windows path; Windows' own curl: just another program, not Winger
 export WINGER_QUIET=1
@@ -43,6 +43,19 @@ for hp in "8.8.8.8 853" "1.1.1.1 443" "1.1.1.1 53"; do  # what this machine's ow
 done
 cat "$OUT/network.txt"
 LINK="hysteria2://family:test-pass-123@$IP:4443/?sni=vpn.test.local&insecure=1#CI"
+
+step "Windows' own antivirus looks at Winger (an unknown program may be taken for a threat)"
+MP="/c/Program Files/Windows Defender/MpCmdRun.exe"
+if [ -f "$MP" ]; then
+  timeout 300 "$MP" -SignatureUpdate > "$OUT/defender.txt" 2>&1
+  for f in winger.exe bin/winger-relay.exe; do
+    timeout 300 "$MP" -Scan -ScanType 3 -File "$(cygpath -w "$PWD/$f")" -DisableRemediation >> "$OUT/defender.txt" 2>&1
+    echo "$f: Defender's answer $?" >> "$OUT/defender.txt"
+  done
+else
+  echo "no Defender on this machine" > "$OUT/defender.txt"
+fi
+grep -E "answer|found|Threat|no Defender" "$OUT/defender.txt"; note "$OUT/defender.txt"
 
 step "the virtual interface: another program's page goes through the server, by its name"
 ./winger-console.exe --selftest "$LINK" -- "$CURL" -s -o NUL -w "%{http_code}" --max-time 30 https://www.example.com/ > "$OUT/selftest.log" 2>&1
@@ -108,4 +121,20 @@ cp /c/ProgramData/Winger/journal.log "$OUT/service-journal.log" 2>/dev/null
 sleep 5
 sc query Winger >/dev/null 2>&1 && fail "the service is still there after removing"
 echo "service ✓"
+
+step "a double-click, as a person does it: Winger installs itself, then its icon and its window come up"
+sleep 3  # the removed one's own clean-up is finished
+timeout 240 ./winger.exe; echo "double-click: Winger ended with $?"
+cat > procs.ps1 <<'EOT'
+Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'winger.exe','msedge.exe' } | ForEach-Object { $_.CommandLine }
+EOT
+P=$(powershell -NoProfile -ExecutionPolicy Bypass -File procs.ps1 | tr -d '\r')
+echo "$P" | grep -i winger | head -5 > "$OUT/double-click.txt"
+sc query Winger | tee -a "$OUT/double-click.txt" | grep -q RUNNING || fail "after a double-click the service does not run"
+echo "$P" | grep -q -- "--tray" || fail "after a double-click there is no icon by the clock"
+echo "$P" | grep -q -- "--app=http://127.0.0.1:47710/?t=" || fail "after a double-click Winger's window did not open"
+taskkill /im msedge.exe /f >/dev/null 2>&1
+"/c/Program Files/Winger/winger.exe" --uninstall
+sleep 5
+echo "double-click ✓"
 step "done"

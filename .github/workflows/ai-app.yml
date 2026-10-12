@@ -5,7 +5,7 @@ name: ai-app
 
 on:
   push:
-    paths: ["ai-app/**", ".github/workflows/ai-app.yml"]
+    paths: ["ai-app/**", "!ai-app/server/**", ".github/workflows/ai-app.yml"]  # the server's part has its own check
   workflow_dispatch:
 
 permissions:

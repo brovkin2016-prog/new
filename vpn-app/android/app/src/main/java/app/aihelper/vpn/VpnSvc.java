@@ -602,10 +602,24 @@ public final class VpnSvc extends VpnService {
         }
     }
 
+    /** The relay's line for each connection through the bridge: counted, not written one by one (tens a second would push
+     *  the bridges' own story — which one was tried, why it failed — out of the journal). */
+    private static final java.util.regex.Pattern CHATTER = java.util.regex.Pattern.compile("relay(\\[\\w+\\])?: (SOCKS |drop msgType)");
+
     private void readBridge(Process proc, CountDownLatch up, String join) {
+        int[] n = new int[3];  // connections asked for, opened, given no answer by the far side
+        long[] since = {SystemClock.elapsedRealtime()};
         try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
              Writer w = new OutputStreamWriter(proc.getOutputStream(), StandardCharsets.UTF_8)) {
             for (String line; (line = r.readLine()) != null; ) {
+                if (CHATTER.matcher(line).find()) {
+                    if (line.contains(" TIMEOUT")) n[2]++;
+                    else if (line.contains("SOCKS CONNECTED")) n[1]++;
+                    else if (line.contains("SOCKS CONNECT ")) n[0]++;
+                    if (SystemClock.elapsedRealtime() - since[0] >= 20_000) chatter(n, since);
+                    continue;
+                }
+                chatter(n, since);
                 if (line.startsWith("RESOLVE:")) {
                     String name = line.substring(8).trim(), ip = "";
                     try {
@@ -635,7 +649,7 @@ public final class VpnSvc extends VpnService {
                     } else if (st.startsWith("ERROR:")) {
                         lastError = st.toLowerCase().contains("not found") || st.contains("404")
                                 ? "Звонок моста не найден: попросите на сервере новую ссылку моста."
-                                : "Мост не подключился к звонку Телемоста.";
+                                : "Мост не подключился к звонку (" + service(profile) + ").";
                         proc.destroy();  // a new try from the start
                     }
                 } else {
@@ -645,7 +659,18 @@ public final class VpnSvc extends VpnService {
         } catch (Exception ignored) {
             // the program ended
         }
+        chatter(n, since);
         up.countDown();
+    }
+
+    /** The counted connections since the last time, as one line of the journal. */
+    private void chatter(int[] n, long[] since) {
+        if (n[0] + n[1] + n[2] > 0) {
+            Diag.i(this, "relay: connections asked for " + n[0] + ", opened " + n[1] + ", no answer from the far side " + n[2]
+                    + " (" + (SystemClock.elapsedRealtime() - since[0]) / 1000 + " s)");
+        }
+        n[0] = n[1] = n[2] = 0;
+        since[0] = SystemClock.elapsedRealtime();
     }
 
     private void read(Process proc, CountDownLatch up) {

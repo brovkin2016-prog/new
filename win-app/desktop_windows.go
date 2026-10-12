@@ -44,11 +44,15 @@ func uiAnswers() bool {
 	return true
 }
 
-// openWindow: Winger's window — Edge as an app (no address bar), with a profile of its own.
+// openWindow: Winger's window — Edge as an app (no address bar), with a profile of its own; the usual browser when
+// there is no Edge. The first start of the service takes a while (the antivirus looks at its new files): waited for.
 func openWindow() error {
+	for i := 0; i < 180 && !uiAnswers(); i++ {
+		time.Sleep(500 * time.Millisecond)
+	}
 	t := token()
 	if t == "" {
-		message("Служба Winger не запустилась. Перезагрузите компьютер или установите Winger заново.")
+		message("Служба Winger не отвечает. Перезагрузите компьютер; не поможет — установите Winger заново.")
 		return errStr("нет ключа окна")
 	}
 	url := uiURL() + "/?t=" + t
@@ -57,11 +61,17 @@ func openWindow() error {
 		os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
 		os.Getenv("LOCALAPPDATA") + `\Microsoft\Edge\Application\msedge.exe`} {
 		if _, err := os.Stat(p); err == nil {
-			return exec.Command(p, "--app="+url, "--window-size=470,900", "--user-data-dir="+profile,
-				"--no-first-run", "--no-default-browser-check", "--disable-features=Translate").Start()
+			if exec.Command(p, "--app="+url, "--window-size=470,900", "--user-data-dir="+profile,
+				"--no-first-run", "--no-default-browser-check", "--disable-features=Translate").Start() == nil {
+				return nil
+			}
 		}
 	}
-	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	if err := exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start(); err != nil {
+		message("Не открылось окно Winger: " + err.Error())
+		return err
+	}
+	return nil
 }
 
 func startTray() {

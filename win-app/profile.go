@@ -122,14 +122,17 @@ func parseBridge(s string) (*Profile, error) {
 		return nil, errors.New("в ссылке моста нет звонка")
 	}
 	batch := 30
-	if p.Platform == "telemost" {
+	switch p.Platform {
+	case "telemost":
 		batch = 45
+	case "dion": // by itself 24 × 10 packets a second come from DION's server side: twice that is asked first
+		batch = 20
 	}
 	p.FPS = number(q["fps"], 24, 1, 60)
 	p.Batch = number(q["batch"], batch, 1, 200)
 	p.Reliable = q["reliable"] != "0"
 	p.DualTrack = q["dual"] == "1"
-	if p.Platform == "wbstream" || p.Platform == "bitrix" {
+	if p.Platform == "wbstream" || p.Platform == "bitrix" || p.Platform == "dion" { // DION: "dc" its higher speed
 		p.TunnelMode = "dc"
 		if q["mode"] == "video" {
 			p.TunnelMode = "video"
@@ -222,7 +225,11 @@ func (p *Profile) JoinParams(tunnel string) map[string]any {
 	} else {
 		j["joinLink"] = p.JoinLink
 	}
-	if p.Platform != "dion" {
+	if p.Platform == "dion" {
+		if tunnel == "dc" { // otherwise nothing: DION's own speed
+			j["vp8Fps"], j["vp8Batch"] = p.FPS, p.Batch
+		}
+	} else {
 		j["vp8Fps"], j["vp8Batch"], j["reliable"], j["dualTrack"] = p.FPS, p.Batch, p.Reliable, p.DualTrack
 		if p.Platform == "wbstream" || p.Platform == "bitrix" {
 			j["tunnelMode"] = tunnel

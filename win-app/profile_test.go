@@ -40,8 +40,12 @@ func TestBridgeLinks(t *testing.T) {
 		t.Fatalf("wb %+v", wb)
 	}
 	dn, _ := ParseLink("winger-bridge://dion?room=dion%3A%2F%2Fslug5678#D")
-	if j := dn.JoinParams(""); j["roomId"] != "dion://slug5678" || j["vp8Fps"] != nil {
-		t.Fatalf("dion %v", j)
+	if j := dn.JoinParams("video"); j["roomId"] != "dion://slug5678" || j["vp8Fps"] != nil {
+		t.Fatalf("dion at its own speed %v", j)
+	}
+	// first twice DION's own 24 × 10 is asked of its server side
+	if j := dn.JoinParams(dn.TunnelMode); dn.TunnelMode != "dc" || j["vp8Fps"] != 24 || j["vp8Batch"] != 20 {
+		t.Fatalf("dion at the higher speed %s %v", dn.TunnelMode, j)
 	}
 	if _, err := ParseLink("winger-bridge://telemost?link=https%3A%2F%2Fevil.example%2Fj%2F123456"); err == nil {
 		t.Fatal("a call that is not Telemost's was taken")
