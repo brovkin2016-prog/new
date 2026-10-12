@@ -296,7 +296,7 @@
     const html = (t) => (A.md ? A.md(t) : String(t || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).replace(/\n/g, "<br>"));
     const stepLine = (icon, what) => el("div", { style: "font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0;color:var(--muted)",
       text: icon + " " + what });
-    function claudeMsg(m) {
+    function claudeMsg(m, asked) {
       const wrap = el("div", { class: "msg " + (m.role === "me" ? "me" : "ai") });
       const b = el("div", { class: "bubble" + (m.err ? " err" : "") });
       if (m.role === "me") b.textContent = m.text; else b.innerHTML = html(m.text);
@@ -312,6 +312,13 @@
         wrap.append(det);
       }
       if (m.note) wrap.append(el("div", { style: "font-size:13px;margin:4px 4px 0;color:" + (m.note.startsWith("↩️") ? "#b45309" : "var(--muted)"), text: m.note }));
+      if (m.role !== "me" && m.text) {
+        // the answer for the project's developer (the Claude chat that makes new versions): question, answer, files in one copy
+        const forDev = () => ["Из «🛠 Claude» на сервере.", asked ? "Вопрос: " + asked : "", "Ответ:\n" + m.text,
+          m.files && m.files.length ? "Изменены файлы: " + m.files.join(", ") : "", m.note || ""].filter(Boolean).join("\n\n");
+        wrap.append(el("div", { style: "margin:4px 4px 0" }, el("button", { class: "hint", text: "📋 Для разработчика",
+          onclick: () => { copyText(forDev()); toast("✅ Скопировано — вставьте в чат с разработчиком", 5000); } })));
+      }
       return wrap;
     }
     function liveBubble() {
@@ -358,7 +365,8 @@
           el("button", { class: "btn soft", text: "➕ Новый", onclick: (e) => { e.stopPropagation(); newChat(); } }))));
       const box = claude.box = el("div", { class: "msgs", style: "padding:4px 2px 12px" });
       if (!d.history.length) box.append(claudeIntro());
-      for (const m of d.history) box.append(claudeMsg(m));
+      let asked = "";
+      for (const m of d.history) { box.append(claudeMsg(m, asked)); if (m.role === "me") asked = m.text; }
       scroll.append(box);
       const acts = el("div", { class: "big-actions", style: "margin:0 0 10px" });
       if (d.busy) {
