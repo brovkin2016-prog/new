@@ -992,9 +992,12 @@
         if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
         if (!end.on) { toast("Сначала подключите бота MAX: «Приложение» → «💬 Помощник в MAX»", 5000); return; }
         sheet("💬 MAX — " + u.name, (box) => box.append(
-          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Отправьте это сообщение человеку как удобно. Код одноразовый." }),
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: end.link
+            ? "Отправьте приглашение человеку: он откроет ссылку — MAX сам откроет помощника и подключит его. Одноразовое."
+            : "Отправьте это сообщение человеку как удобно. Код одноразовый." }),
           el("div", { style: "font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px;user-select:all", text: end.text }),
-          el("button", { class: "btn wide", text: "📋 Копировать сообщение", onclick: () => { copyText(end.text); toast("✅ Скопировано — отправьте как удобно"); } })));
+          el("button", { class: "btn wide", text: "📤 Отправить приглашение", onclick: () => (navigator.share ? navigator.share({ text: end.text }).catch(() => {}) : (copyText(end.text), toast("✅ Скопировано — отправьте как удобно"))) }),
+          el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Копировать", onclick: () => { copyText(end.text); toast("✅ Скопировано — отправьте как удобно"); } })));
       } catch (e) { toast(problem(e)); }
     }
     function maxCard() {
@@ -1010,7 +1013,7 @@
         if (m.on) {  // the server's news to the owner's MAX: problems, fixes, new versions, the hosting's money
           card.append(el("div", { class: "row" },
             el("div", { class: "grow" }, "🔔 Тревоги сервера в MAX",
-              el("small", { text: !m.owner_linked ? "Свяжите свой MAX: «💬 Код для помощника в MAX» в своей карточке ниже."
+              el("small", { text: !m.owner_linked ? "Свяжите свой MAX: «💬 Пригласить в MAX» в своей карточке ниже."
                 : m.alerts ? "Сбои, починки, новые версии, оплата хостинга. О VPN в MAX ни слова — только «посмотрите в приложении»."
                   : "Выключено: всё только здесь, в «Событиях»." })),
             el("button", { class: "btn" + (m.alerts ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.alerts ? "Выключить" : "Включить",
@@ -1032,7 +1035,7 @@
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
             el("li", { text: "В MAX для партнёров (нужен подтверждённый профиль ИП или самозанятого) создайте чат-бота." }),
             el("li", { text: "Скопируйте токен бота и вставьте сюда." }),
-            el("li", { text: "Людям — «💬 Код для помощника в MAX» в их карточке: они отправят код боту и смогут писать." })),
+            el("li", { text: "Людям — «💬 Пригласить в MAX» в их карточке: они откроют ссылку и смогут писать. Или сами: «☰ Ещё» → «💬 Помощник в MAX»." })),
           m.on ? el("div", { style: "margin-bottom:10px", text: `Сейчас: @${m.bot || "бот"}. Подключены: ${m.people.map((p) => p.name).join(", ") || "пока никто"}` }) : "",
           inp,
           el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
@@ -1076,7 +1079,7 @@
           el("div", { style: "font-size:14px;margin-bottom:6px", text: `Сегодня: вопросов ${t.text || 0}${lim("text")}, картинок ${t.draw || 0}${lim("draw")}, фото ${t.photo || 0}${lim("photo")}` }),
           act(mine ? "🔗 Ссылка: приложение + код для второго телефона (24 ч)" : "🔗 Ссылка: приложение + код входа (24 ч)",
             () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""),
-          act("💬 Код для помощника в MAX", () => maxCode(u)));
+          act("💬 Пригласить в MAX", () => maxCode(u)));
         if (mine) {
           box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — ссылка выше; если потеряли все телефоны — на экране входа «✉️ Я владелец — прислать код на почту»." }));
           return;
