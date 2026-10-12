@@ -24,7 +24,13 @@ func ReadStdinLine() (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
+// one lookup at a time: the app answers RESOLVE lines in order, so a question and its answer must not interleave
+// with another lookup's (two at once could each take the other's address)
+var resolveMu sync.Mutex
+
 func RequestResolve(hostname string) (string, error) {
+	resolveMu.Lock()
+	defer resolveMu.Unlock()
 	stdinMu.Lock()
 	fmt.Printf("RESOLVE:%s\n", hostname)
 	stdinMu.Unlock()

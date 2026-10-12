@@ -43,9 +43,10 @@ function draw(s) {
   if (cap && !capBox) {
     capBox = el("div", { id: "captcha", class: "card" }, el("b", { text: "VK просит подтвердить, что вы не робот" }),
       el("small", { text: "Пройдите проверку — после неё мост VK подключится сам." }),
-      el("button", { class: "btn wide", text: "✅ Я не робот — открыть проверку", onclick: () => window.open(cap, "_blank") }));
+      el("button", { class: "btn wide", text: "✅ Я не робот — открыть проверку", onclick: () => window.open(capBox.dataset.url, "_blank") }));
     $("#note").after(capBox);
   } else if (!cap && capBox) capBox.remove();
+  if (cap) capBox.dataset.url = cap;  // a new check (the bridge started again) has its own page
   const list = $("#conns"); list.innerHTML = "";
   if (!s.conns.length) list.append(el("div", { class: "row" }, el("div", { class: "grow", text: "Пока ни одного — вставьте ссылку из сообщения." })));
   s.conns.forEach((c, i) => {

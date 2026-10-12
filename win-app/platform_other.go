@@ -24,6 +24,11 @@ func dataDir() string {
 
 func hideWindow(*exec.Cmd) {}
 
+// ownChild: on Windows the helpers end with this program; here the tests end them.
+func ownChild(*os.Process) {}
+
+func endLeftRelays() {}
+
 func ownNames() []string { return []string{"winger", "winger-relay"} }
 
 // relayPath: the bridge's program (the tests give it).

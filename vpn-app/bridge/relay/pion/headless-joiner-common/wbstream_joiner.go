@@ -56,6 +56,9 @@ func (j *WBStreamHeadlessJoiner) RunWithParams(jsonParams string) {
 		j.Status.EmitStatusError("bad params: " + err.Error())
 		return
 	}
+	// the room as the creator knows it: a wbstream://<id> link or a page address becomes the bare id, which is also
+	// where the tunnel's key comes from on the creator's side (a key from the whole link never matched it)
+	params.RoomID = wbstream.ParseRoomID(params.RoomID)
 	if params.RoomID == "" {
 		j.logFn("wbstream-joiner: missing roomId")
 		j.Status.EmitStatusError("missing roomId")

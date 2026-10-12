@@ -22,11 +22,12 @@ type Relay struct {
 	ended     chan struct{}
 	mu        sync.Mutex
 	err       string
-	lost      bool
+	captchaAt time.Time // when VK last asked for a person
 }
 
-// StartRelay runs the relay for this bridge; tunnel: "dc" or "video" for WB Stream and Bitrix24.
-func StartRelay(path string, p *Profile, tunnel string, socksPort int, home string, onLost func()) (*Relay, error) {
+// StartRelay runs the relay for this bridge; tunnel: "dc" or "video" for WB Stream and Bitrix24. onLink: the call lost
+// for a while (false) or back (true).
+func StartRelay(path string, p *Profile, tunnel string, socksPort int, home string, onLink func(up bool)) (*Relay, error) {
 	params, _ := json.Marshal(p.JoinParams(tunnel))
 	join := p.JoinVerb() + string(params)
 	cmd := exec.Command(path, "--mode", p.RelayMode(), "--ws-port", itoa(FreePort()),
@@ -46,20 +47,46 @@ func StartRelay(path string, p *Profile, tunnel string, socksPort int, home stri
 		return nil, err
 	}
 	r := &Relay{cmd: cmd, connected: make(chan struct{}), ended: make(chan struct{})}
-	go r.read(stdout, stdin, join, onLost)
+	ownChild(cmd.Process)
+	go r.read(stdout, stdin, join, onLink)
 	go func() {
 		_ = cmd.Wait()
+		setCaptcha(r, "")
 		close(r.ended)
 	}()
 	return r, nil
 }
 
-func (r *Relay) read(out io.Reader, in io.Writer, join string, onLost func()) {
+// socksChatter: a line per connection of every program — counted, not written, so the journal keeps what matters
+var socksChatter = regexp.MustCompile(`relay: SOCKS (CONNECT|CONNECTED|UDP|\d+ )`)
+var socksFailed = regexp.MustCompile(`relay: SOCKS CONNECT \d+ (failed|TIMEOUT)`)
+
+func (r *Relay) read(out io.Reader, in io.Writer, join string, onLink func(up bool)) {
 	sc := bufio.NewScanner(out)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	once := sync.Once{}
+	once, inCall := sync.Once{}, false
+	conns, failed, since := 0, 0, time.Now()
+	tell := func() {
+		if conns > 0 {
+			Logf("bridge: %d connections through it, %d did not open (%d min)", conns, failed, max(1, int(time.Since(since).Minutes()+0.5)))
+		}
+		conns, failed, since = 0, 0, time.Now()
+	}
+	defer tell()
 	for sc.Scan() {
 		line := sc.Text()
+		if socksChatter.MatchString(line) {
+			if strings.Contains(line, "SOCKS CONNECT ") && strings.Contains(line, " -> ") {
+				conns++
+			}
+			if socksFailed.MatchString(line) {
+				failed++
+			}
+			if time.Since(since) >= 5*time.Minute {
+				tell()
+			}
+			continue
+		}
 		switch {
 		case strings.HasPrefix(line, "RESOLVE:"):
 			name := strings.TrimSpace(line[8:])
@@ -78,14 +105,24 @@ func (r *Relay) read(out io.Reader, in io.Writer, join string, onLost func()) {
 			case strings.HasPrefix(st, "CAPTCHA:"):
 				// VK wants a person first: the check is a page of the relay's own here; the window and the icon open it
 				if u := strings.TrimSpace(st[8:]); captchaPage.MatchString(u) {
-					SetCaptcha(u)
+					r.mu.Lock()
+					r.captchaAt = time.Now()
+					r.mu.Unlock()
+					setCaptcha(r, u)
 				}
 			case st == "TUNNEL_CONNECTED":
-				SetCaptcha("")
+				setCaptcha(r, "")
+				r.mu.Lock()
+				r.captchaAt = time.Time{}
+				r.mu.Unlock()
 				once.Do(func() { close(r.connected) })
+				if inCall && onLink != nil {
+					onLink(true)
+				}
+				inCall = true
 			case st == "TUNNEL_LOST" || st == "RECONNECTING":
-				if onLost != nil {
-					onLost()
+				if onLink != nil {
+					onLink(false)
 				}
 			case strings.HasPrefix(st, "ERROR:"):
 				if strings.Contains(strings.ToLower(st), "not found") || strings.Contains(st, "404") {
@@ -105,16 +142,24 @@ var (
 	captchaPage = regexp.MustCompile(`^http://127\.0\.0\.1:[0-9]{2,5}/$`)
 	captchaMu   sync.Mutex
 	captchaURL  string
+	captchaBy   *Relay
 )
 
-// SetCaptcha: VK's «I am not a robot» page of the bridge program, waiting for the person ("" when none).
-func SetCaptcha(u string) {
+// setCaptcha: VK's «I am not a robot» page of this bridge program, waiting for the person ("": none any more — only
+// its own page is taken away, not one a newer bridge program shows).
+func setCaptcha(r *Relay, u string) {
 	captchaMu.Lock()
 	defer captchaMu.Unlock()
-	if u != "" && u != captchaURL {
+	if u == "" {
+		if captchaBy == r {
+			captchaURL, captchaBy = "", nil
+		}
+		return
+	}
+	if u != captchaURL {
 		Logf("bridge: VK asks to confirm a person (captcha) — the window shows it")
 	}
-	captchaURL = u
+	captchaURL, captchaBy = u, r
 }
 
 // Captcha is the page waiting for the person, or "".
@@ -137,21 +182,41 @@ func (r *Relay) Err() string {
 	return r.err
 }
 
-// Wait: in the call (nil), or why not.
+// captchaTime: how long the person has for VK's check once it is shown.
+const captchaTime = 5 * time.Minute
+
+// Wait: in the call (nil), or why not. While VK's check waits for the person, the wait is longer.
 func (r *Relay) Wait(timeout time.Duration) error {
-	select {
-	case <-r.connected:
-		return nil
-	case <-r.ended:
-		if e := r.Err(); e != "" {
-			return errors.New(e)
+	end := time.Now().Add(timeout)
+	for {
+		r.mu.Lock()
+		if t := r.captchaAt.Add(captchaTime); !r.captchaAt.IsZero() && t.After(end) {
+			end = t
 		}
-		return errors.New("Мост не поднялся.")
-	case <-time.After(timeout):
-		if e := r.Err(); e != "" {
-			return errors.New(e)
+		r.mu.Unlock()
+		left := time.Until(end)
+		if left <= 0 {
+			if e := r.Err(); e != "" {
+				return errors.New(e)
+			}
+			r.mu.Lock()
+			asked := !r.captchaAt.IsZero()
+			r.mu.Unlock()
+			if asked {
+				return errors.New("VK ждал проверку «я не робот», её не прошли — пробую снова.")
+			}
+			return errors.New("Мост не поднялся: звонок не отвечает.")
 		}
-		return errors.New("Мост не поднялся: звонок не отвечает.")
+		select {
+		case <-r.connected:
+			return nil
+		case <-r.ended:
+			if e := r.Err(); e != "" {
+				return errors.New(e)
+			}
+			return errors.New("Мост не поднялся.")
+		case <-time.After(min(left, time.Second)):
+		}
 	}
 }
 
@@ -167,8 +232,11 @@ func (r *Relay) Alive() bool {
 
 // Stop ends it.
 func (r *Relay) Stop() {
-	SetCaptcha("")
-	if r != nil && r.cmd.Process != nil {
+	if r == nil {
+		return
+	}
+	setCaptcha(r, "")
+	if r.cmd.Process != nil {
 		_ = r.cmd.Process.Kill()
 	}
 }

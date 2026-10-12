@@ -12,39 +12,88 @@ import (
 )
 
 // direct is how this program reaches the internet by itself: names asked straight from a public DNS (the computer's
-// own lookups go into the VPN when it is on, and get made-up addresses there).
-var directResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-	var d net.Dialer
-	for _, server := range []string{"77.88.8.8:53", "8.8.8.8:53", "1.1.1.1:53"} {
-		if c, err := d.DialContext(ctx, "udp", server); err == nil {
+// own lookups go into the VPN when it is on, and get made-up addresses there) — the next one when one does not answer.
+var dnsServers = []string{"77.88.8.8:53", "8.8.8.8:53", "1.1.1.1:53"}
+
+func resolverVia(server string) *net.Resolver {
+	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, server)
+	}}
+}
+
+var directResolvers = func() (rs []*net.Resolver) {
+	for _, s := range dnsServers {
+		rs = append(rs, resolverVia(s))
+	}
+	return
+}()
+
+// lookup: the name's addresses (IPv4 first) from the first public DNS that answers.
+func lookup(ctx context.Context, name string) ([]net.IP, error) {
+	if ip := net.ParseIP(name); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	err := errors.New("нет DNS")
+	for _, r := range directResolvers {
+		c, cancel := context.WithTimeout(ctx, 3*time.Second)
+		var ips []net.IPAddr
+		ips, err = r.LookupIPAddr(c, name)
+		cancel()
+		if err == nil && len(ips) > 0 {
+			var v4, v6 []net.IP
+			for _, ip := range ips {
+				if ip.IP.To4() != nil {
+					v4 = append(v4, ip.IP)
+				} else {
+					v6 = append(v6, ip.IP)
+				}
+			}
+			return append(v4, v6...), nil
+		}
+		var dnsErr *net.DNSError
+		if ctx.Err() != nil || errors.As(err, &dnsErr) && dnsErr.IsNotFound { // no such name: the same everywhere
+			break
+		}
+	}
+	return nil, err
+}
+
+// dialDirect: straight to the name's address, past the VPN's own lookups.
+func dialDirect(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := lookup(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	d := net.Dialer{Timeout: 10 * time.Second}
+	for _, ip := range ips {
+		var c net.Conn
+		if c, err = d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port)); err == nil {
 			return c, nil
 		}
 	}
-	return nil, errors.New("нет DNS")
-}}
-
-var directDialer = &net.Dialer{Timeout: 10 * time.Second, Resolver: directResolver}
+	return nil, err
+}
 
 // Resolve gives one address for a name (IPv4 first), straight.
 func Resolve(name string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ips, err := directResolver.LookupIPAddr(ctx, name)
+	ips, err := lookup(ctx, name)
 	if err != nil || len(ips) == 0 {
 		return "", errors.New("не найден " + name)
 	}
-	for _, ip := range ips {
-		if ip.IP.To4() != nil {
-			return ip.IP.String(), nil
-		}
-	}
-	return ips[0].IP.String(), nil
+	return ips[0].String(), nil
 }
 
 // client: through the connection's local port when it is up (the family server may be out of reach straight), else
 // straight.
 func client(probePort int, timeout time.Duration) *http.Client {
-	tr := &http.Transport{DialContext: directDialer.DialContext, TLSHandshakeTimeout: 10 * time.Second}
+	tr := &http.Transport{DialContext: dialDirect, TLSHandshakeTimeout: 10 * time.Second}
 	if probePort > 0 {
 		px, _ := url.Parse("http://127.0.0.1:" + itoa(probePort))
 		tr = &http.Transport{Proxy: http.ProxyURL(px), TLSHandshakeTimeout: 10 * time.Second}

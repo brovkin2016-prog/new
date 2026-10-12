@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,14 +29,31 @@ var masks = []struct {
 	{regexp.MustCompile(`\b[0-9a-fA-F]{20,}\b`), "…"},
 	{regexp.MustCompile(`\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b`), "$1.x.x"},
 	{regexp.MustCompile(`("auth"\s*:\s*")[^"]*`), "$1…"},
+	// the bridge program's words: the call (room, its link, the name in it, the key made from it)
+	{regexp.MustCompile(`(?i)\b(room|roomid|room_id|alias|peer_id|pid|link|key-source|instance-id|userid|slug|portal)=("[^"]*"|\S+)`), "$1=…"},
+	{regexp.MustCompile(`(?i)\b(wbstream|dion)://\S+`), "$1://…"},
 }
+
+// webLink: a page's address — its site stays, the rest goes but for the last 3 signs (to tell two calls apart).
+var webLink = regexp.MustCompile(`(?i)\b((?:https?|wss?)://[^/\s"'?#]+)([/?#][^\s"']*)`)
+var lastSigns = regexp.MustCompile(`([0-9A-Za-z_-]{3})[^0-9A-Za-z_-]*$`)
 
 // Mask hides links, keys and addresses.
 func Mask(s string) string {
 	for _, m := range masks {
 		s = m.re.ReplaceAllString(s, m.with)
 	}
-	return s
+	return webLink.ReplaceAllStringFunc(s, func(u string) string {
+		m := webLink.FindStringSubmatch(u)
+		if m[2] == "/" || strings.HasPrefix(m[2], "/…") {
+			return u
+		}
+		tail := ""
+		if t := lastSigns.FindStringSubmatch(m[2]); t != nil {
+			tail = t[1]
+		}
+		return m[1] + "/…" + tail
+	})
 }
 
 func OpenJournal(dir string) {

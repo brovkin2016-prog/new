@@ -339,7 +339,8 @@ adb shell "am start -n $ACT --es test_bridge '$WB' --ez test_connect true" >/dev
 for _ in $(seq 1 40); do adb logcat -d -s AIVPN:V | grep -q "wbstream-joiner: room=" && break; sleep 1; done
 adb logcat -d -s AIVPN:V | grep -E "bridge|relay" | head -12 | tee "$OUT/bridge-wb.log"
 grep -q "bridge: READY" "$OUT/bridge-wb.log" || fail "the WB Stream relay did not start"
-grep -q "wbstream-joiner: room=wbstream://0123456789abcdef" "$OUT/bridge-wb.log" || fail "the WB Stream relay did not take the room"
+# the room as the creator knows it (the bare id: the tunnel's key comes from it on both sides), not the whole link
+grep -q "wbstream-joiner: room=0123456789abcdef " "$OUT/bridge-wb.log" || fail "the WB Stream relay did not take the room as its bare id"
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 sleep 3
 echo "bridge WB Stream: relay started in its mode, room taken"

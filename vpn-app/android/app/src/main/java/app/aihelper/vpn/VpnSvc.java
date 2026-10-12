@@ -64,6 +64,10 @@ public final class VpnSvc extends VpnService {
     private Profile profile;   // the connection in use
     private Profile preferred; // the one the person chose; Winger goes back to it when it answers again
     private String tunnel = "dc";  // WB Stream / Bitrix: the data channel first, the video if it does not carry
+    private volatile long captchaAt;  // when VK asked for «I am not a robot» on this start (0: it did not)
+    private volatile boolean noData;  // this start got into the call, but nothing came back through it
+    private int dcFails;  // starts in a row the quicker way did not carry (only those, not a lost network)
+    private long fellBackAt;  // when it went to the slower way (it tries the quicker one again after a while)
     private long backAt, backWait = BACK_FIRST, returnedAt;
     private File dir;
 
@@ -203,6 +207,13 @@ public final class VpnSvc extends VpnService {
         quickChoice();
         while (mine()) {
             Process[] own = {null};
+            if (profile.bridge && "video".equals(tunnel) && fellBackAt > 0 && SystemClock.elapsedRealtime() - fellBackAt > 30 * 60_000L
+                    && !profile.tunnelMode.isEmpty() && !"video".equals(profile.tunnelMode)) {
+                tunnel = profile.tunnelMode;  // half an hour on the slower way: the quicker one may carry again
+                fellBackAt = 0;
+                Diag.i(this, "bridge: trying the quicker way again");
+            }
+            long since = 0;
             String err = profile.bridge ? startBridge(own) : startClient(own);
             if (err == null && mine()) {
                 if (tun == null && !openTunnel()) {
@@ -217,12 +228,14 @@ public final class VpnSvc extends VpnService {
                 if (!profile.bridge && returnedAt > 0 && SystemClock.elapsedRealtime() - returnedAt > 30 * 60_000L) {
                     backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;  // the chosen server held for a while: the usual wait again
                 }
+                since = SystemClock.elapsedRealtime();
                 State.set(State.Phase.ON, "");
                 Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + profile.modeLabel(tunnel) + ")" : ""));
                 ping();
                 err = watch(own[0]);
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
+            captchaDone();  // its program is gone: so is the check page it showed
             if (!mine()) break;
             if (BACK.equals(err)) {  // the chosen server answers again: back to it
                 returnedAt = SystemClock.elapsedRealtime();
@@ -246,8 +259,17 @@ public final class VpnSvc extends VpnService {
                 if (!sleep(300)) break;
                 continue;
             }
-            if (profile.bridge && "dc".equals(tunnel) && fails >= 2 && !profile.tunnelMode.isEmpty()) {
+            if (profile.bridge && "dc".equals(tunnel) && !profile.tunnelMode.isEmpty()) {
+                // the quicker way's own failures only: in the call and nothing came back, or a session that died soon
+                // (a lost network, a new call from the server or a slow captcha are not its fault)
+                long held = since > 0 ? SystemClock.elapsedRealtime() - since : -1;
+                if (noData || (held >= 0 && held < 5 * 60_000L)) dcFails++;
+                else if (held >= 5 * 60_000L) dcFails = 0;
+            }
+            if (profile.bridge && "dc".equals(tunnel) && dcFails >= 2 && !profile.tunnelMode.isEmpty()) {
                 tunnel = "video";  // the data channel does not carry here: the call's video does, a little slower
+                fellBackAt = SystemClock.elapsedRealtime();
+                dcFails = 0;
                 fails = 0;
                 Diag.i(this, "dion".equals(profile.platform) ? "bridge: DION does not carry at the higher speed, back to its usual one"
                         : "bridge: the data channel does not carry, trying the video");
@@ -511,6 +533,8 @@ public final class VpnSvc extends VpnService {
             if (!wanted || worker != Thread.currentThread()) return;
             profile = next;
             tunnel = next.tunnelMode.isEmpty() ? "dc" : next.tunnelMode;
+            dcFails = 0;
+            fellBackAt = 0;
         }
         stopParts();
         State.activeLink = next.link;
@@ -546,7 +570,10 @@ public final class VpnSvc extends VpnService {
     private String startBridge(Process[] own) {
         Profile p = profile;
         lastError = null;
+        captchaAt = 0;
+        noData = false;
         connected = new CountDownLatch(1);
+        Thread me = Thread.currentThread();
         try {
             String join = p.joinVerb() + p.joinParams(tunnel);
             ProcessBuilder pb = new ProcessBuilder(getApplicationInfo().nativeLibraryDir + "/librelay.so",
@@ -564,8 +591,13 @@ public final class VpnSvc extends VpnService {
             }
             own[0] = proc;
             CountDownLatch up = connected;
-            new Thread(() -> readBridge(proc, up, join), "bridge-log").start();
-            if (!up.await(90, TimeUnit.SECONDS)) return lastError != null ? lastError : "Мост не поднялся: звонок не отвечает.";
+            new Thread(() -> readBridge(proc, up, join, me), "bridge-log").start();
+            long deadline = SystemClock.elapsedRealtime() + 90_000;
+            while (!up.await(1, TimeUnit.SECONDS)) {  // a VK check («I am not a robot») gets five minutes for the person
+                if (captchaAt > 0) deadline = Math.max(deadline, captchaAt + 300_000);
+                if (!mine()) return "";
+                if (SystemClock.elapsedRealtime() > deadline) return lastError != null ? lastError : "Мост не поднялся: звонок не отвечает.";
+            }
             if (!alive(proc)) return lastError != null ? lastError : "Мост не поднялся.";
             // being in the call is not enough: the bridge counts only when a request really comes back through it
             State.set(State.Phase.CONNECTING, "Мост в звонке. Проверяю, что через него идут данные…");
@@ -579,6 +611,7 @@ public final class VpnSvc extends VpnService {
             }
             if (!mine()) return "";
             Diag.i(this, "bridge: in the call, but nothing comes back through it (the server's side of the bridge is not there?)");
+            noData = true;
             Diag.upload(this, true, true);  // the journal goes now, past the bridge
             if (BridgeSync.refreshNow(this)) {
                 Profile fresh = null;  // this service's bridge as the server has it now
@@ -592,6 +625,7 @@ public final class VpnSvc extends VpnService {
                     }
                     State.activeLink = fresh.link;
                     Diag.i(this, "bridge: the server gave a new call, trying it");
+                    noData = false;  // not the way's fault: another call
                     return "Мост на сервере сменил звонок — подключаюсь к новому.";
                 }
             }
@@ -608,7 +642,13 @@ public final class VpnSvc extends VpnService {
      *  the bridges' own story — which one was tried, why it failed — out of the journal). */
     private static final java.util.regex.Pattern CHATTER = java.util.regex.Pattern.compile("relay(\\[\\w+\\])?: (SOCKS |drop msgType)");
 
-    private void readBridge(Process proc, CountDownLatch up, String join) {
+    private boolean mine(Thread t) {
+        synchronized (lock) {
+            return wanted && worker == t;
+        }
+    }
+
+    private void readBridge(Process proc, CountDownLatch up, String join, Thread owner) {
         int[] n = new int[3];  // connections asked for, opened, given no answer by the far side
         long[] since = {SystemClock.elapsedRealtime()};
         try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
@@ -647,7 +687,7 @@ public final class VpnSvc extends VpnService {
                         captchaDone();
                         up.countDown();
                     } else if (st.equals("TUNNEL_LOST") || st.equals("RECONNECTING")) {
-                        if (up.getCount() == 0 && mine()) {
+                        if (up.getCount() == 0 && mine(owner)) {  // (this thread is the log's: whose start it is, it is told)
                             State.set(State.Phase.RETRYING, "Мост переподключается к звонку…");
                             update();
                         }
@@ -677,6 +717,7 @@ public final class VpnSvc extends VpnService {
      */
     private void captcha(String url) {
         if (!url.matches("http://127\\.0\\.0\\.1:[0-9]{2,5}/")) return;  // only the bridge program's own page
+        captchaAt = SystemClock.elapsedRealtime();
         Diag.i(this, "bridge: VK asks to confirm a person (captcha), a notice is shown");
         State.set(State.Phase.CONNECTING, "VK просит подтвердить, что вы не робот: нажмите на уведомление «Мост VK».");
         update();
@@ -904,6 +945,7 @@ public final class VpnSvc extends VpnService {
             }
         }
         killClient();
+        captchaDone();  // off or another connection: the check page of the bridge program is gone
     }
 
     private void killClient() {

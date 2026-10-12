@@ -202,6 +202,7 @@ final class Profile {
 
     /** The bridge's way in the journal: "dc"/"video", or DION's "fast"/"usual". */
     String modeLabel(String tunnel) {
+        if (platform.isEmpty() || platform.equals("telemost")) return "video";  // Telemost carries only video
         return platform.equals("dion") ? ("dc".equals(tunnel) ? "fast" : "usual") : tunnel;
     }
 
@@ -339,6 +340,9 @@ final class Profile {
         String chosen = cur >= 0 && cur < list.size() ? list.get(cur).link : null;
         int at = same(list, p);
         if (at >= 0 && list.get(at).link.equals(p.link)) return false;
+        // the same call with other settings: the person's own choice (say, the video way on a network where the data
+        // channel does not carry) stays; only a new call of the service replaces it
+        if (at >= 0 && list.get(at).joinLink != null && list.get(at).joinLink.equals(p.joinLink)) return false;
         if (at >= 0) list.set(at, p);
         else list.add(p);
         save(c, list);

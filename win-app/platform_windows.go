@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -120,6 +121,67 @@ func Processes() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// childJob: the helpers this program starts end with it, however it ends (stopped, killed, crashed) — Windows closes
+// the job with the program and ends what is in it.
+var (
+	childJobOnce sync.Once
+	childJob     windows.Handle
+)
+
+func ownChild(p *os.Process) {
+	if p == nil {
+		return
+	}
+	childJobOnce.Do(func() {
+		h, err := windows.CreateJobObject(nil, nil)
+		if err != nil {
+			return
+		}
+		info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE}}
+		if _, err := windows.SetInformationJobObject(h, windows.JobObjectExtendedLimitInformation,
+			uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+			windows.CloseHandle(h)
+			return
+		}
+		childJob = h
+	})
+	if childJob == 0 {
+		return
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(p.Pid))
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(h)
+	if err := windows.AssignProcessToJobObject(childJob, h); err != nil {
+		Logf("bridge: not tied to Winger: %v", err)
+	}
+}
+
+// endLeftRelays: a bridge program left by an earlier Winger (one that was killed before it could end it) holds on to
+// its call — ended when the service starts.
+func endLeftRelays() {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(snap)
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
+		if !strings.EqualFold(windows.UTF16ToString(e.ExeFile[:]), "winger-relay.exe") {
+			continue
+		}
+		if h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, e.ProcessID); err == nil {
+			if windows.TerminateProcess(h, 1) == nil {
+				Logf("bridge: ended a bridge program left from before")
+			}
+			windows.CloseHandle(h)
+		}
+	}
 }
 
 func runCheck(name string, args ...string) (string, error) {

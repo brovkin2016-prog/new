@@ -45,6 +45,7 @@ type Engine struct {
 	box       Box
 	relay     *Relay
 	probePort int
+	runDone   chan struct{} // closed when the latest run has ended
 }
 
 func NewEngine(st *Store, dataDir, relayPath string, own []string, tun bool) *Engine {
@@ -69,15 +70,23 @@ func (e *Engine) ProbePort() int {
 	return 0
 }
 
-func (e *Engine) set(phase, note string) {
+// set: what this run (g) is doing now — a run already replaced (off, another connection) changes nothing.
+func (e *Engine) set(g int, phase, note string) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.gen != g || !e.wanted {
+		return
+	}
 	e.status.Phase, e.status.Note = phase, note
 	if phase == "on" && e.status.Since == 0 {
 		e.status.Since = time.Now().Unix()
 	}
-	if phase == "off" {
-		e.status = Status{Phase: "off", Note: note}
-	}
+}
+
+// off: the status once switched off.
+func (e *Engine) off() {
+	e.mu.Lock()
+	e.status = Status{Phase: "off"}
 	e.mu.Unlock()
 }
 
@@ -105,10 +114,18 @@ func (e *Engine) Connect() error {
 	e.wanted, e.preferred, e.profile, e.tunnel = true, p, p, p.TunnelMode
 	e.status = Status{Phase: "connecting", Active: p.Link}
 	e.backWait = backFirst
+	prev, done := e.runDone, make(chan struct{})
+	e.runDone = done
 	e.mu.Unlock()
 	e.st.Update(func(s *Settings) { s.KeepOn = true })
 	e.stopParts()
-	go e.run(g)
+	go func() {
+		defer close(done)
+		if prev != nil { // the run before has ended first: its last clean-up never stops this one's connection
+			<-prev
+		}
+		e.run(g)
+	}()
 	return nil
 }
 
@@ -120,7 +137,7 @@ func (e *Engine) Disconnect() {
 	e.mu.Unlock()
 	e.st.Update(func(s *Settings) { s.KeepOn = false })
 	e.stopParts()
-	e.set("off", "")
+	e.off()
 	Logf("stopped")
 }
 
@@ -157,9 +174,9 @@ func (e *Engine) sleep(g int, d time.Duration) bool {
 func (e *Engine) run(g int) {
 	p, _ := e.cur()
 	if p.Bridge {
-		e.set("connecting", "Поднимаю мост через "+p.Service()+"… до минуты")
+		e.set(g, "connecting", "Поднимаю мост через "+p.Service()+"… до минуты")
 	} else {
-		e.set("connecting", "Подключаюсь к серверу…")
+		e.set(g, "connecting", "Подключаюсь к серверу…")
 	}
 	e.quickChoice(g)
 	fails := 0
@@ -168,7 +185,7 @@ func (e *Engine) run(g int) {
 		err := e.start(g, p, tunnel)
 		if err == nil && e.mine(g) {
 			fails = 0
-			e.set("on", "")
+			e.set(g, "on", "")
 			Logf("connected via %s%s", p.Host+p.Platform, map[bool]string{true: " (" + tunnel + ")"}[p.Bridge])
 			err = e.watch(g)
 		}
@@ -180,7 +197,7 @@ func (e *Engine) run(g int) {
 			e.mu.Lock()
 			back := e.preferred
 			e.mu.Unlock()
-			e.switchTo(back, false, "Выбранный сервер снова отвечает — переключаюсь на него…")
+			e.switchTo(g, back, false, "Выбранный сервер снова отвечает — переключаюсь на него…")
 			continue
 		}
 		fails++
@@ -191,7 +208,9 @@ func (e *Engine) run(g int) {
 		}
 		if p.Bridge && tunnel == "dc" && fails >= 2 && p.TunnelMode != "" {
 			e.mu.Lock()
-			e.tunnel = "video" // the data channel does not carry here: the call's video does, a little slower
+			if e.gen == g {
+				e.tunnel = "video" // the data channel does not carry here: the call's video does, a little slower
+			}
 			e.mu.Unlock()
 			fails = 0
 			if p.Platform == "dion" {
@@ -207,12 +226,12 @@ func (e *Engine) run(g int) {
 				if next.Bridge {
 					what = "включаю мост через " + next.Service()
 				}
-				e.switchTo(next, true, "«"+p.Name+"» не отвечает — "+what+"…")
+				e.switchTo(g, next, true, "«"+p.Name+"» не отвечает — "+what+"…")
 				fails = 0
 				continue
 			}
 		}
-		e.set("retrying", fmt.Sprint(err)+" Пробую снова…")
+		e.set(g, "retrying", fmt.Sprint(err)+" Пробую снова…")
 		if !e.sleep(g, min(30*time.Second, time.Second<<min(fails, 5))) {
 			return
 		}
@@ -228,21 +247,25 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 	}
 	if p.Bridge {
 		opts.SocksPort = FreePort()
-		r, err := StartRelay(e.relayPath, p, tunnel, opts.SocksPort, e.dataDir, func() {
-			if e.mine(g) && e.Status().Phase == "on" {
-				e.set("retrying", "Мост переподключается к звонку…")
-			}
-		})
+		var me *Relay
+		r, err := StartRelay(e.relayPath, p, tunnel, opts.SocksPort, e.dataDir, func(up bool) { e.bridgeLink(g, &me, up) })
 		if err != nil {
 			return errors.New("Не получилось запустить мост на этом компьютере.")
 		}
 		e.mu.Lock()
-		e.relay = r
+		stale := e.gen != g || !e.wanted
+		if !stale {
+			e.relay, me = r, r
+		}
 		e.mu.Unlock()
+		if stale { // switched off or over while it started: it is not left running
+			r.Stop()
+			return nil
+		}
 		if err := r.Wait(90 * time.Second); err != nil {
 			return err
 		}
-		e.set("connecting", "Мост в звонке. Проверяю, что через него идут данные…")
+		e.set(g, "connecting", "Мост в звонке. Проверяю, что через него идут данные…")
 	}
 	if !e.mine(g) {
 		return nil
@@ -266,6 +289,10 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 			for _, x := range e.st.Profiles() {
 				if x.Bridge && x.Platform == p.Platform && x.Link != p.Link {
 					e.mu.Lock()
+					if e.gen != g || !e.wanted {
+						e.mu.Unlock()
+						return errors.New("Мост выключен.")
+					}
 					if e.preferred != nil && e.preferred.Link == p.Link {
 						e.preferred = x
 					}
@@ -304,6 +331,11 @@ func (e *Engine) watch(g int) error {
 			continue
 		}
 		failed = 0
+		e.mu.Lock()
+		if e.gen == g && e.wanted && e.status.Phase == "retrying" { // the bridge got back into its call: pages come again
+			e.status.Phase, e.status.Note = "on", ""
+		}
+		e.mu.Unlock()
 		if auto && time.Now().After(back) {
 			e.mu.Lock()
 			pref := e.preferred
@@ -319,6 +351,24 @@ func (e *Engine) watch(g int) error {
 		}
 	}
 	return nil
+}
+
+const bridgeBack = "Мост переподключается к звонку…"
+
+// bridgeLink: the bridge lost its call for a while (up false) or is back in it (up true) — said in the status.
+func (e *Engine) bridgeLink(g int, me **Relay, up bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.gen != g || !e.wanted || *me == nil || e.relay != *me {
+		return
+	}
+	switch {
+	case !up && e.status.Phase == "on":
+		e.status.Phase, e.status.Note = "retrying", bridgeBack
+	case up && e.status.Phase == "retrying" && e.status.Note == bridgeBack:
+		e.status.Phase, e.status.Note = "on", ""
+		Logf("bridge: back in the call")
+	}
 }
 
 // probeServer: a short-lived connection to this server, past the VPN — does a page come through it?
@@ -366,7 +416,7 @@ func (e *Engine) quickChoice(g int) {
 	if at.Bridge {
 		what = "включаю мост через " + at.Service()
 	}
-	e.switchTo(at, true, "«"+p.Name+"» не отвечает в этой сети — "+what+"…")
+	e.switchTo(g, at, true, "«"+p.Name+"» не отвечает в этой сети — "+what+"…")
 }
 
 // moved: the family server may have moved to a new address (its name follows it) — the saved link is renewed from
@@ -380,11 +430,11 @@ func (e *Engine) moved(g int, p *Profile) bool {
 		return false
 	}
 	e.mu.Lock()
-	if e.preferred != nil && e.preferred.Link == p.Link {
+	if e.gen == g && e.preferred != nil && e.preferred.Link == p.Link {
 		e.preferred = fresh
 	}
 	e.mu.Unlock()
-	e.switchTo(fresh, false, "Сервер переехал на новый адрес — подключаюсь по новому…")
+	e.switchTo(g, fresh, false, "Сервер переехал на новый адрес — подключаюсь по новому…")
 	return true
 }
 
@@ -427,9 +477,16 @@ func (e *Engine) nextChoiceFrom(from *Profile) *Profile {
 	return order[(at+1)%len(order)]
 }
 
-func (e *Engine) switchTo(next *Profile, byItself bool, why string) {
+func (e *Engine) switchTo(g int, next *Profile, byItself bool, why string) {
+	if !e.mine(g) {
+		return
+	}
 	e.stopParts()
 	e.mu.Lock()
+	if e.gen != g || !e.wanted {
+		e.mu.Unlock()
+		return
+	}
 	e.profile, e.tunnel = next, next.TunnelMode
 	e.status.Active = next.Link
 	e.status.Auto = byItself && e.preferred != nil && next.Link != e.preferred.Link
@@ -466,7 +523,15 @@ func (e *Engine) Shutdown() {
 	e.mu.Lock()
 	e.gen++
 	e.wanted = false
+	done := e.runDone
 	e.mu.Unlock()
 	e.stopParts()
-	e.set("off", "")
+	if done != nil { // the run ends first (a few seconds at most): nothing it starts is left behind
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+		e.stopParts()
+	}
+	e.off()
 }

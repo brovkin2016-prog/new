@@ -51,6 +51,7 @@ func serve(tun bool, stop <-chan struct{}) error {
 	}
 	OpenJournal(dir)
 	Logf("Winger %s starts", versionName)
+	endLeftRelays()
 	st := OpenStore(dir)
 	relay, err := relayPath(dir)
 	if err != nil {

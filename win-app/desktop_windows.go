@@ -128,6 +128,8 @@ func runTray() error {
 				if m := captchaInState.FindSubmatch(b); err == nil && m != nil && string(m[1]) != shown {
 					shown = string(m[1])
 					_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", shown).Start()
+				} else if err == nil && m == nil {
+					shown = "" // passed: the next check, even on the same page, opens again
 				}
 				now := err == nil && strings.Contains(string(b), `"phase":"on"`)
 				busy := err == nil && (strings.Contains(string(b), `"phase":"connecting"`) || strings.Contains(string(b), `"phase":"retrying"`))
