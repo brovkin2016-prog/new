@@ -19,18 +19,19 @@ var (
 )
 
 func main() {
-	mode := ""
+	// a double-click gives no words at all: no mode, nothing after it
+	mode, rest := "", []string{}
 	if len(os.Args) > 1 {
-		mode = os.Args[1]
+		mode, rest = os.Args[1], os.Args[2:]
 	}
 	switch mode {
 	case "--serve": // in the foreground (development and the tests): --serve [--no-tun]
-		tun := !(len(os.Args) > 2 && os.Args[2] == "--no-tun")
+		tun := !(len(rest) > 0 && rest[0] == "--no-tun")
 		exit(serve(tun, nil))
 	case "--selftest":
-		exit(selftest(os.Args[2:]))
+		exit(selftest(rest))
 	default:
-		exit(platformMain(mode, os.Args[2:]))
+		exit(platformMain(mode, rest))
 	}
 }
 
