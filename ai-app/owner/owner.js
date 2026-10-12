@@ -953,7 +953,7 @@
     }
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      scroll.append(diskRow(), maxCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
+      scroll.append(diskRow(), maxCard(), videoCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
         el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Только приложение помощника — без входа (24 ч)",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется помощником" }),
@@ -1006,6 +1006,56 @@
           el("button", { class: "btn wide", text: "📤 Отправить приглашение", onclick: () => (navigator.share ? navigator.share({ text: end.text }).catch(() => {}) : (copyText(end.text), toast("✅ Скопировано — отправьте как удобно"))) }),
           el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Копировать", onclick: () => { copyText(end.text); toast("✅ Скопировано — отправьте как удобно"); } })));
       } catch (e) { toast(problem(e)); }
+    }
+    // ---- video from a photo on Hugging Face: the owner's free minutes; the owner has it, others when allowed ----
+    let video = null;
+    function videoCard() {
+      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🎬 Видео из фото: проверяю…" }));
+      const fill = (v) => {
+        video = v;
+        card.innerHTML = "";
+        card.append(el("div", { class: "row" },
+          el("div", { class: "grow" }, "🎬 Видео из фото" + (v.on ? " ✓" : ""),
+            el("small", { text: v.on ? `Hugging Face${v.name ? " «" + v.name + "»" : ""}. Вам — сразу; другим — «🎬 Видео из фото» в их карточке ниже`
+              + (v.people.length ? ` (включено: ${v.people.join(", ")})` : "") + "."
+              : "Короткое видео из фото («оживи») на бесплатных минутах Hugging Face: несколько роликов в день." })),
+          v.env ? null : el("button", { class: "btn" + (v.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: v.on ? "Настроить" : "Подключить",
+            onclick: () => videoSetup(v, fill) })));
+      };
+      panel({ op: "hf_get" }).then((v) => (v.t === "done" ? fill(v) : card.remove())).catch(() => card.remove());
+      return card;
+    }
+    function videoSetup(v, fill) {
+      sheet("🎬 Видео из фото", (box, close) => {
+        const inp = el("input", { class: "input", placeholder: "hf_…", autocomplete: "off", spellcheck: "false" });
+        box.append(
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Видео делают модели на видеокартах Hugging Face "
+            + "(Wan 2.2, запасная — LTX-2.3). Бесплатные минуты — вашего аккаунта, общие на всех, кому вы включите." }),
+          el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
+            el("li", { text: "Войдите на huggingface.co (нужна только почта)." }),
+            el("li", { text: "«🔑 Получить токен» → «Create new token» → тип «Read» → «Create token» → скопируйте (начинается с hf_)." }),
+            el("li", { text: "Вставьте сюда и нажмите «✅ Подключить». В чаты токен не присылайте." })),
+          el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens",
+            style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Получить токен" }),
+          inp,
+          el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
+            let t = "";
+            try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
+            if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
+          } }),
+          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить", onclick: async () => {
+            try {
+              const end = await panel({ op: "hf_set", token: inp.value.trim() });
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+              close(); fill(end);
+              toast(`✅ Подключено${end.name ? ": " + end.name : ""}. Пишите в «🖼 Фото»: «оживи»`, 5000);
+            } catch (e) { toast(problem(e)); }
+          } }),
+          v.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "Отключить видео из фото", onclick: async () => {
+            if (!(await confirmBox("Отключить видео из фото? У всех пропадёт «🎬 Оживить», токен удалится с сервера.", "Отключить"))) return;
+            try { const end = await panel({ op: "hf_off" }); close(); fill(end); toast("Видео из фото отключено"); } catch (e) { toast(problem(e)); }
+          } }) : "");
+      });
     }
     function maxCard() {
       const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "💬 MAX: проверяю…" }));
@@ -1087,6 +1137,14 @@
           act(mine ? "🔗 Ссылка: приложение + код для второго телефона (24 ч)" : "🔗 Ссылка: приложение + код входа (24 ч)",
             () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""),
           act("💬 Пригласить в MAX", () => maxCode(u)));
+        if (!mine) {  // video from a photo: the owner's Hugging Face minutes, only for whom the owner allows
+          box.append(el("div", { class: "row", style: "margin-top:10px" },
+            el("div", { class: "grow" }, "🎬 Видео из фото", el("small", { text: !(video && video.on) ? "Сначала подключите: «🎬 Видео из фото» выше в разделе."
+              : u.video ? "Включено: в «🖼 Фото» есть «🎬 Оживить» (и в MAX)." : "Выключено: минуты Hugging Face общие — включайте тем, кому нужно." })),
+            el("button", { class: "toggle" + (u.video ? " on" : ""), disabled: !(video && video.on), onclick: () => {
+              close(); appOp({ op: "app_set", id: u.id, video: !u.video }, u.video ? "🎬 Видео из фото выключено" : "🎬 Видео из фото включено");
+            } })));
+        }
         if (mine) {
           box.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:10px", text: "Это вы. Свой вход здесь не удаляется, чтобы не потерять управление. Новый телефон — ссылка выше; если потеряли все телефоны — на экране входа 5 раз нажмите на звёздочку ✦, появится «✉️ Я владелец — прислать код на почту»." }));
           return;
@@ -1242,7 +1300,7 @@
       } catch (e) { /* quiet */ }
     }
     return { root, peek, redraw: () => open && draw(),
-      sub: () => ({ server: "состояние, мосты, события", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется приложением", claude: "Claude Code на вашем сервере" })[part],
+      sub: () => ({ server: "состояние, мосты, события", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется помощником", claude: "Claude Code на вашем сервере" })[part],
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
       onShow: () => (open ? load() : enter()) };
   }
