@@ -1,0 +1,101 @@
+# one-off: VK's «I am not a robot» through the bridge's own check page, in a real browser — what the page loads, what
+# fails, what the tick does (Winger's window showed the page blank)
+name: vk-probe
+on:
+  push:
+    paths: [".github/workflows/vk-probe.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vpn-app/bridge/go.mod
+          cache-dependency-path: vpn-app/bridge/go.sum
+      - name: The bridge's VK sign-in, up to its check page
+        working-directory: vpn-app/bridge
+        run: |
+          mkdir -p cmd/vkprobe
+          cat > cmd/vkprobe/main.go <<'EOF'
+          package main
+
+          import (
+          	"fmt"
+          	"os"
+          	"time"
+
+          	joiner "whitelist-bypass/relay/pion/headless-joiner-common"
+          )
+
+          func main() {
+          	logf := func(f string, a ...any) { fmt.Printf("LOG "+f+"\n", a...) }
+          	status := func(s string) { fmt.Println("STATUS:" + s) }
+          	res, err := joiner.RunVKAuth("https://vk.com/call/join/abcdefghij0123456789", "Участник", logf, status, nil, nil)
+          	fmt.Println("RESULT", len(res), err)
+          	time.Sleep(time.Second)
+          	os.Exit(0)
+          }
+          EOF
+          go build -o /tmp/vkprobe ./cmd/vkprobe
+          (/tmp/vkprobe > /tmp/vk.log 2>&1 &)
+          for i in $(seq 1 60); do grep -q "STATUS:CAPTCHA:" /tmp/vk.log && break; sleep 1; done
+          cat /tmp/vk.log
+      - name: The check page in Chrome (as a phone), then the tick
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i --silent playwright@1.48.2 >/dev/null
+          U=$(grep -o "STATUS:CAPTCHA:http://127.0.0.1:[0-9]*/" /tmp/vk.log | head -1 | sed 's/STATUS:CAPTCHA://')
+          echo "page: $U"
+          [ -n "$U" ] || { echo "VK did not ask for the check"; exit 0; }
+          cat > probe.js <<'EOF'
+          const { chromium, devices } = require("playwright");
+          const short = (u) => {
+            try {
+              const x = new URL(u);
+              if (x.pathname === "/generic_proxy") { const p = new URL(x.searchParams.get("proxy_url")); return "GP>" + p.host + p.pathname; }
+              return x.host + x.pathname;
+            } catch (e) { return String(u).slice(0, 100); }
+          };
+          (async () => {
+            const b = await chromium.launch({ channel: "chrome" });
+            for (const [name, url] of [["proxy", process.argv[2]], ["direct", null]]) {
+              const ctx = await b.newContext({ ...devices["Pixel 7"], locale: "ru-RU" });
+              const page = await ctx.newPage();
+              page.on("console", (m) => console.log(name, "console", m.type(), m.text().slice(0, 300)));
+              page.on("pageerror", (e) => console.log(name, "pageerror", e.message.slice(0, 300)));
+              page.on("requestfailed", (r) => console.log(name, "FAILED", r.method(), r.resourceType(), short(r.url()), r.failure() && r.failure().errorText));
+              page.on("response", (r) => console.log(name, "resp", r.status(), r.request().resourceType(), r.request().method(), short(r.url())));
+              let target = url;
+              if (!target) target = global.realUrl;
+              if (!target) break;
+              console.log("=====", name, short(target));
+              await page.goto(target, { waitUntil: "load", timeout: 60000 }).catch((e) => console.log(name, "goto", e.message));
+              if (name === "proxy") {
+                const u = new URL(page.url());
+                global.realUrl = "https://id.vk.ru" + u.pathname + u.search;
+                const html = await page.content();
+                console.log(name, "HTML", html.length, html.replace(/\s+/g, " ").slice(0, 3000));
+              }
+              await page.waitForTimeout(10000);
+              console.log(name, "TITLE", await page.title());
+              console.log(name, "TEXT", (await page.evaluate(() => (document.body ? document.body.innerText : ""))).replace(/\s+/g, " ").slice(0, 400));
+              await page.screenshot({ path: `/tmp/${name}.png` });
+              if (name === "proxy") {
+                const cb = await page.$('input[type=checkbox], [role=checkbox], button:has-text("робот"), label:has-text("робот"), [class*="heckbox"]');
+                console.log(name, "TICK element", !!cb);
+                if (cb) {
+                  await cb.click().catch((e) => console.log(name, "click", e.message));
+                  await page.waitForTimeout(15000);
+                  console.log(name, "AFTER", (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ").slice(0, 400));
+                  await page.screenshot({ path: `/tmp/${name}-after.png` });
+                }
+              }
+              await ctx.close();
+            }
+            await b.close();
+          })();
+          EOF
+          timeout 300 node probe.js "$U" || true
+          echo "===== the program after the tick"
+          cat /tmp/vk.log | tail -20
