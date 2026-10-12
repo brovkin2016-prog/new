@@ -1237,11 +1237,13 @@
           ["tg", "Telegram", "Telegram без VPN: iPhone, компьютер, любой телефон (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
         const chips = el("div", { class: "chips", style: "margin-bottom:10px" });
-        if (u.links.hy2) {
-          // Winger made for this person: the connection is inside, they only press the big button
-          box.append(el("button", { class: "btn wide", text: "📲 Ссылка для человека: Winger уже с VPN (на сутки)",
-            onclick: () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); } }),
-            el("small", { style: "display:block;color:var(--muted);margin:6px 0 10px", text: "Человек откроет ссылку, поставит Winger и нажмёт одну кнопку. Там же — Telegram без VPN." }));
+        if (u.links.hy2) {  // what to give the person: three ways, each a ready message to send
+          box.append(el("div", { style: "font-weight:600;margin:2px 2px 8px", text: "Выдать человеку" }),
+            giveTile("📲", "Программа + VPN", "Winger с подключением внутри: человек скачает и нажмёт одну кнопку. Ссылка на сутки, там же Telegram без VPN.",
+              () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); }),
+            giveTile("🔗", "Только ссылка VPN", "Если Winger уже стоит: ссылка и QR-код — вставить или отсканировать.", () => { close(); vpnOnly(u); }),
+            u.owner ? "" : giveTile("🌉", "Мост", "На дни, когда интернет пускает только разрешённые сайты: выберите, какой.",
+              () => { close(); bridgePick(u); }, !u.can_bridge && !(u.bridges || []).length ? "Сначала поднимите свой мост: «🖥 Сервер» → «🌉 Мосты»." : ""));
         }
         const raw = el("details", { style: "margin-bottom:6px" }, el("summary", { style: "cursor:pointer;color:var(--muted);font-size:14px;padding:6px 0",
           text: "Для других программ (iPhone, v2RayTun, Telegram-прокси) ›" }));
@@ -1270,13 +1272,10 @@
         if (!u.owner) {
           const mine = u.bridges || [], has = mine.length > 0;
           const links = mine.map(wingerLink).filter(Boolean);
-          box.append(el("div", { class: "row", style: "margin-top:12px" },
-            el("div", { class: "grow" }, "🌉 Мосты" + (has ? ": " + mine.map((b) => (b.ok ? "🟢 " : "🔴 ") + b.label.replace(/^.*· /, "")).join(", ") : ""),
-              el("small", { text: has ? "Свои звонки для Winger этого человека: Winger берёт их сам и включает рабочий, когда сервер не отвечает."
-                : u.can_bridge ? "Копии ваших мостов со своими звонками — на дни, когда мобильный интернет пускает только отдельные сайты."
-                : "Сначала поднимите хотя бы один свой мост: «🖥 Сервер» → «🌉 Мосты»." })),
-            el("button", { class: "btn" + (has ? " line" : ""), style: "flex:none;padding:8px 14px", text: has ? "Убрать" : "Выдать",
-              disabled: !has && !u.can_bridge, onclick: () => { close(); userBridge(u, !has); } })));
+          if (has) box.append(el("div", { class: "row", style: "margin-top:12px" },
+            el("div", { class: "grow" }, "🌉 Мосты: " + mine.map((b) => (b.ok ? "🟢 " : "🔴 ") + b.label.replace(/^.*· /, "")).join(", "),
+              el("small", { text: "Свои звонки для Winger этого человека: Winger берёт их сам и включает рабочий, когда сервер не отвечает." })),
+            el("button", { class: "btn line", style: "flex:none;padding:8px 14px", text: "Убрать", onclick: () => { close(); userBridge(u, false); } })));
           if (links.length) {
             // when the person's phone cannot reach the server at all, Winger cannot fetch it: the link goes by messenger
             const msg = `Мосты для Winger (${u.name}):\n${links.join("\n")}\n\nСкопируйте всё сообщение, откройте Winger и нажмите «Вставить ссылку».`;
@@ -1291,6 +1290,85 @@
           box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
         }
       });
+    }
+    // ---------- giving a person what they need: each a ready message, a QR, and «📤 Отправить» ----------
+    function giveTile(icon, title, about, onclick, off) {
+      return el("button", { class: "give-tile", disabled: !!off, onclick,
+        style: "display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--card);color:inherit;font:inherit;"
+          + "border:1px solid rgba(127,127,127,.22);border-radius:16px;padding:12px 14px;margin:0 0 8px;cursor:pointer" + (off ? ";opacity:.55" : "") },
+        el("span", { style: "font-size:28px;line-height:1;flex:none", text: icon }),
+        el("span", { style: "flex:1;min-width:0" }, el("b", { style: "display:block;font-size:16px", text: title }),
+          el("span", { style: "display:block;font-size:13px;color:var(--muted);margin-top:2px", text: off || about })),
+        el("span", { style: "color:var(--muted);font-size:20px;flex:none", text: "›" }));
+    }
+    function shareSheet(title, msg, link, png, file, note) {
+      sheet(title, (box) => {
+        box.append(
+          note ? el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: note }) : "",
+          png ? el("img", { src: urlOf(png), alt: "QR", onclick: () => viewer(png, file),
+            style: "display:block;width:230px;max-width:72%;margin:0 auto 12px;background:#fff;border-radius:16px;padding:8px" }) : "",
+          el("div", { class: "give-msg", text: msg, style: "font:14px/1.5 system-ui,sans-serif;white-space:pre-wrap;word-break:break-word;"
+            + "background:var(--card);border-radius:16px 16px 16px 4px;padding:12px 14px;margin-bottom:12px;user-select:all" }),
+          el("button", { class: "btn wide", text: "📤 Отправить", onclick: () => (png ? shareBlob(png, file, msg)
+            : navigator.share ? navigator.share({ text: msg }).catch(() => {}) : (copyText(msg), toast("✅ Скопировано — отправьте как удобно"))) }),
+          el("div", { class: "big-actions", style: "margin-top:8px" },
+            el("button", { class: "btn line", text: "📋 Сообщение", onclick: () => { copyText(msg); toast("✅ Сообщение скопировано"); } }),
+            el("button", { class: "btn line", text: "📋 Только ссылку", onclick: () => { copyText(link); toast("✅ Ссылка скопирована"); } })));
+      });
+    }
+    function vpnOnly(u) {
+      const link = u.links.hy2;
+      const png = u.qr && u.qr.hy2 ? blobOf(u.qr.hy2, "image/png") : null;
+      const msg = `🔐 VPN для «${u.name}»\n\nЕсли Winger уже стоит:\n1️⃣ Скопируйте ссылку ниже\n2️⃣ Откройте Winger → «📋 Вставить ссылку»`
+        + `\n3️⃣ Нажмите большую кнопку — готово ✅\n\nИли в Winger «📷 Сканировать QR» — QR-код на картинке.\n\n${link}`;
+      shareSheet("🔗 VPN для «" + u.name + "»", msg, link, png, `vpn-${u.name}.png`, "Нет Winger? Тогда в карточке «📲 Программа + VPN».");
+    }
+    const BRIDGE_ICON = { tm: "📹", vk: "💬", wb: "🛍", dion: "🟦", bitrix: "🏢" };
+    function bridgePick(u) {
+      const owned = u.owner_bridges || [], mine = u.bridges || [];
+      sheet("🌉 Мост для «" + u.name + "»", (box, close) => {
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px",
+          text: "Человек получит свою копию моста со своим звонком — ваш мост не мешает. Winger включает мост сам, когда обычный VPN не отвечает." }));
+        if (!owned.length) box.append(el("p", { text: "У вас ещё нет мостов: «🖥 Сервер» → «🌉 Мосты» → поднимите хотя бы один." }));
+        for (const b of owned) {
+          const got = mine.find((x) => x.id.startsWith(b.plat + "-"));
+          box.append(giveTile(BRIDGE_ICON[b.plat] || "🌉", b.name + (got ? " · уже выдан ✓" : ""),
+            (got ? (got.ok ? "🟢 работает — нажмите, чтобы отправить ещё раз" : "🔴 сейчас не отвечает — отправить можно")
+              : b.ok ? "🟢 ваш мост работает" : "🔴 ваш мост сейчас не отвечает — копия может не подняться"),
+            () => { close(); giveBridge(u, b, got); }));
+        }
+        if (owned.length > 1) box.append(el("button", { class: "btn line wide", style: "margin-top:6px", text: "🌉 Все мосты сразу",
+          onclick: () => { close(); userBridge(u, true); } }));
+      });
+    }
+    async function giveBridge(u, b, got) {
+      if (!got) {
+        toast(`⏳ Поднимаю мост «${b.name}» для «${u.name}»: свой звонок… до 3 минут`, 410000);
+        try {
+          const end = await panel({ op: "user_bridge", name: u.name, on: true, only: [b.plat] }, (t) => toast("⏳ " + t.replace(/^\S+\s/, ""), 410000));
+          document.querySelectorAll(".toast").forEach((t) => t.remove());
+          if (end.t !== "done") { toast("⚠️ " + end.text, 9000); return; }
+          load();
+          got = (end.bridges || []).find((x) => x.id.startsWith(b.plat + "-"));
+          if (!got || !got.link) {
+            toast((end.dropped || []).length ? `⚠️ «${b.name}» не выдан: второй звонок с вашего входа выбивал ваш мост.` : `⚠️ Мост «${b.name}» не поднялся — попробуйте позже.`, 9000);
+            return;
+          }
+          u = end;
+        } catch (e) { toast(problem(e)); return; }
+      }
+      const link = wingerLink(got);
+      if (!link) { toast(`⚠️ У моста «${b.name}» для «${u.name}» ещё нет звонка — он поднимается сам, попробуйте через пару минут.`, 7000); return; }
+      let png = null;
+      try {
+        const q = await panel({ op: "qr", text: link });
+        if (q.t === "done" && q.png) png = blobOf(q.png, "image/png");
+      } catch (e) { /* no picture: the message alone */ }
+      const msg = `🌉 Мост «${b.name}» для «${u.name}»\n\nНужен в дни, когда мобильный интернет пускает только разрешённые сайты.\n`
+        + `1️⃣ Скопируйте это сообщение целиком\n2️⃣ Откройте Winger → «📋 Вставить ссылку»\nДальше Winger сам включит мост, когда обычный VPN не отвечает.`
+        + `\n\n${link}`;
+      shareSheet(`🌉 ${b.name} для «${u.name}»`, msg, link, png, `bridge-${b.plat}-${u.name}.png`,
+        got.ok ? "🟢 Мост работает. Если у человека Winger уже с этим VPN — он возьмёт мост и сам, до 20 минут." : "🔴 Мост сейчас не отвечает — когда поднимется, Winger возьмёт его сам.");
     }
     async function userBridge(u, on) {
       if (!on && !(await confirmBox(`Убрать мосты у «${u.name}»? Их звонки закроются, Winger этого человека останется без мостов.`, "Убрать"))) return;
