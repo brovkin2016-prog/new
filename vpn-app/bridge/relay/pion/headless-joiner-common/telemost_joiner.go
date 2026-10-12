@@ -502,8 +502,13 @@ func (j *TelemostHeadlessJoiner) initPC() {
 			j.logFn("telemost-joiner: === VP8 TUNNEL CONNECTED ===")
 			j.Status.EmitStatus(common.StatusTunnelConnected)
 			// winger: the reliable layer may put up to its window (hundreds of segments) on the track at once — the
-			// deeper queue (as WB Stream and Bitrix24 have) keeps them from being thrown away and sent again
-			j.vp8tunnel = rtc.NewVP8DataTunnelWithQueue(j.sampleTrack, j.obf, j.logFn, rtc.KCPCarrierQueueDepth)
+			// deeper queue (as WB Stream and Bitrix24 have) keeps them from being thrown away and sent again. The plain
+			// way keeps the old depth: its sender waits for room and loses nothing, more room only adds delay
+			queue := 0
+			if j.reliable {
+				queue = rtc.KCPCarrierQueueDepth
+			}
+			j.vp8tunnel = rtc.NewVP8DataTunnelWithQueue(j.sampleTrack, j.obf, j.logFn, queue)
 			vp8tun := j.vp8tunnel
 			vp8tun.Start(j.vp8FPS, j.vp8Batch)
 			var active tunnel.DataTunnel = vp8tun

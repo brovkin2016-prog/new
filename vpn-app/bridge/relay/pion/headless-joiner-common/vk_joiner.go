@@ -643,7 +643,8 @@ func (h *VKHeadlessJoiner) initPC() {
 			h.reconnectAttempt.Store(0)
 			h.logFn("vk-joiner: === TUNNEL CONNECTED ===")
 			h.Status.EmitStatus(common.StatusTunnelConnected)
-			h.vp8tunnel = rtc.NewVP8DataTunnelWithQueue(h.sampleTrack, h.obf, h.logFn, rtc.KCPCarrierQueueDepth) // winger: room for the reliable window
+			// winger: no reliable layer on VK's video way: the old depth, a deeper queue only adds delay (see the creator)
+			h.vp8tunnel = rtc.NewVP8DataTunnel(h.sampleTrack, h.obf, h.logFn)
 			h.vp8tunnel.Start(h.vp8FPS, h.vp8Batch)
 			var downlink tunnel.DataTunnel = h.vp8tunnel
 			trackCount := 1

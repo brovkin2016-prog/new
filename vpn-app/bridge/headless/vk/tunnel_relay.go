@@ -169,7 +169,9 @@ func (u *TunnelRelay) Init(iceServers []webrtc.ICEServer) error {
 		u.modeOnce.Do(func() {
 			u.mode = "video"
 			log.Println("[relay] === MODE: VIDEO ===")
-			u.tun = rtc.NewVP8DataTunnelWithQueue(sampleTrack, u.obf, log.Printf, rtc.KCPCarrierQueueDepth) // winger: room for the reliable window
+			// winger: VK's video way has no reliable layer: a blocked sender waits for room, never loses a frame, so a
+			// deeper queue would only hold more frames ahead of a page's request (1024 of them: over a second)
+			u.tun = rtc.NewVP8DataTunnel(sampleTrack, u.obf, log.Printf)
 			u.tun.Start(0, 0)
 			var downlink tunnel.DataTunnel = u.tun
 			if u.screenDC != nil {
