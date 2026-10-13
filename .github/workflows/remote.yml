@@ -355,7 +355,10 @@ jobs:
           # The portable runs here as the Windows user whose own RustDesk settings host.ps1's command lines filled in
           # (rustdesk.exe --config/--option keep a copy for the user), and RustDesk takes the server and key from there
           # when its file name says nothing; on the real other laptop there is no such copy. So it is set aside first,
-          # and must still name no server or key afterwards
+          # and must still name no server or key afterwards. (A tray icon of this user's, if the install left one,
+          # could keep that copy in step with the service: it is closed first.)
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'rustdesk*' -and "$($_.CommandLine)" -match '--tray' } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           $userToml = Join-Path $env:APPDATA 'RustDesk\config\RustDesk2.toml'
           if (Test-Path -LiteralPath $userToml) { Move-Item -LiteralPath $userToml -Destination (Join-Path $env:RUNNER_TEMP 'user-RustDesk2.toml') -Force }
           function Test-UserNoServer {
@@ -414,7 +417,7 @@ jobs:
           }
           # the line asks for RemoteSigned: a new Windows' policy is Restricted, which does not load the script module
           # Windows PowerShell's Get-FileHash lives in (what Restricted does is shown, not required)
-          $probe = "Get-FileHash -LiteralPath `$env:windir\System32\notepad.exe | Out-Null; 'hashed'"
+          $probe = "`$ErrorActionPreference = 'Stop'; Get-FileHash -LiteralPath `$env:windir\System32\notepad.exe | Out-Null; 'hashed'"
           $ps51 = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
           $r1 = (& $ps51 -NoProfile -ExecutionPolicy Restricted -Command $probe 2>&1 | Out-String)
           $r2 = (& $ps51 -NoProfile -ExecutionPolicy RemoteSigned -Command $probe 2>&1 | Out-String)
