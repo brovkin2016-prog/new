@@ -82,7 +82,11 @@
       }, () => { throw new Error("net"); });
   }
   class HttpError extends Error {
-    constructor(status, text) { super(text || "Ошибка " + status); this.status = status; }
+    constructor(status, text) {
+      super(text || (status >= 500 ? "Сервер сейчас не отвечает — попробуйте через минуту." : status === 413 ? "Файл слишком большой."
+        : "Что-то пошло не так — попробуйте ещё раз."));
+      this.status = status;
+    }
   }
   function bytesToText(parts) {
     let n = 0;
@@ -144,7 +148,7 @@
     ];
     for (const [re, t] of words) if (re.test(m)) return t;
     const code = m.match(/net::ERR_[A-Z0-9_]+/);
-    return code ? code[0] : "";
+    return code && ((S.me && S.me.panel) || store.get("wasOwner", false)) ? code[0] : "";  // the raw code: for the owner only
   }
   function problem(e) {
     if (e instanceof HttpError) {
@@ -256,6 +260,7 @@
     const codes = [];
     s = s.replace(/`([^`]+)`/g, (m, c) => { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
     s = esc(tidyMath(s));
+    s = s.replace(/(\d) (?=\d{3}(?!\d))/g, "$1\u00a0").replace(/(\d) (?=[₽%$€]|лет|руб)/g, "$1\u00a0");  // 10 000 ₽ not torn apart
     s = s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/__(.+?)__/g, "<b>$1</b>")
       .replace(/(^|[\s(«])\*(?!\s)(.+?)(?<!\s)\*(?=[\s).,!?:;»]|$)/g, "$1<i>$2</i>")
       .replace(/(^|[\s(«])_(?!\s)(.+?)(?<!\s)_(?=[\s).,!?:;»]|$)/g, "$1<i>$2</i>")
@@ -423,31 +428,42 @@
   }
 
   // ---------- small UI helpers ----------
+  // emoji some phones draw as plain black signs without the «picture» mark (U+FE0F): only this app's own words and the
+  // server's labels in the family's screens get it (never everywhere: the owner's code matches its texts as they are)
+  const emo = (s) => String(s).replace(/(🖼|🌫|🎞|🖌|🗑|🗂|🗣|🛡|🏖|↩|⏹)(?!️)/gu, "$1️");
   function toast(text, ms) {
     document.querySelectorAll(".toast").forEach((t) => t.remove());
-    const t = el("div", { class: "toast", text });
+    const t = el("div", { class: "toast", role: "status", text });
     document.body.append(t);
-    setTimeout(() => t.remove(), ms || 2600);
+    setTimeout(() => t.remove(), ms || Math.min(7000, 1800 + String(text || "").length * 45));
   }
   function sheet(title, build) {
     const bg = el("div", { class: "sheet-bg" });
-    const box = el("div", { class: "sheet" }, el("div", { class: "grab" }), title ? el("h2", { text: title }) : null);
     const close = () => bg.remove();
+    const box = el("div", { class: "sheet" }, el("div", { class: "sheet-head" }, title ? el("h2", { text: title }) : el("span", { style: "flex:1" }),
+      el("button", { class: "sheet-x", "aria-label": "Закрыть", text: "✕", onclick: close })));
     bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
     build(box, close);
     bg.append(box);
     document.body.append(bg);
     return close;
   }
+  // a list to choose from: [icon, words, action] items; a plain string is a section's name
   function menu(title, items) {
     sheet(title, (box, close) => {
       const list = el("div", { class: "list" });
       for (const it of items) {
         if (!it) continue;
+        if (typeof it === "string") { list.append(el("div", { class: "menu-sec", text: it })); continue; }
         list.append(el("button", { onclick: () => { close(); it[2](); } }, el("span", { class: "ic", text: it[0] }), el("span", { text: it[1] })));
       }
       box.append(list);
     });
+  }
+  // a big tile of a tool: «🪄 Убрать фон» — the icon and the words
+  function tool(text, onclick) {
+    const s = emo(text), i = s.indexOf(" ");
+    return el("button", { class: "tool", onclick }, el("span", { class: "ic", text: i > 0 ? s.slice(0, i) : "•" }), el("span", { text: i > 0 ? s.slice(i + 1) : s }));
   }
   function ask(title, placeholder, initial) {
     return new Promise((resolve) => {
@@ -460,14 +476,30 @@
       });
     });
   }
-  function confirmBox(title, yes) {
+  // «Удалить чат «…»? Переписка удалится с телефона.»: the question on top, the rest under it; danger — a red «yes»
+  function confirmBox(text, yes, danger) {
+    const m = String(text).match(/^(.+?[.?!])\s+(.+)$/s);
     return new Promise((resolve) => {
-      sheet(title, (box, close) => {
-        box.append(el("div", { class: "big-actions" },
+      sheet(m ? m[1] : text, (box, close) => {
+        if (m) box.append(el("p", { class: "muted", style: "font-size:15px;margin:0 0 16px", text: m[2] }));
+        box.append(el("div", { class: "big-actions", style: m ? "" : "margin-top:6px" },
           el("button", { class: "btn line", text: "Отмена", onclick: () => { close(); resolve(false); } }),
-          el("button", { class: "btn", text: yes || "Да", onclick: () => { close(); resolve(true); } })));
+          el("button", { class: danger ? "btn danger-fill" : "btn", text: yes || "Да", onclick: () => { close(); resolve(true); } })));
       });
     });
+  }
+  // a row taken away at once, with «↩️ Вернуть» for 5 seconds; then it is gone for good (commit)
+  function softDelete(row, said, commit) {
+    const kids = [...row.childNodes];
+    kids.forEach((k) => k.remove());
+    row.classList.add("gone");
+    const timer = setTimeout(commit, 5000);
+    row.append(el("div", { class: "grow", text: said }), el("button", { class: "act", text: "↩️ Вернуть", onclick: () => {
+      clearTimeout(timer);
+      row.innerHTML = "";
+      row.classList.remove("gone");
+      kids.forEach((k) => row.append(k));
+    } }));
   }
   function viewer(blob, name, extra) {
     const v = el("div", { class: "viewer" });
@@ -501,18 +533,19 @@
     const c = s.match(/\b([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})\b/);
     return c ? { host: "", code: c[1] } : null;
   }
+  const NO_CODE = "Не вижу кода. Скопируйте сообщение от владельца помощника целиком и нажмите «📋 Вставить скопированное».";
   function renderLogin(message) {
     const app = $("#app");
     app.innerHTML = "";
-    const inp = el("input", { class: "input", placeholder: "XXXX-XXXX", autocomplete: "off", autocapitalize: "characters", spellcheck: "false" });
+    const inp = el("input", { class: "input", placeholder: "Строка из сообщения", autocomplete: "off", autocapitalize: "characters", spellcheck: "false" });
     const err = el("div", { class: "msg-err", text: message || "" });
-    const go = el("button", { class: "btn wide", text: "Войти" });
+    const go = el("button", { class: "btn line wide", text: "Войти" });
     async function login() {
       const p = parseLogin(inp.value);
-      if (!p) { err.textContent = "Вставьте код из сообщения администратора."; return; }
+      if (!p) { err.textContent = NO_CODE; return; }
       if (Native) {
         const host = p.host || (Native.getHost && Native.getHost());
-        if (!host) { err.textContent = "Вставьте строку целиком — вместе с адресом сервера."; return; }
+        if (!host) { err.textContent = "Нужна вся строка из сообщения, а не только код. Скопируйте её целиком и нажмите «📋 Вставить скопированное»."; return; }
         Native.setHost(host);
       }
       go.disabled = true;
@@ -528,10 +561,13 @@
     }
     go.onclick = login;
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
-    const paste = el("button", { class: "btn soft wide", text: "📋 Вставить из буфера", onclick: async () => {
+    // the usual way: the whole message from the owner is copied — one tap reads it and signs in
+    const paste = el("button", { class: "btn wide", text: "📋 Вставить скопированное", onclick: async () => {
       let t = "";
       try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
-      if (t) { inp.value = t.trim(); if (parseLogin(t)) login(); } else toast("В буфере ничего нет — вставьте вручную");
+      if (!t || !t.trim()) { toast("Ничего не скопировано — скопируйте строку из сообщения"); return; }
+      inp.value = t.trim();
+      if (parseLogin(t)) login(); else err.textContent = NO_CODE;
     } });
     // the owner without a signed-in phone: a new code to the owner's mailbox, no server console needed
     const mail = el("button", { class: "btn line wide", style: "margin-top:18px", text: "✉️ Я владелец — прислать код на почту", onclick: async () => {
@@ -549,7 +585,7 @@
       err.textContent = "";
       try {
         const r = await api("/api/owner_mail", {});
-        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «📋 Вставить из буфера».`;
+        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «📋 Вставить скопированное».`;
       } catch (e) {
         err.textContent = problem(e);
       }
@@ -561,9 +597,9 @@
     const logo = el("div", { class: "logo", text: "✦", onclick: () => { if (++taps >= 5) mail.classList.remove("hidden"); } });
     app.append(el("div", { class: "login" },
       logo, el("h1", { text: "ИИ-помощник" }),
-      el("p", { text: "Отвечает на вопросы, решает задания по фото, обрабатывает снимки, рисует и переводит." }),
-      el("p", { text: "Для входа нужен код от администратора." }),
-      inp, paste, go, err, mail));
+      el("p", { text: "Отвечает на вопросы, помогает с уроками, улучшает и меняет фото, рисует и переводит." }),
+      el("p", { text: "Для входа нужен код — его присылает владелец помощника." }),
+      inp, err, paste, go, mail));
   }
   async function logout(message) {
     try { await api("/api/logout", {}); } catch (e) { /* signed out anyway */ }
@@ -573,9 +609,9 @@
   }
 
   // ---------- the main screen ----------
-  const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼", "Фото"], ["video", "🎬", "Видео"], ["more", "☰", "Ещё"]];
-  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", video: "Видео", vpn: "Управление", more: "Ещё" };
-  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "🛡", "Управление"]], TABS.slice(4)) : TABS);
+  const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼️", "Фото"], ["video", "🎬", "Видео"], ["more", "☰", "Ещё"]];
+  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото", video: "Видео", vpn: "Управление", more: "Ещё" };
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "🛡️", "Управление"]], TABS.slice(4)) : TABS);
   // «Управление» is not in this app: the server gives its code only to the owner's signed-in phone
   async function ownerCode() {
     try {
@@ -610,6 +646,7 @@
       if (Date.now() - wingerAt < 2 * 60000) setTimeout(start, 8000);  // Winger is coming up over a bridge: again by itself
       return;
     }
+    document.querySelectorAll(".toast").forEach((t) => t.remove());  // the sign-in screen's words are done with
     const owner = S.me.panel ? ownerCode() : null;  // fetched while the conversations load
     if (S.me.panel) store.set("wasOwner", true);
     await DB.open();
@@ -619,7 +656,7 @@
     const shell = el("div", { class: "shell" });
     S.top = el("div", { class: "top" });
     S.viewsEl = el("div", { class: "views" });
-    const tabs = el("div", { class: "tabs" });
+    const tabs = el("div", { class: "tabs" + (tabsFor(S.me).length === 6 ? " six" : "") });
     for (const [key, ic, name] of tabsFor(S.me)) {
       tabs.append(el("button", { class: "tab", "data-tab": key, onclick: () => show(key) }, el("span", { class: "ic", text: ic }), el("span", { text: name })));
     }
@@ -638,6 +675,8 @@
     show(tabsFor(S.me).some((t) => t[0] === S.tab) && S.tab !== "vpn" ? S.tab : "chat");
   }
   function show(tab) {
+    // a notice belongs to the screen it was said on; the owner's code shows one and redraws the same tab right after
+    if (tab !== S.tab) document.querySelectorAll(".toast").forEach((t) => t.remove());
     S.tab = tab;
     store.set("tab", tab);
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
@@ -646,7 +685,7 @@
     S.top.innerHTML = "";
     const sub = v.sub ? v.sub() : "";
     S.top.append(el("h1", {}, TITLES[tab], sub ? el("span", { class: "sub", text: sub }) : null));
-    for (const b of v.buttons ? v.buttons() : []) S.top.append(el("button", { class: "icon-btn", title: b[1], text: b[0], onclick: b[2] }));
+    for (const b of v.buttons ? v.buttons() : []) S.top.append(el("button", { class: "icon-btn pill", title: b[1], onclick: b[2] }, b[0]));
     if (v.onShow) v.onShow();
   }
   function refreshTop() { if (S.views[S.tab]) show(S.tab); }
@@ -654,31 +693,34 @@
   // ---------- reminders: the phone rings by itself (the app's own alarm); the server only works out when and what ----------
   const REMIND_ASK = /^\s*(?:пожалуйста,?\s+)?(напомни|напомнить|поставь\s+напоминание)(?![а-яё])/i;
   function remindSet(r) {
-    if (!(Native && Native.remindAdd)) return "\n\nНапоминание звенит в приложении на телефоне — обновите приложение.";
+    if (!Native) return "\n\nНапоминания звенят только в приложении «ИИ-помощник» на телефоне.";
+    if (!Native.remindAdd) return "\n\nЧтобы телефон напоминал сам, обновите приложение: «☰ Ещё» → «Проверить обновление».";
     const id = Native.remindAdd(JSON.stringify(r));
     if (!id) return "\n\n⚠️ Не получилось поставить напоминание на телефоне.";
     if (Native.askNotify && !store.get("askedNotify", false)) { store.set("askedNotify", true); Native.askNotify(); }
     return "\n\nТелефон напомнит сам, даже без интернета. Отменить — «☰ Ещё» → «⏰ Напоминания».";
   }
-  function remindersCard() {
+  function remindersCard(redraw) {
     const card = el("div", { class: "card" }, el("h3", { text: "⏰ Напоминания" }));
     let list = [];
     try { list = JSON.parse(Native.reminders() || "[]"); } catch (e) { /* none */ }
     if (!list.length) {
-      card.append(el("small", { style: "color:var(--muted)", text: "Пока нет. Напишите или скажите в чате: «Напомни завтра в 9 выпить таблетку» — телефон напомнит сам, даже без интернета." }));
+      card.append(el("div", { class: "muted", style: "font-size:14px", text: "Пока нет. Скажите или напишите в чате: «Напомни завтра в 9 выпить таблетку» — телефон напомнит сам, даже без интернета." }));
     }
     const again = { daily: " · каждый день", weekly: " · каждую неделю", monthly: " · каждый месяц" };
     for (const r of list) {
       const at = new Date(r.at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
-      card.append(el("div", { class: "row" }, el("div", { class: "grow" }, r.text, el("small", { text: at + (again[r.repeat] || "") })),
-        el("button", { class: "icon-btn", text: "🗑", title: "Удалить", onclick: () => {
-          Native.remindDel(r.id); card.replaceWith(remindersCard()); toast("Напоминание удалено");
-        } })));
+      const row = el("div", { class: "row" }, el("div", { class: "grow" }, r.text, el("small", { text: at + (again[r.repeat] || "") })));
+      row.append(el("button", { class: "icon-btn", text: "🗑️", title: "Удалить", onclick: () => softDelete(row, "Напоминание удалено", () => {
+        Native.remindDel(r.id);
+        redraw();
+      }) }));
+      card.append(row);
     }
     return card;
   }
 
-  // ---------- conversation threads (chat and study) ----------
+  // ---------- conversation threads (chat, study, photo, video) ----------
   function context(thread) {
     const out = [];
     for (const m of S.msgs[thread]) {
@@ -690,12 +732,14 @@
   }
   function msgEl(m, thread, list) {
     if (m.role === "note") return el("div", { class: "msg note" }, el("div", { class: "bubble", text: m.text }));
-    const wrap = el("div", { class: "msg " + (m.role === "me" ? "me" : "ai") });
+    const wrap = el("div", { class: "msg " + (m.role === "me" ? "me" : "ai") + (m.image || m.result || m.video ? " media" : "") });
     const b = el("div", { class: "bubble" + (m.err ? " err" : "") });
-    if (m.image) b.append(el("img", { class: "thumb", src: urlOf(m.image), onclick: () => viewer(m.image, "photo.jpg") }));
+    // in Photo a picture opened full screen can be worked on again
+    const again = (im, words) => (thread === "photo" ? [words, () => S.views.photo.set(im)] : null);
+    if (m.image) b.append(el("img", { class: "thumb", src: urlOf(m.image), alt: "", onclick: () => viewer(m.image, "photo.jpg", again(m.image, "✏️ Изменить это фото")) }));
     if (m.file) b.append(el("div", { class: "file-chip", text: "📄 " + m.file }));
     if (m.result) {
-      b.append(el("img", { class: "result", src: urlOf(m.result), onclick: () => viewer(m.result, m.name || "picture.jpg") }));
+      b.append(el("img", { class: "result", src: urlOf(m.result), alt: "", onclick: () => viewer(m.result, m.name || "picture.jpg", again(m.result, "✏️ Изменить ещё")) }));
     }
     if (m.video) b.append(el("video", { class: "result", controls: true, playsinline: true, src: urlOf(m.video) }));
     if (m.pdf) b.append(el("div", { class: "file-chip", style: "background:var(--accent-soft);margin-bottom:6px", text: "📄 " + (m.name || "document.pdf") }));
@@ -703,26 +747,33 @@
     else if (m.text) b.append(el("div", { html: md(m.text) }));
     if (m.audio) b.append(el("audio", { controls: true, src: urlOf(m.audio) }));
     wrap.append(b);
-    if (m.label) wrap.append(el("div", { class: "label", text: m.label }));
+    // under an answer: the family sees no model's name and no usual mode — only «🌐 интернет», the grade, the checks
+    const lab = m.label && (S.me.panel ? m.label : m.label.split(" · ").slice(1).filter((x) => x && x !== S.me.modes.chat).join(" · "));
+    if (lab) wrap.append(el("div", { class: "label", text: lab }));
+    const act = (text, onclick) => el("button", { class: "act", text, onclick });
     const file = m.result || m.video || m.pdf;
     if (file) {  // a picture, video or PDF that came out: keep it, share it, or (in Photo) work on it further
+      const view = S.views[thread];
       wrap.append(el("div", { class: "acts" },
-        el("button", { class: "act", text: "⬇️ Сохранить", onclick: () => { saveBlob(file, m.name || "result"); toast("Сохранено"); } }),
-        el("button", { class: "act", text: "📤 Поделиться", onclick: () => shareBlob(file, m.name || "result") }),
-        thread === "photo" && m.result ? el("button", { class: "act", text: "✏️ Дальше", onclick: () => S.views.photo.set(m.result) }) : null));
+        act("⬇️ Сохранить", () => { saveBlob(file, m.name || "result"); toast("Сохранено"); }),
+        act("📤 Поделиться", () => shareBlob(file, m.name || "result")),
+        thread === "photo" && m.result ? act("✏️ Изменить ещё", () => S.views.photo.set(m.result)) : null,
+        m.tpl && view && view.th ? act("🔁 С другими фото", () => whoIsWho(m.tpl.kind, m.tpl, view.th)) : null));
     } else if (m.role === "ai" && m.text && !m.err) {
-      const acts = el("div", { class: "acts" });
-      acts.append(el("button", { class: "act", text: "📋 Копировать", onclick: () => copyText(plain(m.text)) }));
-      if (S.me.can.speak) acts.append(el("button", { class: "act", text: "🔊", title: "Озвучить", onclick: () => speakMsg(m, thread) }));
-      if (!m.note) {
-        acts.append(el("button", { class: "act", text: "✂️ Короче", onclick: () => list.follow("short") }),
-          el("button", { class: "act", text: "➕ Подробнее", onclick: () => list.follow("more") }));
-      }
-      wrap.append(acts);
+      // «Короче» and «Подробнее» are about the last answer: only under it
+      const all = S.msgs[thread] || [];
+      let lastAi = null;
+      for (let i = all.length - 1; i >= 0 && !lastAi; i--) if (all[i].role === "ai") lastAi = all[i];
+      wrap.append(el("div", { class: "acts" },
+        act("📋 Копировать", () => copyText(plain(m.text))),
+        S.me.can.speak ? act("🔊 Прочитать вслух", () => speakMsg(m, b)) : null,
+        !m.note && m === lastAi && list && list.ask ? [act("✂️ Короче", () => list.follow("short")), act("➕ Подробнее", () => list.follow("more"))] : null));
+    } else if (m.err && list && list.canRetry(m)) {
+      wrap.append(el("div", { class: "acts" }, act("🔄 Повторить", () => list.retry(m))));
     }
     return wrap;
   }
-  async function speakMsg(m, thread) {
+  async function speakMsg(m, bubble) {
     if (m.audio) { playAudio(m.audio); return; }
     toast("🔊 Озвучиваю…");
     try {
@@ -730,22 +781,29 @@
       if (ev.t !== "done") { toast(ev.text); return; }
       m.audio = blobOf(ev.audio, "audio/ogg");
       await DB.put(m);
-      S.views[thread].redraw();
-      playAudio(m.audio);
+      const a = el("audio", { controls: true, src: urlOf(m.audio) });
+      bubble.append(a);
+      a.play().catch(() => {});
     } catch (e) { toast(problem(e)); }
   }
-  // a thread of messages with a live answer bubble; used by Chat, Study and Photo
-  function thread(name, scroll, emptyState) {
+  // a thread of messages with a live answer bubble; emptyState: what an empty thread shows, tail: what goes under the
+  // last message (both may give null)
+  function thread(name, scroll, emptyState, tail) {
     const box = el("div", { class: "msgs" });
+    let last = null, liveEl = null;  // the last request (for «Повторить»), the bubble being written now
     const api2 = {
-      box,
+      box, name,
       redraw() {
         box.innerHTML = "";
-        if (!S.msgs[name].length && emptyState) box.append(emptyState());
+        if (!S.msgs[name].length && emptyState && !liveEl) box.append(emptyState());
         for (const m of S.msgs[name]) box.append(msgEl(m, name, api2));
+        if (liveEl) box.append(liveEl);
+        else if (tail && !S.busy[name]) box.append(tail());
+        if (api2.onRedraw) api2.onRedraw();
         api2.down();
       },
-      down() { requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; }); },
+      // to the newest message; an empty screen opens at its top
+      down() { requestAnimationFrame(() => { scroll.scrollTop = box.querySelector(".msg") ? scroll.scrollHeight : 0; }); },
       async add(m) {
         m.thread = name;
         m.ts = Date.now();
@@ -758,20 +816,27 @@
       async run(path, body, mine) {
         if (S.busy[name]) { toast("Подождите, ещё отвечаю…"); return null; }
         S.busy[name] = true;
+        last = { path, body };
         if (mine) { await api2.add(mine); api2.redraw(); }
         const live = el("div", { class: "msg ai" });
         const b = el("div", { class: "bubble" });
         const content = el("div");
         const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Думаю…" }));
         b.append(content, status);
+        if (path === "/api/tvideo" || path === "/api/animate") {
+          b.append(el("div", { class: "live-note", text: "Можно свернуть приложение, но не закрывайте его — ролик придёт сюда." }));
+        }
         live.append(b);
-        if (box.firstChild && box.firstChild.classList.contains("empty")) box.firstChild.remove();
+        [...box.children].forEach((c) => { if (c.classList.contains("empty") || c.classList.contains("tail")) c.remove(); });
         box.append(live);
+        liveEl = live;
         api2.down();
         let text = "", timer = null, said = "Думаю…", t0 = Date.now();
         const clock = setInterval(() => {
           const sec = Math.round((Date.now() - t0) / 1000);
-          if (sec >= 5 && !status.classList.contains("hidden")) status.lastChild.textContent = said + " " + sec + " с";
+          if (sec >= 5 && !status.classList.contains("hidden")) {
+            status.lastChild.textContent = said + " · " + (sec < 60 ? sec + " с" : "прошло " + Math.floor(sec / 60) + " мин");
+          }
         }, 1000);
         const paint = () => { timer = null; content.innerHTML = md(text); content.lastElementChild && content.lastElementChild.classList.add("typing"); api2.down(); };
         let end;
@@ -795,6 +860,7 @@
         }
         clearTimeout(timer);
         clearInterval(clock);
+        liveEl = null;
         live.remove();
         S.busy[name] = false;
         let out;
@@ -812,11 +878,24 @@
         api2.redraw();
         return out;
       },
+      // «🔄 Повторить» under the last answer when it did not come: the same request once more
+      canRetry(m) {
+        const l = S.msgs[name];
+        return !!last && !!m.err && l[l.length - 1] === m && !S.busy[name];
+      },
+      async retry(m) {
+        if (!api2.canRetry(m)) return;
+        await DB.del(m.id);
+        S.msgs[name].pop();
+        api2.redraw();
+        api2.run(last.path, last.body, null);
+      },
       follow(kind) {
         const shown = { short: "✂️ Короче", more: "➕ Подробнее" }[kind];
         api2.ask({ followup: kind }, { role: "me", text: shown, ctx: shown });
       },
       ask: null,  // set by the view
+      onRedraw: null,  // set by the view that draws something of its own with the thread
     };
     return api2;
   }
@@ -826,8 +905,8 @@
     try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
     const time = el("span", { class: "time", text: "0:00" });
     const recRow = el("div", { class: "rec" }, el("span", { class: "dot" }), time,
-      el("button", { class: "round ghost", text: "✕", onclick: () => finish(false) }),
-      el("button", { class: "round main", text: "✓", onclick: () => finish(true) }));
+      el("button", { class: "round ghost", text: "✕", "aria-label": "Отменить", onclick: () => finish(false) }),
+      el("button", { class: "round main", text: "✓", "aria-label": "Готово", onclick: () => finish(true) }));
     row.replaceWith(recRow);
     const tick = setInterval(() => {
       const s = Math.floor((Date.now() - Rec.t0) / 1000);
@@ -855,6 +934,7 @@
   // several chats on this phone, each its own thread of messages (the first one keeps the old thread «chat»)
   const CHATS_MAX = 30;
   const chatName = (id) => (id === "main" ? "chat" : "chat:" + id);
+  const cut40 = (t) => { t = String(t).replace(/\s+/g, " ").trim(); return t.length > 40 ? t.slice(0, 40).trim() + "…" : t; };
   function chatsAll() {
     const l = store.get("chats", null);
     return Array.isArray(l) && l.length ? l : [{ id: "main", title: "", upd: 0 }];
@@ -862,38 +942,47 @@
   function chatTitle(c) {
     if (c.title) return c.title;
     const first = (S.msgs[chatName(c.id)] || []).find((m) => m.role === "me" && m.text);
-    return first ? first.text.slice(0, 40) : c.id === "main" ? "Первый чат" : "Новый чат";
+    return first ? cut40(first.text) : c.id === "main" ? "Первый чат" : "Новый чат";
   }
+  const IDEAS_SHOWN = ["congrats", "letter", "reply", "recipe", "explain", "gift"];  // the rest: «💡 Другие готовые задачи»
   function chatView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "✦" }), el("h2", { text: "Спросите что угодно" }),
-      el("div", { text: "Пишите, говорите голосом 🎤, присылайте фото и документы 📎" }),
-      el("div", { class: "hints" }, ...["Объясни, как работает ипотека", "Составь меню на неделю", "Помоги ответить на письмо"]
-        .concat(S.me.can.draw ? ["Нарисуй кота-космонавта на Луне"] : [])
-        .map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.focus(); sync(); } }))));
+      el("p", { text: "Пишите или нажмите 🎤 и говорите. Фото и документы — через 📎." }),
+      el("p", { class: "empty-sec", text: "Готовые задачи" }),
+      el("div", { class: "tools" },
+        Native && Native.remindAdd ? tool("⏰ Напомнить", () => { ta.value = "Напомни "; sync(); ta.focus(); }) : null,
+        tool("🗣️ Переводчик", translator),
+        IDEAS_SHOWN.filter((k) => S.me.ideas[k]).map((k) => tool(S.me.ideas[k][0], () => pickIdea(k)))),
+      el("button", { class: "btn line wide", style: "margin-top:12px", text: "💡 Другие готовые задачи", onclick: ideasMenu }));
     let cur = store.get("chatCur", "main"), th = null;
     if (!chatsAll().some((c) => c.id === cur)) cur = chatsAll()[0].id;
     const attach = el("div", { class: "attach-row hidden" });
     const chips = el("div", { class: "chips hidden", style: "padding:0 4px 8px" });
+    const ideaHint = el("div", { class: "idea-hint hidden" });
     const ta = el("textarea", { rows: 1, placeholder: "Сообщение" });
     autoGrow(ta);
     const clip = el("button", { class: "round ghost", text: "📎", title: "Прикрепить", onclick: attachMenu });
     const act = el("button", { class: "round main", text: "🎤" });
     const row = el("div", { class: "inrow" }, clip, ta, act);
-    const composer = el("div", { class: "composer" }, attach, chips, row);
+    const composer = el("div", { class: "composer" }, attach, chips, ideaHint, row);
     root.append(scroll, composer);
     let image = null, doc = null;
 
     function sync() {
-      const has = ta.value.trim() || image || doc || S.idea;
+      const has = ta.value.trim() || image || doc;
       act.textContent = has ? "➤" : "🎤";
+      act.setAttribute("aria-label", has ? "Отправить" : "Сказать голосом");
       attach.innerHTML = "";
       attach.classList.toggle("hidden", !(image || doc || S.idea));
-      if (image) attach.append(el("img", { src: urlOf(image) }));
+      if (image) attach.append(el("img", { src: urlOf(image), alt: "" }));
       if (doc) attach.append(el("div", { class: "chip", text: "📄 " + doc.name }));
       if (S.idea) attach.append(el("div", { class: "chip on", text: S.me.ideas[S.idea][0] }));
-      if (image || doc || S.idea) attach.append(el("button", { class: "x", text: "✕", onclick: () => { image = doc = null; S.idea = null; ta.placeholder = "Сообщение"; sync(); } }));
+      if (image || doc || S.idea) attach.append(el("button", { class: "x", text: "✕", "aria-label": "Убрать", onclick: () => { image = doc = null; S.idea = null; sync(); } }));
+      ideaHint.textContent = S.idea ? S.me.ideas[S.idea][1] : "";
+      ideaHint.classList.toggle("hidden", !S.idea);
+      ta.placeholder = S.idea ? "Напишите здесь" : "Сообщение";
       chips.innerHTML = "";
       chips.classList.toggle("hidden", !image);
       if (image) {
@@ -903,9 +992,17 @@
       }
     }
     ta.addEventListener("input", sync);
+    function pickIdea(k) {
+      S.idea = k;
+      sync();
+      ta.focus();
+    }
     function sendNow(extra) {
       const text = ta.value.trim();
-      if (!text && !image && !doc && !(extra && extra.op)) return;
+      if (!text && !image && !doc && !(extra && extra.op)) {
+        if (S.idea) { toast(S.me.ideas[S.idea][1].split(" Например")[0]); ta.focus(); }
+        return;
+      }
       const req = Object.assign({ text }, extra || {});
       if (S.idea) req.idea = S.idea;
       const shown = (extra && extra.op ? S.me.ai_ops[extra.op] + (text ? ": " + text : "") : "") || (S.idea ? S.me.ideas[S.idea][0] + ": " + text : text);
@@ -915,7 +1012,6 @@
       ta.style.height = "auto";
       image = doc = null;
       S.idea = null;
-      ta.placeholder = "Сообщение";
       sync();
       th.ask(req, mine, im, d);
     }
@@ -942,10 +1038,11 @@
       const chats = chatsAll();
       let c = chats.find((x) => x.id === cur);
       if (!c) { c = { id: cur, title: "", upd: 0 }; chats.unshift(c); }
-      if (!c.title && text && !S.msgs[chatName(cur)].some((m) => m.role === "me")) c.title = text.replace(/\s+/g, " ").slice(0, 40);
+      if (!c.title && text && !S.msgs[chatName(cur)].some((m) => m.role === "me")) c.title = cut40(text);
       c.upd = Date.now();
       chats.sort((a, b) => (b.upd || 0) - (a.upd || 0));
       store.set("chats", chats);
+      refreshTop();
     }
     async function openChat(id) {
       // a new chat left without a word in it does not stay in the list
@@ -967,7 +1064,7 @@
       await openChat(id);
     }
     async function delChat(c) {
-      if (!(await confirmBox(`Удалить чат «${chatTitle(c)}»? Переписка удалится с телефона.`, "Удалить"))) return;
+      if (!(await confirmBox(`Удалить чат «${chatTitle(c)}»? Переписка удалится с телефона.`, "Удалить", true))) return;
       await DB.clear(chatName(c.id));
       delete S.msgs[chatName(c.id)];
       let chats = chatsAll().filter((x) => x.id !== c.id);
@@ -980,14 +1077,14 @@
         box.append(el("button", { class: "btn wide", style: "margin-bottom:10px", text: "➕ Новый чат", onclick: () => { close(); newChat(); } }));
         for (const c of chatsAll()) {
           const day = c.upd ? new Date(c.upd).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "";
-          box.append(el("div", { class: "row", style: "cursor:pointer" + (c.id === cur ? ";font-weight:600" : ""), onclick: () => { close(); openChat(c.id); } },
-            el("div", { class: "grow" }, chatTitle(c), el("small", { text: c.id === cur ? "открыт сейчас" : day })),
-            el("button", { class: "round ghost", style: "width:36px;height:36px;font-size:15px", text: "✏️", title: "Переименовать", onclick: async (e) => {
+          box.append(el("div", { class: "row chat-row" + (c.id === cur ? " cur" : ""), onclick: () => { close(); openChat(c.id); } },
+            el("div", { class: "grow" }, el("span", { class: "t", text: chatTitle(c) }), el("small", { text: c.id === cur ? "открыт сейчас" : day })),
+            el("button", { class: "round ghost", text: "✏️", title: "Переименовать", "aria-label": "Переименовать", onclick: async (e) => {
               e.stopPropagation(); close();
               const t = await ask("Название чата", "Например: Ремонт кухни", chatTitle(c));
               if (t) { const chats = chatsAll(); const x = chats.find((y) => y.id === c.id); if (x) { x.title = t.slice(0, 60); store.set("chats", chats); refreshTop(); } }
             } }),
-            el("button", { class: "round ghost", style: "width:36px;height:36px;font-size:15px;margin-left:6px", text: "🗑", title: "Удалить",
+            el("button", { class: "round ghost", text: "🗑️", title: "Удалить", "aria-label": "Удалить",
               onclick: (e) => { e.stopPropagation(); close(); delChat(c); } })));
         }
       });
@@ -996,33 +1093,33 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); sendNow(); } });
 
     function record() {
-      dictate(row, (text) => th.ask({ text, voice: true }, { role: "me", text: "🎤 " + text, ctx: text }));
+      dictate(row, (t) => (S.idea ? ((ta.value = t), sendNow({ voice: true }))
+        : th.ask({ text: t, voice: true }, { role: "me", text: "🎤 " + t, ctx: t })));
     }
     function attachMenu() {
       menu("Прикрепить", [
         ["📷", "Камера", async () => { const f = await pickFile("image/*", true); if (f) { image = f; sync(); } }],
-        ["🖼", "Фото из галереи", async () => { const f = await pickFile("image/*"); if (f) { image = f; sync(); } }],
+        ["🖼️", "Фото из галереи", async () => { const f = await pickFile("image/*"); if (f) { image = f; sync(); } }],
         ["📄", "Документ: PDF, Word, текст", async () => {
           const f = await pickFile(".pdf,.docx,.pptx,.epub,.txt,.md,.csv,.json,.html,text/*,application/pdf");
-          if (f) { if (f.size > 14e6) toast("Файл больше 14 МБ"); else { doc = f; sync(); } }
+          if (f) { if (f.size > 14e6) toast("Файл больше 14 МБ — возьмите поменьше"); else { doc = f; sync(); } }
         }],
         ["💡", "Готовые задачи", ideasMenu],
       ]);
     }
     function ideasMenu() {
-      menu("Готовые задачи", Object.entries(S.me.ideas).map(([k, v]) => [v[0].split(" ")[0], v[0].split(" ").slice(1).join(" "), () => {
-        S.idea = k;
-        ta.placeholder = v[1];
-        sync();
-        ta.focus();
-      }]));
+      menu("Готовые задачи", Object.entries(S.me.ideas).map(([k, v]) => {
+        const s = emo(v[0]), i = s.indexOf(" ");
+        return [s.slice(0, i), s.slice(i + 1), () => pickIdea(k)];
+      }));
     }
     bind();
     if (cur !== "main") openChat(cur);
     return {
       root, redraw: () => th.redraw(),
-      sub: () => (chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) + " · " : "") + S.me.modes[S.me.mode],
-      buttons: () => [["🗂", "Чаты", chatsSheet], ["➕", "Новый чат", newChat]],
+      sub: () => [chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) : "",
+        S.me.mode !== "chat" ? S.me.modes[S.me.mode] : ""].filter(Boolean).join(" · "),
+      buttons: () => [["🗂️ Чаты", "Чаты", chatsSheet], ["➕ Новый", "Новый чат", newChat]],
       attachImage(im) { image = im; sync(); },
       onShow: () => th.down(),
     };
@@ -1044,40 +1141,54 @@
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     let mode = store.get("studyMode", "solve");
+    if (!STUDY_MODES[mode]) mode = "solve";
     let grade = store.get("grade", "5");
+    let open = false;  // the grade and the modes shown in full above the answers
     const head = el("div");
-    const EMPTY = { notes: ["Сфотографируйте параграф", "Конспект главного и тест, чтобы проверить себя."],
-      retell: ["Сфотографируйте текст", "Пересказ своими словами, план и главная мысль."],
-      essay: ["Тема сочинения", "Напишите тему или сфотографируйте задание — сочинение под возраст и требования."],
-      check: ["Сфотографируйте своё решение", "Найду ошибки и объясню, как исправить."] };
-    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "📚" }),
-      el("h2", { text: (EMPTY[mode] || ["Сфотографируйте задание"])[0] }),
-      el("div", { text: (EMPTY[mode] || ["", "Примеры, задачи, упражнения, вопросы по любому предмету — от 1 класса до вуза."])[1] }));
-    const th = thread("study", scroll, empty);
+    const gradeName = () => (GRADES.find((g) => g[0] === grade) || ["", ""])[1];
+    const tail = () => (S.msgs.study.length ? el("div", { class: "tail big-actions next" },
+      el("button", { class: "btn", text: "📷 Новое задание", onclick: () => shoot(true) }),
+      el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => shoot(false) })) : null);
+    const th = thread("study", scroll, null, tail);
+    th.onRedraw = () => drawHead();
     scroll.append(head, th.box);
     const ta = el("textarea", { rows: 1, placeholder: "Задание, тема сочинения или вопрос" });
     autoGrow(ta);
     const cam = el("button", { class: "round ghost", text: "📷", title: "Фото задания", onclick: () => shoot(true) });
-    const act = el("button", { class: "round main", text: "➤", onclick: () => submit() });
-    const composer = el("div", { class: "composer" }, el("div", { class: "inrow" }, cam, ta, act));
+    const act = el("button", { class: "round main", text: "🎤", "aria-label": "Сказать голосом" });
+    const row = el("div", { class: "inrow" }, cam, ta, act);
+    const composer = el("div", { class: "composer" }, row);
     root.append(scroll, composer);
+    const syncAct = () => {
+      const has = !!ta.value.trim();
+      act.textContent = has ? "➤" : "🎤";
+      act.setAttribute("aria-label", has ? "Отправить" : "Сказать голосом");
+    };
+    ta.addEventListener("input", syncAct);
+    act.onclick = () => (ta.value.trim() ? submit() : dictate(row, (t) => { ta.value = t; submit(); }));
 
     function drawHead() {
       head.innerHTML = "";
-      const sel = el("select", { onchange: () => { grade = sel.value; store.set("grade", grade); refreshTop(); } });
-      for (const [k, v] of GRADES) sel.append(el("option", { value: k, text: v, selected: k === grade }));
-      const seg = el("div", { class: "seg grid2" });
-      for (const [k, v] of Object.entries(STUDY_MODES)) {
-        seg.append(el("button", { class: k === mode ? "on" : "", text: v[0], onclick: () => { mode = k; store.set("studyMode", k); drawHead(); if (!S.msgs.study.length) th.redraw(); } }));
-      }
-      const card = el("div", { class: "card" },
-        el("div", { class: "row" }, el("div", { class: "grow" }, "Кто учится"), sel),
-        seg, el("div", { style: "font-size:14px;color:var(--muted);margin-top:8px", text: STUDY_MODES[mode][1] }));
-      head.append(card);
-      if (!S.msgs.study.length) {
-        head.append(el("div", { class: "big-actions", style: "margin-bottom:12px" },
-          el("button", { class: "big primary", onclick: () => shoot(true) }, el("span", { class: "ic", text: "📷" }), "Сфотографировать"),
-          el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼" }), "Из галереи")));
+      const has = S.msgs.study.length > 0;
+      if (has && !open) {
+        head.append(el("button", { class: "card study-line", onclick: () => { open = true; drawHead(); } },
+          el("span", { class: "grow", text: gradeName() + " · " + STUDY_MODES[mode][0] }), el("span", { class: "muted", text: "Изменить ›" })));
+      } else {
+        const sel = el("select", { "aria-label": "Кто учится", onchange: () => { grade = sel.value; store.set("grade", grade); refreshTop(); } });
+        for (const [k, v] of GRADES) sel.append(el("option", { value: k, text: v, selected: k === grade }));
+        const seg = el("div", { class: "seg grid2", style: "margin-top:8px" });
+        for (const [k, v] of Object.entries(STUDY_MODES)) {
+          seg.append(el("button", { class: k === mode ? "on" : "", "aria-pressed": k === mode ? "true" : "false", text: v[0],
+            onclick: () => { mode = k; store.set("studyMode", k); open = false; drawHead(); } }));
+        }
+        head.append(el("div", { class: "card" },
+          el("div", { class: "row" }, el("div", { class: "grow" }, "Кто учится"), sel),
+          seg, el("div", { class: "study-desc", text: STUDY_MODES[mode][1] })));
+        if (!has) {
+          head.append(el("div", { class: "big-actions", style: "margin-bottom:12px" },
+            el("button", { class: "big primary", onclick: () => shoot(true) }, el("span", { class: "ic", text: "📷" }), "Сфотографировать"),
+            el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи")));
+        }
       }
       ta.placeholder = mode === "essay" ? "Тема сочинения и требования" : S.msgs.study.length ? "Спросите про решение"
         : mode === "notes" || mode === "retell" ? "Текст или тема" : "Задание или вопрос";
@@ -1087,113 +1198,154 @@
       if (f) solve(f);
     }
     async function solve(im, text) {
+      open = false;
       const shown = STUDY_MODES[mode][0] + (text ? ": " + text : "");
       const body = { mode, grade, text: text || "", context: [] };
       body.image = await b64(await shrink(im, 1800, 0.9));
       await th.run("/api/study", body, { role: "me", text: shown, image: im });
+      open = false;
       drawHead();
     }
     function submit() {
       const text = ta.value.trim();
-      if (!text) { shoot(true); return; }
+      if (!text) return;
       ta.value = "";
       ta.style.height = "auto";
+      syncAct();
+      open = false;
       const follow = S.msgs.study.length > 0 && !["essay", "notes", "retell"].includes(mode);
       th.run("/api/study", { mode: follow ? "ask" : mode, grade, text, context: follow ? context("study") : [] },
-        { role: "me", text: follow ? text : STUDY_MODES[mode][0] + ": " + text }).then(drawHead);
+        { role: "me", text: follow ? text : STUDY_MODES[mode][0] + ": " + text }).then(() => { open = false; drawHead(); });
     }
     th.ask = async (req, mine) => {
       await th.run("/api/study", Object.assign({ mode: "ask", grade, context: context("study"), text: "" }, req), mine);
     };
-    drawHead();
     th.redraw();
     return {
-      root, redraw: th.redraw, solve,
-      sub: () => (GRADES.find((g) => g[0] === grade) || ["", ""])[1],
-      buttons: () => [["🧹", "Очистить", async () => {
-        if (!S.msgs.study.length || !(await confirmBox("Очистить решения?", "Очистить"))) return;
+      root, th, redraw: th.redraw, solve,
+      sub: gradeName,
+      buttons: () => [["🧹 Очистить", "Очистить", async () => {
+        if (!S.msgs.study.length) { toast("Здесь пока пусто"); return; }
+        if (!(await confirmBox("Очистить решения?", "Очистить", true))) return;
         await DB.clear("study");
         S.msgs.study = [];
+        open = false;
         th.redraw();
-        drawHead();
       }]],
       onShow: () => th.down(),
     };
   }
 
   // ---------- Photo: send a photo and say what to do; without a photo, describe a picture to draw ----------
-  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan"];  // the rest is under «Ещё» or in words; videos: «🎬 Видео»
-  const STYLE_ASKS = [["🎌", "В стиле аниме", "Перерисуй в стиле аниме"], ["🧸", "Как мультфильм Pixar", "Сделай как кадр из мультфильма Pixar, 3D"],
-    ["🌻", "Как картина Ван Гога", "Перерисуй как картину Ван Гога"], ["🏖", "Фон — море", "Замени фон на берег моря"],
-    ["🧹", "Убрать лишних людей", "Убери посторонних людей на заднем плане"]];
+  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan"];  // on the chosen photo; the rest under «⋯ Другое» or in words
+  // clearer names for some of the server's tools (only renames: the tools themselves are the server's)
+  const OP_NAMES = { restore: "👴 Восстановить старое", scan: "📑 Скан документа", bw: "⬛ Чёрно-белое", cartoon: "🦸 Мульт",
+    oil: "🖌️ Картина маслом", blurbg: "🌫️ Размыть фон", vintage: "🎞️ Винтаж" };
+  const STYLE_ASKS = { anime: ["🎌", "В стиле аниме", "Перерисуй в стиле аниме"], toon: ["🧸", "Как в мультфильме", "Сделай как кадр из мультфильма Pixar, 3D"],
+    gogh: ["🌻", "Как картина Ван Гога", "Перерисуй как картину Ван Гога"], sea: ["🏖️", "Фон — море", "Замени фон на берег моря"],
+    people: ["🚶", "Убрать лишних людей", "Убери посторонних людей на заднем плане"] };
+  const PHOTO_SECS = [["Фон", ["whitebg", "blurbg", "sea", "people"]], ["Цвет и качество", ["upscale", "vivid", "bw", "vintage"]],
+    ["Стиль", ["anime", "toon", "gogh", "sketch", "cartoon", "oil", "sticker"]]];
+  const DRAW_HINTS = ["Рыжий кот-космонавт на Луне, акварель", "Уютный домик в снежном лесу ночью", "Открытка с днём рождения для мамы"];
   function photoView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
-    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "🖼" }), el("h2", { text: "Фото и картинки" }),
-      el("div", { text: "Пришлите фото и напишите или скажите 🎤, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»."
-        + (S.me.can.draw ? " Без фото — опишите картинку, и я её нарисую." : "") }),
+    let photo = null;  // the photo chosen now; a job takes it away, the next step is chosen again
+    const tplOk = () => !!(S.me.can.tvideo || S.me.panel);
+    const empty = () => (photo ? null : el("div", { class: "empty" }, el("h2", { text: "Что сделать с фото?" }),
+      el("p", { text: "Пришлите фото и скажите или напишите, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»." }),
       el("div", { class: "big-actions", style: "margin:16px 0 4px" },
         el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
-        el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼" }), "Из галереи")),
-      S.me.can.draw ? el("div", { class: "hints" }, ...["Рыжий кот-космонавт на Луне, акварель", "Уютный домик в снежном лесу ночью",
-        "Открытка с днём рождения для мамы"].map((t) => el("button", { class: "hint", text: "🎨 " + t, onclick: () => { ta.value = t; sync(); ta.focus(); } }))) : null);
-    const th = thread("photo", scroll, empty);
+        el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи"),
+        tplOk() ? el("button", { class: "big wide", onclick: () => templatesSheet("photo", th) }, el("span", { class: "ic", text: "🎭" }),
+          el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null),
+      S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите картинку — я нарисую:" }),
+        el("div", { class: "hints" }, DRAW_HINTS.map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.dispatchEvent(new Event("input")); ta.focus(); } })))] : null));
+    const has = (op) => !!(S.me.photo_ops[op] || S.me.ai_ops[op]);
+    // the chosen photo, big, with what can be done to it
+    const chosen = () => (!photo ? null : el("div", { class: "tail chosen" },
+      el("div", { class: "preview" }, el("img", { src: urlOf(photo), alt: "", onclick: () => viewer(photo, "photo.jpg") }),
+        el("button", { class: "x", text: "✕", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
+      el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
+      el("div", { class: "tools" }, QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
+        tool("🪄 Своё — скажите или напишите", own), tool("⋯ Другое", more))));
+    const th = thread("photo", scroll, empty, chosen);
     scroll.append(th.box);
-    const scanBar = el("div", { class: "banner hidden", style: "margin:0 4px 8px" });
-    const attach = el("div", { class: "attach-row hidden" });
-    const chips = el("div", { class: "chips hidden", style: "padding:0 4px 8px" });
+    const scanBar = el("div", { class: "banner hidden" });
     const ta = el("textarea", { rows: 1 });
     autoGrow(ta);
-    const cam = el("button", { class: "round ghost", text: "📷", title: "Фото", onclick: () => menu("Фото", [
-      ["📷", "Снять", () => pick(true)], ["🖼", "Из галереи", () => pick(false)]]) });
+    const cam = el("button", { class: "round ghost", text: "📷", title: "Выбрать фото", onclick: () => menu("Выбрать фото", [
+      ["📷", "Снять фото", () => pick(true)], ["🖼️", "Из галереи", () => pick(false)],
+      tplOk() ? ["🎭", "Я на фото", () => templatesSheet("photo", th)] : null]) });
     const act = el("button", { class: "round main", text: "🎤" });
     const row = el("div", { class: "inrow" }, cam, ta, act);
-    root.append(scroll, el("div", { class: "composer" }, scanBar, attach, chips, row));
-    let photo = null;
+    root.append(scroll, el("div", { class: "composer" }, scanBar, row));
 
-    function label(op) { return S.me.photo_ops[op] || S.me.ai_ops[op] || op; }
+    function label(op) { return OP_NAMES[op] || emo(S.me.photo_ops[op] || S.me.ai_ops[op] || op); }
     function sync() {
-      act.textContent = ta.value.trim() ? "➤" : "🎤";
-      ta.placeholder = photo ? "Что сделать с фото?" : S.me.can.draw ? "Опишите картинку — нарисую" : "Пришлите фото 📷";
-      attach.innerHTML = "";
-      attach.classList.toggle("hidden", !photo);
-      chips.innerHTML = "";
-      chips.classList.toggle("hidden", !photo);
-      if (photo) {
-        attach.append(el("img", { src: urlOf(photo), onclick: () => viewer(photo, "photo.jpg") }),
-          el("div", { style: "font-size:13px;color:var(--muted);flex:1", text: "Фото выбрано. Нажмите кнопку или напишите, что сделать" }),
-          el("button", { class: "x", text: "✕", onclick: () => { photo = null; sync(); } }));
-        for (const op of QUICK) if (S.me.photo_ops[op] || S.me.ai_ops[op]) chips.append(el("button", { class: "chip", text: label(op), onclick: () => runOp(op) }));
-        chips.append(el("button", { class: "chip", text: "⋯ Ещё", onclick: more }));
-      }
+      const typed = !!ta.value.trim();
+      act.textContent = typed ? "➤" : "🎤";
+      act.setAttribute("aria-label", typed ? "Отправить" : "Сказать голосом");
+      ta.placeholder = photo ? "Что сделать с фото?" : S.me.can.draw ? "Что нарисовать?" : "Сначала пришлите фото 📷";
       scanBar.innerHTML = "";
       scanBar.classList.toggle("hidden", !S.scan.length);
       if (S.scan.length) {
-        scanBar.append(el("span", { style: "flex:1", text: `📑 Страниц для PDF: ${S.scan.length}` }),
-          el("button", { class: "act", text: "📄 Собрать PDF", onclick: makePdf }),
-          el("button", { class: "act", text: "✕", onclick: () => { S.scan = []; sync(); } }));
+        scanBar.append(el("span", { class: "grow", text: `📑 Страниц для PDF: ${S.scan.length}` }),
+          el("button", { class: "act", text: "✕", "aria-label": "Убрать страницы", onclick: async () => {
+            if (!(await confirmBox(`Убрать собранные страницы (${S.scan.length})? PDF не соберётся.`, "Убрать", true))) return;
+            S.scan = [];
+            sync();
+          } }),
+          el("div", { class: "banner-acts" },
+            el("button", { class: "act", text: "📷 Ещё страница", onclick: () => menu("Ещё страница", [
+              ["📷", "Снять", () => page(true)], ["🖼️", "Из галереи", () => page(false)]]) }),
+            el("button", { class: "act", text: "📄 Собрать PDF", onclick: makePdf })));
       }
     }
     ta.addEventListener("input", sync);
     act.onclick = () => (ta.value.trim() ? send() : dictate(row, (t) => { ta.value = t; send(); }));
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); send(); } });
+    function own() {
+      ta.placeholder = "Например: сделай зиму, добавь шляпу";
+      ta.focus();
+    }
     function more() {
-      const items = Object.keys(S.me.photo_ops).filter((op) => !QUICK.includes(op) && op !== "animate")
-        .map((op) => { const [ic, ...rest] = label(op).split(" "); return [ic, rest.join(" "), () => runOp(op)]; });
-      if (S.me.ai_ops.edit) {
-        for (const [ic, name, words] of STYLE_ASKS) items.push([ic, name, () => { ta.value = words; send(); }]);
-        items.push(["🪄", "Своё изменение — опишите словами", () => { ta.placeholder = "Например: сделай зиму, добавь шляпу"; ta.focus(); }]);
+      const edit = !!S.me.ai_ops.edit;  // the AI's styles stand in for the plain «Мульт» and «Масло»
+      const ok = (k) => (STYLE_ASKS[k] ? edit : !!S.me.photo_ops[k] && !QUICK.includes(k) && k !== "animate" && !(edit && (k === "cartoon" || k === "oil")));
+      const item = (k) => {
+        if (STYLE_ASKS[k]) { const [ic, name, words] = STYLE_ASKS[k]; return [ic, name, () => { ta.value = words; send(); }]; }
+        const s = label(k), i = s.indexOf(" ");
+        return i > 0 ? [s.slice(0, i), s.slice(i + 1), () => runOp(k)] : ["•", s, () => runOp(k)];
+      };
+      const items = [["🪄", "Своё изменение — скажите или напишите", own]];
+      const seen = new Set();
+      for (const [sec, keys] of PHOTO_SECS) {
+        const here = keys.filter(ok);
+        keys.forEach((k) => seen.add(k));
+        if (here.length) items.push(sec, ...here.map(item));
       }
+      const rest = Object.keys(S.me.photo_ops).filter((k) => !seen.has(k) && ok(k));
+      if (rest.length) items.push("Ещё", ...rest.map(item));
       menu("Что сделать с фото", items);
     }
     async function pick(camera) {
       const f = await pickFile("image/*", camera);
       if (f) set(f);
     }
-    function set(im) { photo = im; show("photo"); sync(); th.down(); }
+    async function page(camera) {  // one more page for the PDF: straight to «Скан»
+      const f = await pickFile("image/*", camera);
+      if (!f) return;
+      photo = f;
+      runOp("scan");
+    }
+    function set(im) { photo = im; show("photo"); sync(); th.redraw(); }
     async function go(path, body, shown) {
-      if (S.busy.photo) { toast("Подождите, предыдущая ещё делается"); return; }
-      const im = photo;
+      if (S.busy.photo) { toast("Подождите, предыдущее ещё делается"); return; }
+      const im = photo;  // the job takes the photo: the next step is chosen anew
+      photo = null;
+      th.box.querySelectorAll(".tail").forEach((x) => x.remove());
+      sync();
+      refreshTop();
       if (im) body.image = await b64(await shrink(im, 3072, 0.92));
       const out = await th.run(path, body, { role: "me", image: im, text: shown });
       if (out && out.op === "scan" && out.result) { S.scan.push(out.result); sync(); }
@@ -1205,6 +1357,7 @@
     function send() {
       const text = ta.value.trim();
       if (!text) return;
+      if (S.busy.photo) { toast("Подождите, предыдущее ещё делается"); return; }
       if (!photo && !S.me.can.draw) { toast("Сначала пришлите фото: 📷 слева"); return; }
       ta.value = "";
       ta.style.height = "auto";
@@ -1222,163 +1375,278 @@
     sync();
     th.redraw();
     return {
-      root, set, redraw: th.redraw,
-      sub: () => (photo ? "фото выбрано" : "обработка и рисование"),
-      buttons: () => [["🧹", "Очистить", async () => {
-        if (!S.msgs.photo.length || !(await confirmBox("Удалить все готовые фото и картинки из списка?", "Очистить"))) return;
+      root, th, set, redraw: th.redraw,
+      sub: () => (photo ? "фото выбрано" : S.me.can.draw ? "улучшить, изменить, нарисовать" : "улучшить и изменить фото"),
+      buttons: () => [["🧹 Очистить", "Очистить", async () => {
+        if (!S.msgs.photo.length) { toast("Здесь пока пусто"); return; }
+        if (!(await confirmBox("Удалить все готовые фото и картинки из списка?", "Очистить", true))) return;
         await DB.clear("photo");
         S.msgs.photo = [];
         th.redraw();
       }]],
-      onShow: () => th.down(),
+      onShow: () => { gal.photo = null; th.down(); },
     };
   }
 
-  // ---------- Video: «Я в ролике» (yourself in a template video) and «Оживить фото» ----------
-  // The templates are short free clips on the server, by theme; the person adds their own photo (one face, best waist-up
-  // or full-length) and says it is theirs or the person agrees; the server puts them into the clip on Hugging Face (the
-  // owner's free minutes: a couple of clips a day for the family). An own clip (≤ 40 MB) works too.
+  // ---------- «🎭 Я в ролике» (Видео) and «🎭 Я на фото» (Фото): a gallery of templates, then who is who ----------
+  // Templates are short clips on the server, by theme; the server finds up to 3 faces, a photo is chosen for any of them
+  // (the rest stay as they are) with consent, and the server swaps faces on its own CPU in 5–8 min. An own clip up to
+  // 20 s works too. Photo templates («Я на фото») share the gallery and who-is-who code.
+  const TPL = {
+    video: { title: "🎭 Я в ролике", path: "/api/tvideo", go: "🎬 Сделать ролик", find: "🔎 Ищу лица в ролике…",
+      off: "«Я в ролике» пока не включено — его включает владелец помощника.",
+      hint: "Выберите ролик — потом покажете, кого в нём заменить на себя или родных. Подойдёт и свой ролик с телефона, до 20 секунд.",
+      none: "Готовых роликов пока нет — загляните позже.", busy: "Подождите, ролик ещё делается",
+      foot: "Ролик будет готов примерно через 5–8 минут и появится здесь — его можно сохранить и отправить. Можно свернуть приложение, но не закрывайте его." },
+    photo: { title: "🎭 Я на фото", path: "/api/tphoto", go: "🖼️ Сделать фото", find: "🔎 Ищу лица на картинке…",
+      off: "«Я на фото» пока не включено — его включает владелец помощника.",
+      hint: "Выберите картинку — потом покажете, кого на ней заменить на себя или родных.",
+      none: "Готовых картинок пока нет — загляните позже.", busy: "Подождите, предыдущее фото ещё делается",
+      foot: "Обычно до полуминуты. Готовое фото появится здесь, во вкладке «Фото»." } };
+  // what the gallery loaded this visit of the tab: {theme, page, items, more, total, themes, can, note}; the tab's onShow forgets it
+  const gal = { video: null, photo: null };
+  // the owner reads the server's own words; the family only «not on yet» or «none yet»
+  const noteFor = (kind, st) => (S.me.panel ? st.note || TPL[kind].none : !st.can ? TPL[kind].off : TPL[kind].none);
+  function templatesSheet(kind, th) {
+    const T = TPL[kind];
+    if (S.busy[th.name]) { toast(T.busy); return; }
+    if (!S.me.can.tvideo && !S.me.panel) { toast(T.off, 5000); return; }
+    sheet(T.title, (box, close) => {
+      if (!gal[kind]) gal[kind] = { theme: store.get("tplTheme:" + kind, ""), page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0 };
+      const st = gal[kind];
+      const chips = el("div", { class: "chips" });
+      const stick = el("div", { class: "sheet-stick" }, chips);
+      const note = el("div", { class: "note-card hidden" });
+      const grid = el("div", { class: "tpl-grid" + (kind === "photo" ? " photo" : "") });
+      box.append(el("p", { class: "muted", style: "margin:0 0 4px;font-size:15px", text: T.hint }), stick, note, grid);
+      let loading = 0, err = null, errPage = 1;
+      const group = (x) => (x.people || 1) > 1;  // «👥 Компанией»: for two or three
+      const fits = (x) => st.theme !== "group" || group(x);
+      const tile = (x) => {
+        const n = Math.min(3, Math.max(1, x.people || 1));
+        return el("button", { class: "tpl", "aria-label": x.title, onclick: () => { close(); whoIsWho(kind, { id: x.id, title: x.title, thumb: x.thumb }, th); } },
+          x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null,
+          n > 1 ? el("span", { class: "ppl", text: "👥 " + n }) : null, el("span", { class: "name", text: x.title }));
+      };
+      function paint() {
+        chips.innerHTML = "";
+        for (const [k, v] of [["", "Все"], ["group", "👥 Компанией"]].concat(Object.entries(st.themes || {}))) {
+          chips.append(el("button", { class: "chip" + (k === st.theme ? " on" : ""), "aria-pressed": k === st.theme ? "true" : "false",
+            text: k && k !== "group" ? emo(v) : v, onclick: () => pick(k) }));
+        }
+        const off = st.loaded && !st.can;
+        stick.classList.toggle("hidden", off || !st.loaded);
+        grid.classList.toggle("hidden", off);
+        note.classList.toggle("hidden", !off);
+        note.textContent = off ? noteFor(kind, st) : "";
+        grid.innerHTML = "";
+        if (off) return;
+        if (kind === "video") {
+          grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(th); } },
+            el("span", { class: "plus", text: "➕" }), el("span", { class: "name", text: "Свой ролик" })));
+        }
+        if (loading === 1 || (!st.loaded && !err)) {
+          grid.append(el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
+          return;
+        }
+        const list = st.items.filter(fits);
+        for (const x of list) grid.append(tile(x));
+        if (err) {
+          grid.append(el("p", { class: "gal-msg", text: problem(err) }),
+            el("button", { class: "btn line gal-msg", text: "🔄 Повторить", onclick: () => load(errPage) }));
+          return;
+        }
+        if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: st.theme ? "В этой теме пока пусто." : noteFor(kind, st) }));
+        if (st.more) {
+          grid.append(el("button", { class: "btn line wide more", disabled: !!loading,
+            text: loading ? "Загружаю…" : st.theme === "group" ? "Показать ещё" : "Показать ещё · осталось " + Math.max(0, st.total - st.items.length),
+            onclick: () => load(st.page + 1) }));
+        }
+      }
+      async function load(page) {
+        const my = ++st.ticket;
+        loading = page;
+        err = null;
+        paint();
+        let added = 0, pages = 0;
+        try {
+          for (;;) {
+            const r = await api("/api/templates", { kind, theme: st.theme && st.theme !== "group" ? st.theme : undefined, page });
+            if (my !== st.ticket) return;  // another chip was tapped meanwhile
+            const items = r.items || [];
+            st.items = page === 1 ? items : st.items.concat(items);
+            Object.assign(st, { page: r.page || page, more: !!r.more, total: r.total || 0, themes: r.themes || {}, can: r.can !== false,
+              note: r.note || "", loaded: true });
+            if (page === 1 && st.theme && st.theme !== "group" && Object.keys(st.themes).length && !(st.theme in st.themes)) {
+              st.theme = "";  // the theme kept from last time is gone: all of them
+              store.set("tplTheme:" + kind, "");
+              continue;
+            }
+            added += items.filter(fits).length;
+            // «Компанией» is picked out here from the pages: a few pages more, so that there is something to see
+            if (st.theme === "group" && st.more && added < 6 && ++pages < 4) { page = st.page + 1; continue; }
+            break;
+          }
+        } catch (e) {
+          if (my !== st.ticket) return;
+          err = e;
+          errPage = page;
+        }
+        loading = 0;
+        paint();
+      }
+      function pick(k) {
+        st.theme = k;
+        store.set("tplTheme:" + kind, k);
+        st.items = [];
+        st.more = false;
+        load(1);
+      }
+      if (st.loaded) paint(); else load(1);
+    });
+  }
+  async function ownClip(th) {
+    const f = await pickFile("video/*", false);
+    if (!f) return;
+    if (f.size > 40 * 1024 * 1024) { toast("Ролик слишком большой — возьмите короче, до 20 секунд", 5000); return; }
+    whoIsWho("video", { own: true, title: "Свой ролик", clip: f }, th);
+  }
+  // who is who: the server finds the people (each one's face), a photo is chosen for one or more of them (the rest stay
+  // as they are), with the word that the photos may be used; then the clip or the picture comes into the thread
+  function whoIsWho(kind, tpl, th) {
+    const T = TPL[kind];
+    if (S.busy[th.name]) { toast(T.busy); return; }
+    const photos = [];
+    let found = null;
+    sheet("🎭 " + tpl.title, async (box, close) => {
+      const said = el("span", { text: tpl.own ? "Загружаю ролик и ищу в нём лица… до минуты" : T.find });
+      const wait = el("div", { class: "status", style: "margin:8px 0 14px" }, el("span", { class: "spin" }), said);
+      box.append(tpl.thumb ? el("img", { class: "tpl-big" + (kind === "photo" ? " photo" : ""), src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null, wait);
+      // a stream: the server says it is still looking (a minute for a clip it has not seen), then who is in it
+      try {
+        found = await stream("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id }, (ev) => {
+          if (ev.t === "status" && ev.text) said.textContent = ev.text;
+        });
+        if (found.t !== "done") throw new HttpError(200, found.text || (kind === "photo" ? "Не получилось найти лица на картинке." : "Не получилось найти лица в ролике."));
+        if (!found.faces || !found.faces.length) throw new HttpError(200, kind === "photo" ? "На картинке не нашлось лиц." : "В ролике не нашлось лиц.");
+      } catch (e) {
+        wait.replaceWith(el("p", { style: "margin:4px 0 12px", text: problem(e) }),
+          el("button", { class: "btn line wide", text: kind === "photo" ? "↩️ Выбрать другую картинку" : "↩️ Выбрать другой ролик", onclick: () => {
+            close();
+            if (tpl.own) ownClip(th); else templatesSheet(kind, th);
+          } }));
+        return;
+      }
+      const n = Math.min(3, found.faces.length);
+      const names = kind === "video" ? (n === 1 ? ["Человек в ролике"] : ["Человек 1", "Человек 2", "Человек 3"])
+        : n === 1 ? ["Человек на картинке"] : n === 2 ? ["Слева", "Справа"] : ["Слева", "В центре", "Справа"];
+      const why = el("div", { class: "why" });
+      const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
+      const rows = el("div");
+      const take = async (i, camera) => {
+        const f = await pickFile("image/*", camera);
+        if (!f) return;
+        photos[i] = f;
+        if (why.textContent.startsWith("Нажмите")) why.textContent = "";
+        paintRows();
+      };
+      const paintRows = () => {
+        rows.innerHTML = "";
+        found.faces.slice(0, n).forEach((p, i) => {
+          const who = names[i];
+          const slot = el("button", { class: "slot" + (photos[i] ? " set" : ""), "aria-label": "Фото для: " + who, onclick: () => menu(who, [
+            ["📷", "Снять фото", () => take(i, true)], ["🖼️", "Из галереи", () => take(i, false)],
+            photos[i] ? ["↩️", "Оставить как есть", () => { photos[i] = null; paintRows(); }] : null]) },
+            photos[i] ? el("img", { src: urlOf(photos[i]), alt: "" }) : el("span", {}, "➕", el("br"), "фото"));
+          rows.append(el("div", { class: "who-row" },
+            el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }), slot,
+            el("div", { class: "who" }, el("b", { text: who }), el("small", { text: photos[i] ? "✓ ваше фото" : "останется как есть" }),
+              kind === "video" && p.on ? el("small", { text: "в кадре " + Math.max(1, Math.round(p.on)) + " с" }) : null)));
+        });
+      };
+      paintRows();
+      const where = kind === "video" ? "В ролике" : "На картинке";
+      const hint = n === 1 ? "Нажмите ➕ и выберите своё фото: одно лицо, крупно, при хорошем свете."
+        : `${where} ${n} человека. Нажмите ➕ у тех, кого заменить, и выберите фото: одно лицо, крупно, при хорошем свете. Остальные останутся как есть.`;
+      const goBtn = el("button", { class: "btn wide", text: T.go, onclick: async () => {
+        if (!photos.some(Boolean)) { why.textContent = "Нажмите ➕ и выберите хотя бы одно фото."; return; }
+        if (!check.checked) { why.textContent = "Поставьте галочку: фото ваше или человек согласен."; return; }
+        close();
+        const images = [];
+        for (let i = 0; i < n; i++) images.push(photos[i] ? await b64(await shrink(photos[i], 2048, 0.92)) : null);
+        const first = photos.find(Boolean);
+        const many = photos.filter(Boolean).length;
+        const out = await th.run(T.path, { analysis: found.analysis, images, consent: true },
+          { role: "me", image: first, text: "🎭 " + tpl.title + (many > 1 ? " · 👥 " + many : "") });
+        if (out && !out.err && !tpl.own) {  // «🔁 С другими фото» under it: the same template once more
+          out.tpl = { kind, id: tpl.id, title: tpl.title };
+          await DB.put(out);
+          th.redraw();
+        }
+      } });
+      wait.replaceWith(el("p", { style: "margin:4px 0 8px", text: (found.note ? found.note + " " : "") + hint }), rows,
+        el("p", { class: "muted", style: "font-size:14px;margin:12px 0 0", text: T.foot }),
+        el("div", { class: "sheet-foot" },
+          el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото, или человек на фото согласен" : "Это мои фото, или люди на них согласны" })),
+          why, goBtn));
+    });
+  }
+
+  // ---------- Video: «🎭 Я в ролике» and «🖼️ Оживить фото» ----------
   function videoView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
-    let tpls = null;  // the server's list, asked once a visit
-    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "🎬" }), el("h2", { text: "Видео" }),
-      el("div", { text: "«Я в ролике» — вы и родные в ролике, как в Instagram: танцы, кино, праздники, или свой ролик — лица в нём станут вашими. "
-        + "«Оживить фото» — фото начинает двигаться. Кнопки — внизу." }));
+    const NOT_ON = "Видео вам пока не включено — его включает владелец помощника.";
+    const tv = () => !!S.me.can.tvideo;
+    const an = () => !!((S.me.ai_ops || {}).animate || (S.me.photo_ops || {}).animate);
+    const empty = () => {
+      const box = el("div", { class: "empty" }, el("h2", { text: "Ролики с вами" }));
+      if (!tv() && !an() && !S.me.panel) { box.append(el("div", { class: "note-card", text: NOT_ON })); return box; }
+      const feat = (on, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off") }, el("b", { text: title }), " — " + words,
+        on ? null : el("small", { text: offWords }));
+      box.append(
+        feat(tv(), "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.",
+          S.me.panel ? "Пока не работает — нажмите «🎭 Я в ролике» внизу, чтобы узнать почему." : "Пока не включено."),
+        feat(an(), "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
+      return box;
+    };
     const th = thread("video", scroll, empty);
     scroll.append(th.box);
-    const bar = el("div", { style: "display:flex;gap:8px" },
-      el("button", { class: "btn", style: "flex:1", text: "🎭 Я в ролике", onclick: gallery }),
-      el("button", { class: "btn line", style: "flex:1", text: "🖼 Оживить фото", onclick: animate }));
-    root.append(scroll, el("div", { class: "composer" }, bar));
-    const NOT_ON = "Видео вам пока не включено — его включает владелец помощника.";
-
-    async function load() {
-      if (tpls) return tpls;
-      try { tpls = await api("/api/templates", {}); } catch (e) { toast(problem(e)); return null; }
-      return tpls;
-    }
-    async function gallery() {
-      if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
-      const t = await load();
-      if (!t) return;
-      if (!t.can) { toast(t.note || NOT_ON, 5000); return; }
-      sheet("🎭 Я в ролике", (box, close) => {
-        const chips = el("div", { class: "chips", style: "margin:0 0 10px" });
-        const grid = el("div", { class: "tpl-grid" });
-        let theme = store.get("tplTheme", "");
-        const fill = () => {
-          chips.innerHTML = "";
-          const group = (x) => (x.people || 1) > 1;  // «Компанией»: the clips for two or three
-          for (const [k, v] of [["", "Все"], ["group", "👥 Компанией"]].concat(Object.entries(t.themes || {}))) {
-            if (k && !t.items.some((x) => (k === "group" ? group(x) : x.theme === k))) continue;
-            chips.append(el("button", { class: "chip" + (k === theme ? " on" : ""), text: v, onclick: () => { theme = k; store.set("tplTheme", k); fill(); } }));
-          }
-          grid.innerHTML = "";
-          grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(); } },
-            el("span", { class: "plus", text: "➕" }), el("span", { class: "name", text: "Свой ролик" })));
-          for (const x of t.items.filter((x) => !theme || (theme === "group" ? group(x) : x.theme === theme))) {
-            const n = Math.min(3, Math.max(1, x.people || 1));
-            grid.append(el("button", { class: "tpl", onclick: () => { close(); withPhoto({ id: x.id, title: x.title, thumb: x.thumb }); } },
-              x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null,
-              n > 1 ? el("span", { class: "ppl", text: "👥 " + n }) : null, el("span", { class: "name", text: x.title })));
-          }
-        };
-        fill();
-        box.append(t.items.length ? null : el("p", { class: "muted", style: "margin:0 0 10px", text: t.note || "Шаблонов пока нет." }),
-          chips, grid, el("div", { class: "muted", style: "font-size:13px;margin-top:10px", text: t.note && t.items.length ? t.note
-            : "«Свой ролик» — любой ролик до 20 секунд, например сохранённый из Instagram или TikTok." }));
-      });
-    }
-    async function ownClip() {
-      const f = await pickFile("video/*", false);
-      if (!f) return;
-      if (f.size > 40 * 1024 * 1024) { toast("Ролик больше 40 МБ — возьмите покороче (до 20 секунд)", 5000); return; }
-      withPhoto({ own: true, title: "Свой ролик", clip: f });
-    }
-    // who is who: the server finds the people in the clip (each one's face), a photo is chosen for one or more of them
-    // (the rest stay as they are), with the word that the photos may be used; then the clip
-    function withPhoto(tpl) {
-      const photos = [];
-      let agreed = false, found = null;
-      sheet("🎭 " + tpl.title, async (box, close) => {
-        const wait = el("div", { class: "status", style: "margin:8px 0 14px" }, el("span", { class: "spin" }),
-          el("span", { text: tpl.own ? "Загружаю ролик и ищу в нём лица…" : "Ищу лица в ролике…" }));
-        box.append(tpl.thumb ? el("img", { class: "tpl-big", src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null, wait);
-        // a stream: the server says it is still looking (a minute for a clip it has not seen), then who is in it
-        const said = wait.querySelector("span:last-child");
-        try {
-          found = await stream("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id }, (ev) => {
-            if (ev.t === "status" && ev.text) said.textContent = ev.text;
-          });
-          if (found.t !== "done") throw new HttpError(200, found.text || "Не получилось найти лица в ролике.");
-        } catch (e) {
-          wait.replaceWith(el("p", { style: "margin:4px 0 10px", text: problem(e) }));
-          return;
-        }
-        const n = found.faces.length;
-        const pics = el("div");
-        const go = el("button", { class: "btn wide", text: "🎬 Сделать ролик", disabled: true, onclick: async () => {
-          close();
-          const imgs = [];
-          for (let i = 0; i < n; i++) imgs.push(photos[i] ? await b64(await shrink(photos[i], 2048, 0.92)) : null);
-          const first = photos.find(Boolean);
-          const many = photos.filter(Boolean).length;
-          await th.run("/api/tvideo", { analysis: found.analysis, images: imgs, consent: true },
-            { role: "me", image: first, text: "🎭 " + tpl.title + (many > 1 ? " · 👥 " + many : "") });
-        } });
-        const check = el("input", { type: "checkbox", onchange: () => { agreed = check.checked; ready(); } });
-        const ready = () => { go.disabled = !(photos.some(Boolean) && agreed); };
-        const take = async (i, camera) => {
-          const f = await pickFile("image/*", camera);
-          if (f) { photos[i] = f; showPics(); ready(); }
-        };
-        const showPics = () => {
-          pics.innerHTML = "";
-          found.faces.forEach((p, i) => {
-            const row = el("div", { class: "who-row" },
-              el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }),
-              photos[i] ? el("img", { class: "face mine", src: urlOf(photos[i]), alt: "" }) : el("span", { class: "face none", text: "как есть" }),
-              el("div", { class: "grow" },
-                el("button", { class: "act", text: "📷 Снять", onclick: () => take(i, true) }),
-                el("button", { class: "act", text: "🖼 Фото", onclick: () => take(i, false) }),
-                photos[i] ? el("button", { class: "act", text: "✕", "aria-label": "Оставить как есть", onclick: () => { photos[i] = null; showPics(); ready(); } }) : null));
-            pics.append(row);
-          });
-        };
-        showPics();
-        const hint = n === 1 ? "Выберите своё фото: одно лицо, крупно, хороший свет."
-          : `В ролике ${n} человека. Выберите фото для одного или нескольких — остальные останутся как есть. На каждом фото одно лицо, крупно, хороший свет.`;
-        wait.replaceWith(el("p", { style: "margin:4px 0 8px", text: hint }), pics,
-          el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото (или человек на фото согласен)"
-            : "Это мои фото, или люди на них согласны" })),
-          go,
-          el("div", { class: "muted", style: "font-size:13px;margin-top:8px", text: (found.note ? found.note + " " : "")
-            + "Ролик сервер делает сам, обычно 5–8 минут. Он придёт сюда — его можно сохранить и отправить." }));
-      });
-    }
+    const tvBtn = el("button", { class: "btn", text: "🎭 Я в ролике", onclick: () => {
+      if (!tv() && !S.me.panel) { toast(TPL.video.off, 5000); return; }
+      templatesSheet("video", th);
+    } });
+    const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить фото", onclick: animate });
+    const paintBar = () => { tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an()); };
+    root.append(scroll, el("div", { class: "composer" }, el("div", { class: "vbar" }, tvBtn, anBtn)));
     async function animate() {
-      if (!(S.me.ai_ops && S.me.ai_ops.animate) && !(S.me.photo_ops && S.me.photo_ops.animate)) { toast(NOT_ON, 5000); return; }
+      if (!an()) { toast(NOT_ON, 5000); return; }
       if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
       const f = await pickFile("image/*", false);
       if (!f) return;
-      await th.run("/api/animate", { image: await b64(await shrink(f, 3072, 0.92)) }, { role: "me", image: f, text: "🖼 Оживить фото" });
+      await th.run("/api/animate", { image: await b64(await shrink(f, 3072, 0.92)) }, { role: "me", image: f, text: "🖼️ Оживить фото" });
     }
+    paintBar();
     th.redraw();
     return {
-      root, redraw: th.redraw,
-      sub: () => "вы в ролике, оживить фото",
-      buttons: () => [["🧹", "Очистить", async () => {
-        if (!S.msgs.video.length || !(await confirmBox("Удалить все ролики из списка?", "Очистить"))) return;
+      root, th, redraw: th.redraw,
+      sub: () => "ролики с вами и ожившие фото",
+      buttons: () => [["🧹 Очистить", "Очистить", async () => {
+        if (!S.msgs.video.length) { toast("Здесь пока пусто"); return; }
+        if (!(await confirmBox("Удалить все ролики из списка?", "Очистить", true))) return;
         await DB.clear("video");
         S.msgs.video = [];
         th.redraw();
       }]],
-      onShow: () => { tpls = null; th.down(); },
+      onShow: () => {
+        gal.video = null;
+        paintBar();
+        if (!S.msgs.video.length && !S.busy.video) th.redraw(); else th.down();
+      },
     };
   }
 
-  // ---------- More: translator, settings, memory, limits, app ----------
+  // ---------- More: translator, reminders, settings, memory, app ----------
   function moreView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
@@ -1391,47 +1659,49 @@
       scroll.innerHTML = "";
       scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: translator },
-          el("span", { style: "font-size:24px", text: "🗣" }), el("div", { class: "grow" }, "Переводчик", el("small", { text: "Говорите — переведу и озвучу" })), "›")));
-      if (Native && Native.reminders) scroll.append(remindersCard());
-      const modeSel = el("select", { onchange: () => setPref({ mode: modeSel.value }) });
-      for (const [k, v] of Object.entries(me.modes)) modeSel.append(el("option", { value: k, text: v, selected: k === me.mode }));
-      const modelSel = el("select", { onchange: () => setPref({ model: modelSel.value }) });
-      for (const [k, v] of Object.entries(me.models)) modelSel.append(el("option", { value: k, text: v, selected: k === me.model }));
+          el("span", { style: "font-size:24px", text: "🗣️" }),
+          el("div", { class: "grow" }, "Переводчик", el("small", { text: "Скажите фразу — переведу и прочитаю вслух" })),
+          el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
+      if (Native && Native.reminders) scroll.append(remindersCard(draw));
+      const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
+      for (const [k, v] of Object.entries(me.modes).filter(([k]) => me.panel || k !== "coder" || k === me.mode)) {
+        modeSel.append(el("option", { value: k, text: v, selected: k === me.mode }));
+      }
       const card = el("div", { class: "card" }, el("h3", { text: "Общение" }),
-        el("div", { class: "row" }, el("div", { class: "grow" }, "Режим"), modeSel),
-        Object.keys(me.models).length > 2 ? el("div", { class: "row" }, el("div", { class: "grow" }, "Модель", el("small", { text: "Авто — самая умная из доступных" })), modelSel) : null);
+        el("div", { class: "row" }, el("div", { class: "grow" }, "Как отвечать в чате"), modeSel));
+      if (me.panel && Object.keys(me.models || {}).length > 2) {  // the models: the owner's business
+        const modelSel = el("select", { "aria-label": "Модель", onchange: () => setPref({ model: modelSel.value }) });
+        for (const [k, v] of Object.entries(me.models)) modelSel.append(el("option", { value: k, text: v, selected: k === me.model }));
+        card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Модель", el("small", { text: "Авто — самая умная из доступных" })), modelSel));
+      }
       if (me.can.speak) {
-        card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Отвечать голосом", el("small", { text: "На голосовые вопросы" })),
-          el("button", { class: "toggle" + (me.vreply ? " on" : ""), onclick: () => setPref({ vreply: !me.vreply }) })));
+        card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Отвечать голосом",
+          el("small", { text: me.vreply ? "Включено: на голосовой вопрос отвечаю голосом" : "Выключено: отвечаю текстом" })),
+          el("button", { class: "toggle" + (me.vreply ? " on" : ""), "aria-label": "Отвечать голосом", "aria-pressed": me.vreply ? "true" : "false",
+            onclick: () => setPref({ vreply: !me.vreply }) })));
         if (Object.keys(me.voices).length > 1) {
-          const vSel = el("select", { onchange: () => setPref({ voice: vSel.value }) });
+          const vSel = el("select", { "aria-label": "Голос", onchange: () => setPref({ voice: vSel.value }) });
           for (const [k, v] of Object.entries(me.voices)) vSel.append(el("option", { value: k, text: v, selected: k === me.voice }));
           card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Голос"), vSel));
         }
       }
       scroll.append(card);
       const mem = el("div", { class: "card" }, el("h3", { text: "🧠 Что я о вас помню" }));
-      if (!me.memory.length) mem.append(el("div", { style: "color:var(--muted);font-size:14px", text: "Пока ничего. Скажите в чате: «Запомни, что…»" }));
+      if (!me.memory.length) mem.append(el("div", { class: "muted", style: "font-size:14px", text: "Пока ничего. Скажите в чате: «Запомни, что…»" }));
       for (const f of me.memory) {
-        mem.append(el("div", { class: "row" }, el("div", { class: "grow", text: f }),
-          el("button", { class: "icon-btn", text: "✕", onclick: async () => { const r = await api("/api/memory", { forget: f }).catch(() => null); if (r) { S.me.memory = r.memory; draw(); } } })));
+        const row = el("div", { class: "row" }, el("div", { class: "grow", text: f }));
+        row.append(el("button", { class: "icon-btn", text: "✕", title: "Забыть", "aria-label": "Забыть", onclick: () => softDelete(row, "Удалено из памяти", async () => {
+          const r = await api("/api/memory", { forget: f }).catch(() => null);
+          if (r) { S.me.memory = r.memory; draw(); }
+        }) }));
+        mem.append(row);
       }
       mem.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "➕ Добавить", onclick: async () => {
         const t = await ask("Что запомнить?", "Например: у меня двое детей, младшему 7 лет");
         if (t) { const r = await api("/api/memory", { add: t }).catch((e) => toast(problem(e))); if (r) { S.me.memory = r.memory; draw(); } }
       } }));
       scroll.append(mem);
-      const lim = el("div", { class: "card" }, el("h3", { text: "📊 Сегодня" }));
-      const names = { text: "Вопросы", draw: "Картинки", photo: "Обработка фото", video: "Оживление фото" };
-      for (const [k, [used, max]] of Object.entries(me.limits)) {
-        if (k === "video" && !me.ai_ops.animate) continue;
-        lim.append(el("div", { style: "margin:6px 0" }, el("div", { style: "display:flex;justify-content:space-between;font-size:14px" },
-          el("span", { text: names[k] || k }), el("span", { text: max ? `${used} из ${max}` : String(used) })),
-          max ? el("div", { class: "bar" }, el("i", { style: `width:${Math.min(100, (100 * used) / max)}%` })) : null));
-      }
-      lim.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:6px", text: "Лимиты обнуляются в полночь." }));
-      scroll.append(lim);
-      const theme = el("select", { onchange: () => { store.set("theme", theme.value); applyTheme(); } });
+      const theme = el("select", { "aria-label": "Тема", onchange: () => { store.set("theme", theme.value); applyTheme(); } });
       for (const [k, v] of Object.entries(THEMES)) theme.append(el("option", { value: k, text: v, selected: k === store.get("theme", "system") }));
       const appCard = el("div", { class: "card" }, el("h3", { text: "Приложение" }),
         el("div", { class: "row" }, el("div", { class: "grow" }, "Вы вошли как", el("small", { text: me.name }))),
@@ -1439,13 +1709,14 @@
       if (Native && Native.version) {
         appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия приложения", el("small", { text: Native.version() })),
           el("button", { class: "act", text: "Проверить обновление", onclick: () => Native.checkUpdate(true) })));
-        const p = Native.netInfo ? Native.netInfo() : "";
+        // how the phone reaches the server: the owner's to know, not the family's
+        const p = me.panel && Native.netInfo ? Native.netInfo() : "";
         if (p) appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Связь с сервером",
           el("small", { text: p.endsWith(" vpn") ? "Через VPN телефона, TCP 8443 ✓" : p === "h3" ? "HTTP/3 по UDP — быстрый путь ✓"
             : "TCP 8443 — запасной путь (UDP не проходит)" }))));
       }
-      appCard.append(el("button", { class: "btn line wide", style: "margin-top:10px", text: "Выйти", onclick: async () => {
-        if (await confirmBox("Выйти из приложения? Для входа снова понадобится код.", "Выйти")) logout("");
+      appCard.append(el("button", { class: "btn line wide danger", style: "margin-top:10px", text: "Выйти", onclick: async () => {
+        if (await confirmBox("Выйти из приложения? Для входа снова понадобится код.", "Выйти", true)) logout("");
       } }));
       scroll.append(appCard);
     }
@@ -1458,38 +1729,49 @@
   function translator() {
     const me = S.me;
     let target = me.trans || store.get("trLang", "en");
+    if (!me.langs[target]) target = Object.keys(me.langs)[0];
+    // «…или на английском»
+    const hintText = () => "Нажмите и говорите — по-русски или на " + me.langs[target][1].toLowerCase().replace(/ий$/, "ом");
     const scr = el("div", { class: "viewer", style: "background:var(--bg)" });
-    const top = el("div", { class: "top" }, el("button", { class: "icon-btn", text: "←", onclick: () => scr.remove() }), el("h1", { text: "Переводчик" }));
+    const top = el("div", { class: "top" }, el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => scr.remove() }), el("h1", { text: "Переводчик" }));
     const langs = el("div", { class: "chips", style: "padding:10px 12px 0" });
     const list = el("div", { class: "scroll" });
     const ta = el("textarea", { rows: 1, placeholder: "Или напишите текст" });
     autoGrow(ta);
-    const mic = el("button", { class: "mic-big", text: "🎤" });
-    const hint = el("div", { style: "text-align:center;color:var(--muted);font-size:14px;margin:8px 0", text: "Нажмите и говорите — на любом из двух языков" });
-    const bottom = el("div", { class: "composer" }, mic, hint, el("div", { class: "inrow" }, ta, el("button", { class: "round main", text: "➤", onclick: () => { const t = ta.value.trim(); if (t) { ta.value = ""; translate(t, null); } } })));
+    const mic = el("button", { class: "mic-big", text: "🎤", "aria-label": "Говорить" });
+    const hint = el("div", { style: "text-align:center;color:var(--muted);font-size:14px;margin:8px 0", text: hintText() });
+    const bottom = el("div", { class: "composer" }, mic, hint, el("div", { class: "inrow" }, ta,
+      el("button", { class: "round main", text: "➤", "aria-label": "Перевести", onclick: () => {
+        const t = ta.value.trim();
+        if (!t) return;
+        ta.value = "";
+        ta.style.height = "auto";
+        translate(t, null);
+      } })));
     function paintLangs() {
       langs.innerHTML = "";
       for (const [k, v] of Object.entries(me.langs)) {
         langs.append(el("button", { class: "chip" + (k === target ? " on" : ""), text: v[0] + " " + v[1], onclick: () => { target = k; store.set("trLang", k); paintLangs(); } }));
       }
+      if (!recording) hint.textContent = hintText();
     }
+    let recording = false;
     paintLangs();
     scr.append(top, langs, list, bottom);
     document.body.append(scr);
-    let recording = false;
     mic.onclick = async () => {
       if (!recording) {
         try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
         recording = true;
         mic.classList.add("on");
-        mic.textContent = "⏹";
+        mic.textContent = "⏹️";
         hint.textContent = "Говорите… нажмите ещё раз, когда закончите";
         return;
       }
       recording = false;
       mic.classList.remove("on");
       mic.textContent = "🎤";
-      hint.textContent = "Нажмите и говорите — на любом из двух языков";
+      hint.textContent = hintText();
       const r = Rec.stop(true);
       if (!r || r.duration < 0.6) return;
       const card = el("div", { class: "tr-card" }, el("div", { class: "status" }, el("span", { class: "spin" }), "Слушаю…"));
@@ -1514,7 +1796,7 @@
         card.append(el("div", { class: "src", text: ev.src + " " + text }), el("div", { class: "dst", text: ev.dst + " " + ev.translation }),
           el("div", { class: "acts", style: "margin-top:8px" },
             audio ? el("button", { class: "act", text: "🔊 Ещё раз", onclick: () => playAudio(audio) }) : null,
-            el("button", { class: "act", text: "📋", onclick: () => copyText(ev.translation) })));
+            el("button", { class: "act", text: "📋 Копировать", onclick: () => copyText(ev.translation) })));
         if (audio) playAudio(audio);
       } catch (e) { card.remove(); toast(problem(e)); }
       list.scrollTop = list.scrollHeight;
