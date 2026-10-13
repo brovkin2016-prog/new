@@ -35,18 +35,27 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: The scripts parse in Windows PowerShell 5.1 and carry only the server's placeholders, each in '…'
+      - name: The scripts parse in Windows PowerShell 5.1, carry only the server's placeholders (each in '…'), and nothing that makes Windows log their text
         run: |
           $ErrorActionPreference = 'Stop'
           $parse = Join-Path $env:RUNNER_TEMP 'parse.ps1'
           Set-Content -Path $parse -Encoding ascii -Value @'
           # parsed as irm | iex gets them: text decoded as UTF-8 (ParseFile would read a file without a BOM as ANSI)
           $bad = 0
+          # Windows PowerShell's own check: a script block with one of its "suspicious" words goes whole into the event
+          # log (4104) even with script block logging off, and the scripts must keep nothing there (internal: via reflection)
+          $check = [System.Management.Automation.ScriptBlock].GetMethod('CheckSuspiciousContent', [System.Reflection.BindingFlags]'NonPublic, Static')
+          if (-not $check) { $bad++; Write-Host "::error::Windows PowerShell's own check of the words it always logs was not found" }
           foreach ($f in $args) {
               $tokens = $null; $errs = $null
               $text = [IO.File]::ReadAllText($f, (New-Object System.Text.UTF8Encoding $false, $true))
-              [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errs)
+              $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errs)
               foreach ($e in $errs) { $bad++; Write-Host ("::error file={0},line={1}::{2}" -f $f, $e.Extent.StartLineNumber, $e.Message) }
+              $hit = if ($check) { [string]$check.Invoke($null, @($ast)) } else { '' }
+              if ($hit) {
+                  $bad++
+                  Write-Host ("::error file={0}::Windows PowerShell would write this script's whole text to its event log whatever the policy (it has: {1})" -f $f, $hit.Substring(0, [Math]::Min(80, $hit.Length)))
+              }
               Write-Host ("{0}: {1} tokens, {2} errors (Windows PowerShell {3})" -f $f, $tokens.Count, $errs.Count, $PSVersionTable.PSVersion)
           }
           exit $bad
@@ -54,9 +63,14 @@ jobs:
           & "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $parse `
             (Resolve-Path remote/host.ps1).Path (Resolve-Path remote/client.ps1).Path
           if ($LASTEXITCODE) { throw "the scripts do not parse in Windows PowerShell 5.1" }
-          $want = @{ 'host.ps1' = 'API HOST KEY PASSWORD TOKEN'; 'client.ps1' = 'HOST ID KEY PASSWORD' }
+          # no PASSWORD: the scripts ask /api/remote/pw for it at run time, so it is never in a script's text
+          $want = @{ 'host.ps1' = 'API HOST KEY TOKEN'; 'client.ps1' = 'API HOST ID KEY TOKEN' }
+          $check = [System.Management.Automation.ScriptBlock].GetMethod('CheckSuspiciousContent', [System.Reflection.BindingFlags]'NonPublic, Static')
+          if (-not $check) { throw "PowerShell 7's own check of the words it always logs was not found" }
           foreach ($name in $want.Keys) {
               $text = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE "remote/$name"), [Text.UTF8Encoding]::new($false, $true))
+              $hit = [string]$check.Invoke($null, @([System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)))
+              if ($hit) { throw "$name`: PowerShell 7 would write its whole text to the event log (it has: $($hit.Substring(0, [Math]::Min(80, $hit.Length))))" }
               $all = [regex]::Matches($text, '\{\{([A-Z]+)\}\}') | ForEach-Object { $_.Groups[1].Value }
               $found = ($all | Sort-Object -Unique) -join ' '
               if ($found -ne $want[$name]) { throw "$name has placeholders [$found], expected [$($want[$name])]" }
@@ -141,8 +155,9 @@ jobs:
             ConvertTo-Json | Set-Content -Path (Join-Path $out 'values.json') -Encoding utf8
           $mock = Join-Path $env:RUNNER_TEMP 'mock_api.py'
           Set-Content -Path $mock -Encoding utf8 -Value @'
-          # A stand-in for the family server's API (appweb): fills remote/*.ps1 in the way appweb does, serves them as
-          # text/plain; charset=utf-8, and keeps what the laptop says to /api/remote/hello.
+          # A stand-in for the family server's API (appweb): fills remote/*.ps1 in the way appweb does (never with the
+          # password), serves them as text/plain; charset=utf-8, gives the password to /api/remote/pw, and keeps what
+          # the laptop says to /api/remote/hello.
           import http.server, json, os, re, sys, urllib.parse
 
           REPO, OUT, PORT = sys.argv[1], sys.argv[2], int(sys.argv[3])
@@ -165,7 +180,8 @@ jobs:
           def fill(name):
               with open(os.path.join(REPO, "remote", name + ".ps1"), encoding="utf-8-sig") as f:
                   text = f.read()
-              values = dict(V, ID=said()["id"])
+              values = {k: v for k, v in V.items() if k != "PASSWORD"}
+              values["ID"] = said()["id"]
               if any(not isinstance(v, str) or UNSAFE.search(v) for v in values.values()):
                   return None
               text = re.sub(r"\{\{([A-Z]+)\}\}", lambda m: values.get(m.group(1), m.group(0)), text)
@@ -187,12 +203,14 @@ jobs:
 
               def do_GET(self):
                   url = urllib.parse.urlsplit(self.path)
-                  m = re.fullmatch(r"/api/remote/(host|client)\.ps1", url.path)
+                  m = re.fullmatch(r"/api/remote/(host\.ps1|client\.ps1|pw)", url.path)
                   if not m:
                       return self.answer(404, "no such page")
                   if urllib.parse.parse_qs(url.query).get("t", [""])[0] != V["TOKEN"]:
                       return self.answer(403, "Эта команда устарела или неверна.")
-                  text = fill(m.group(1))
+                  if m.group(1) == "pw":
+                      return self.answer(200, V["PASSWORD"])
+                  text = fill(m.group(1)[:-4])
                   if text is None:
                       return self.answer(503, "the template did not fill in")
                   self.answer(200, text)
@@ -223,6 +241,12 @@ jobs:
             -RedirectStandardOutput (Join-Path $out 'api-out.log') -RedirectStandardError (Join-Path $out 'api.log') | Out-Null
           for ($i = 0; $i -lt 20 -and -not (Test-Tcp 8099); $i++) { Start-Sleep -Seconds 1 }
           Check (Test-Tcp 8099) 'the stand-in API listens'
+          # every script block's text into Windows PowerShell's event log, as a work laptop's policy may have it (the
+          # end checks that the password is in none of it); PowerShell 7 here reads a key of its own, so only the
+          # scripts' Windows PowerShell is logged
+          $sbl = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging'
+          New-Item -Path $sbl -Force | Out-Null
+          New-ItemProperty -Path $sbl -Name EnableScriptBlockLogging -Value 1 -PropertyType DWord -Force | Out-Null
           # the owner's lines, exactly as the family server words them
           $line = { param($name) "powershell -NoProfile -ExecutionPolicy Bypass -Command `"[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm '$api/api/remote/$name.ps1?t=$token' | iex`"" }
           $lnkName = 'Ноутбук (удалённо).lnk'
@@ -289,16 +313,34 @@ jobs:
           Check (Test-Path -LiteralPath $portable) "the portable RustDesk is named for our server and key: $(Split-Path -Leaf $portable)"
           Check ((Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash -eq '8555777215510D83D2D61C9DC984E4FCC838BD7E79F9D18A42585431F5E8BB47') 'it is the official 1.5.0'
           Check (Test-Path -LiteralPath $lnk) "the desktop shortcut is there: $lnkName"
-          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+          # read back under a plain name: the shortcut maker passes its path through the old code page (1252 here),
+          # where the Russian name is «???» and nothing is found
+          $chk = Join-Path $env:RUNNER_TEMP 'check.lnk'
+          Copy-Item -LiteralPath $lnk -Destination $chk -Force
+          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($chk)
           Check ($sc.TargetPath -eq $portable) "the shortcut opens that RustDesk ($($sc.TargetPath))"
           Check ($sc.Arguments -eq "--connect $($hello.id)") "the shortcut connects to the laptop ($($sc.Arguments))"
           $d = Read-Toml $defaults 'options'
           foreach ($kv in @(@('image_quality', 'low'), @('custom-fps', '15'), @('show_quality_monitor', 'Y'), @('view_style', 'adaptive'))) {
               Check ($d[$kv[0]] -eq $kv[1]) "defaults for new connections: $($kv[0]) = $($kv[1])"
           }
-          try { $clip = Get-Clipboard -Raw } catch { $clip = $null }
-          if ("$clip".Trim() -ceq $password) { Write-Host 'ok: the password is on the clipboard' }
-          else { Write-Host '::warning::the password is not on the clipboard (no clipboard on this machine?)' }
+          # the clipboard as Windows PowerShell sees it: the password, with the mark that keeps it out of the clipboard
+          # history (Win+V) and its sync. The password reaches the check through its environment, not its text
+          $clipCheck = Join-Path $out 'clip-check.ps1'
+          Set-Content -Path $clipCheck -Encoding ascii -Value @'
+          [void][Reflection.Assembly]::Load('System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089')
+          $d = [System.Windows.Forms.Clipboard]::GetDataObject()
+          if (-not $d) { 'nothing'; exit }
+          $text = [string]$d.GetData([System.Windows.Forms.DataFormats]::UnicodeText)
+          $same = if ($text.Trim() -ceq $env:RD_TEST_PW) { 'same' } elseif ($text) { 'other' } else { 'empty' }
+          $mark = if ($d.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing')) { 'marked' } else { 'unmarked' }
+          "$same $mark"
+          '@
+          $env:RD_TEST_PW = $password
+          $clip = (& "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -ExecutionPolicy Bypass -File $clipCheck 2>&1 | Out-String).Trim()
+          Remove-Item Env:RD_TEST_PW
+          Check ([IO.File]::ReadAllText((Join-Path $out 'client.log')).Contains('Пароль в буфере')) 'client.ps1 put the password on the clipboard'
+          Check ($clip -eq 'same marked') "the password is on the clipboard, kept out of the clipboard history ($clip)"
 
           # 7. again: nothing to fetch, still one shortcut to the same laptop
           $before = (Get-Item -LiteralPath $portable).LastWriteTimeUtc
@@ -310,6 +352,18 @@ jobs:
           # test only) takes our server and key from its own file name, hbbs lets it through with that key, and the
           # laptop's service lets it in with the permanent password. Only a login brings the laptop's own details
           # (its name, Windows) back: the portable keeps them in its notes on that peer
+          # The portable runs here as the Windows user whose own RustDesk settings host.ps1's command lines filled in
+          # (rustdesk.exe --config/--option keep a copy for the user), and RustDesk takes the server and key from there
+          # when its file name says nothing; on the real other laptop there is no such copy. So it is set aside first,
+          # and must still name no server or key afterwards
+          $userToml = Join-Path $env:APPDATA 'RustDesk\config\RustDesk2.toml'
+          if (Test-Path -LiteralPath $userToml) { Move-Item -LiteralPath $userToml -Destination (Join-Path $env:RUNNER_TEMP 'user-RustDesk2.toml') -Force }
+          function Test-UserNoServer {
+              if (-not (Test-Path -LiteralPath $userToml)) { return $true }
+              $o = Read-Toml $userToml 'options'
+              return -not ($o['custom-rendezvous-server'] -or $o['relay-server'] -or $o['key'])
+          }
+          Check (Test-UserNoServer) "this Windows user's own RustDesk settings name no server or key"
           $peer = Join-Path $env:APPDATA "RustDesk\config\peers\$($hello.id).toml"
           Remove-Item -LiteralPath $peer -Force -ErrorAction SilentlyContinue
           Start-Process -FilePath $portable -ArgumentList '--connect', $hello.id, '--password', $password -WorkingDirectory (Split-Path $portable) | Out-Null
@@ -326,6 +380,7 @@ jobs:
           Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'rustdesk*' -and $_.ExecutablePath -and
               -not $_.ExecutablePath.StartsWith($env:ProgramFiles, [StringComparison]::OrdinalIgnoreCase) } |
               ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Check (Test-UserNoServer) '…and still none after it: the server and key came from the file name alone'
 
           # 9. the line host.ps1 hands to Windows when it has no administrator rights (Start-Elevated): built by host.ps1's
           # own Get-RelaunchArguments and run by Windows PowerShell 5.1 the way Windows runs it, minus the question (this
@@ -357,6 +412,15 @@ jobs:
               Check (-not $text.Contains($password)) "$(Split-Path -Leaf $Log): the password is not shown"
               return @{ Code = $p.ExitCode; Text = $text }
           }
+          # the line asks for RemoteSigned: a new Windows' policy is Restricted, which does not load the script module
+          # Windows PowerShell's Get-FileHash lives in (what Restricted does is shown, not required)
+          $probe = "Get-FileHash -LiteralPath `$env:windir\System32\notepad.exe | Out-Null; 'hashed'"
+          $ps51 = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $r1 = (& $ps51 -NoProfile -ExecutionPolicy Restricted -Command $probe 2>&1 | Out-String)
+          $r2 = (& $ps51 -NoProfile -ExecutionPolicy RemoteSigned -Command $probe 2>&1 | Out-String)
+          if ($r1 -match 'hashed') { Write-Host '::warning::Get-FileHash loaded under Restricted here too' } else { Write-Host 'ok: under Restricted, Get-FileHash does not load' }
+          Check ($r2 -match 'hashed') 'under RemoteSigned (the relaunch line''s) it does'
+          Check ((Get-RelaunchArguments $stale) -like '-NoProfile -ExecutionPolicy RemoteSigned -Command *') 'the relaunch line asks for RemoteSigned'
           $count = (Get-Content (Join-Path $out 'hello.json') -Raw | ConvertFrom-Json).count
           $r = Run-Relaunch (Get-RelaunchArguments $stale) (Join-Path $out 'host-elevated.log')
           Check ($r.Code -eq 0 -and $r.Text.Contains('Готово!')) 'the relaunched window set the laptop up'
@@ -369,6 +433,42 @@ jobs:
           Check ($r.Code -eq 0 -and $r.Text -notmatch 'ParserError|Exception|Готово') 'the relaunched window with an old command stops there, and waits for Enter'
           if ($r.Text.Contains($stale)) { Write-Host 'ok: …saying the command is old, in its own words' }
           else { Write-Host '::warning::the old-command line did not come through as UTF-8 here (the line itself ran: see above)' }
+
+          # 10. another laptop whose profile folder has a Russian name, on a Windows whose old code page has no Cyrillic
+          # (this one's): the shortcut maker may turn the folder into «???», so client.ps1 reads the shortcut back and,
+          # when it is not right, leaves a starter file that names the folder through %LOCALAPPDATA% instead
+          $cyr = Join-Path $env:RUNNER_TEMP 'Профиль\AppData\Local'
+          $cyrExe = Join-Path $cyr "FamilyRemote\rustdesk-host=127.0.0.1,key=$key,.exe"
+          New-Item -ItemType Directory -Force -Path (Split-Path $cyrExe) | Out-Null
+          Copy-Item -LiteralPath $portable -Destination $cyrExe -Force  # already there: nothing to fetch
+          $starter = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Ноутбук (удалённо).cmd'
+          Remove-Item -LiteralPath $lnk, $starter -Force -ErrorAction SilentlyContinue
+          $keepLocal = $env:LOCALAPPDATA
+          $env:LOCALAPPDATA = $cyr
+          try { $code = Run-Line (& $line 'client') (Join-Path $out 'client-cyrillic.log') } finally { $env:LOCALAPPDATA = $keepLocal }
+          Check ($code -eq 0) 'client.ps1 in a Russian-named profile finished well'
+          if (Test-Path -LiteralPath $lnk) {
+              Copy-Item -LiteralPath $lnk -Destination $chk -Force
+              $t = (New-Object -ComObject WScript.Shell).CreateShortcut($chk).TargetPath
+              Check ($t -eq $cyrExe) "…its shortcut opens that RustDesk ($t)"
+              Check (-not (Test-Path -LiteralPath $starter)) '…and there is no starter file besides'
+          } else {
+              Check (Test-Path -LiteralPath $starter) '…no shortcut: a starter file instead'
+              $txt = [IO.File]::ReadAllText($starter)
+              $wantTxt = "@start `"`" `"%LOCALAPPDATA%\FamilyRemote\rustdesk-host=127.0.0.1,key=$key,.exe`" --connect $($hello.id)`r`n"
+              Check ($txt -ceq $wantTxt) "…naming the folder through %LOCALAPPDATA%: $txt"
+              Check ([IO.File]::ReadAllText((Join-Path $out 'client-cyrillic.log')).Contains('вместо него')) '…and it says so'
+          }
+
+          # 11. Windows PowerShell's event logs, with every script block's text in them (above): host.ps1's text is
+          # there, the password nowhere (looked for in halves: a long text is logged in parts)
+          $events = @(Get-WinEvent -LogName 'Microsoft-Windows-PowerShell/Operational' -ErrorAction SilentlyContinue) +
+            @(Get-WinEvent -LogName 'Windows PowerShell' -ErrorAction SilentlyContinue)
+          $blocks = @($events | Where-Object { $_.Id -eq 4104 })
+          Check (@($blocks | Where-Object { "$($_.Message)".Contains('Get-RelaunchArguments') }).Count -gt 0) "the log holds host.ps1's text ($($blocks.Count) script blocks logged)"
+          $halves = $password.Substring(0, 12), $password.Substring(12)
+          $leaks = @($events | Where-Object { $m = "$($_.Message)"; $m.Contains($halves[0]) -or $m.Contains($halves[1]) })
+          Check ($leaks.Count -eq 0) "no event in Windows PowerShell's logs holds the password ($($leaks.Count) of $($events.Count) do)"
           Write-Host 'All checks passed.'
 
       - name: Logs (the job's own log cannot be read from outside, so the ends go into the run's notes too)
