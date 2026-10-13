@@ -46,14 +46,56 @@ const (
 	kcpDeafAfter  = 10 * time.Second
 	kcpDeafMargin = 3 * time.Second
 	kcpProbeEvery = time.Second
+
+	// winger: per segment number, where its last copy went (more than any window, so a slot is long free when reused)
+	kcpSnRing = 4096
+	// winger: the PUSH segments one KCP packet can hold (only tiny ones come more than one to a packet)
+	kcpPushesPerPacket = 48
+	// winger: with flightGate, KCP's own windows (its span from the oldest unacked segment, and what the far side may
+	// hold out of order) are this many times what may be in flight
+	kcpSpanFactor = 2
 )
 
-func computeKCPWindow(fps, batch int) int {
+// kcpTuning: how this side runs its reliable sessions. All of it is local: the far side sees ordinary KCP either way,
+// so a side with it and an older program without it work together.
+type kcpTuning struct {
+	// ackEach: every incoming segment answered at once by a packet of its own, as older programs do. Each such packet
+	// took a whole frame of the carrier: the joiner's one track spent ~860 of its ~970 frames a second on single acks
+	// and they queued up to half a second, so the creator's windows waited on them. Off: acks gather until the next
+	// flush (10 ms), dozens to a packet.
+	ackEach bool
+	// urgent: packets of acks alone, and resends of a copy that a later copy overtook (the far side acked one sent after
+	// it: on one track that means lost), go out ahead of the carrier's queue, so neither waits behind a window's worth
+	// of data (an ack behind an upload, a lost segment behind the download).
+	urgent bool
+	// resendGuard: a resend KCP's timer asks for is held while the last copy of that segment is still in the carrier's
+	// queue, or left it less than a network round trip ago with nothing sent after it acked yet. KCP starts its timer
+	// when it hands a segment over, so with hundreds of segments queued it resent 20-40% of what it sent though nothing
+	// was lost.
+	resendGuard bool
+	// carrierRTT: the window is the carrier's rate times this.
+	carrierRTT time.Duration
+	// flightGate: the window bounds what is in flight (sent, not acked) rather than KCP's span from the oldest
+	// unacked segment, which is twice that: a lost segment then no longer stops the sending while it is repaired.
+	flightGate bool
+}
+
+// span: KCP's own windows for a window of this many segments in flight.
+func (t *MultiTrackKCPTunnel) span(window int) int {
+	if t.tuning.flightGate {
+		return window * kcpSpanFactor
+	}
+	return window
+}
+
+var kcpTuningDefault = kcpTuning{urgent: true, resendGuard: true, flightGate: true, carrierRTT: kcpCarrierRTT}
+
+func computeKCPWindow(fps, batch int, carrierRTT time.Duration) int {
 	rate := fps * batch
 	if rate < 1 {
 		rate = defaultVP8FPS * defaultVP8Batch
 	}
-	window := int(float64(rate) * kcpCarrierRTT.Seconds())
+	window := int(float64(rate) * carrierRTT.Seconds())
 	if window < kcpWindowFloor {
 		return kcpWindowFloor
 	}
@@ -79,11 +121,82 @@ type trackKCPSession struct {
 	lastIn  atomic.Int64 // unix ns: the far side's last segment on it
 	// updateLoop only
 	busySince time.Time // something has waited on it, unanswered, since then (zero: nothing waits)
+
+	// winger: what the packets KCP puts out carry and where they went (all under kcpMu)
+	sentAny bool
+	maxSN   uint32
+	copies  [kcpSnRing]segCopy
+	rtt     netRTT
+	rack    int64 // when the latest-sent copy the far side acked went out
+
+	// winger: the far side's next expected segment, how many past it it has acked one by one, and the segments handed
+	// to KCP not yet put out: what is in flight is the rest
+	peerUna uint32
+	sacked  int
+	pending int
 }
 
 // ready: new connections may go on it.
 func (s *trackKCPSession) ready() bool {
 	return !s.removed.Load() && (!s.probed || s.heard.Load())
+}
+
+// segCopy: where a segment's last copy went, and KCP's timestamp on it (the far side's ack echoes it, so an ack tells
+// which copy arrived); acked: the far side has it, though one before it is missing.
+type segCopy struct {
+	place framePlace
+	ts    uint32
+	acked bool
+}
+
+type segPush struct {
+	sn, ts uint32
+	fresh  bool
+}
+
+// outRoute: where a packet from KCP goes.
+type outRoute int
+
+const (
+	routeQueue outRoute = iota // new data, and resends whose time has come: in turn
+	routeAhead                 // acks alone, and resends of copies a later copy overtook: ahead of the queue
+	routeHold                  // only resends whose last copy may still arrive: not now
+)
+
+// netRTT: the round trip from a copy leaving the carrier to its ack, so the carrier's own queue is left out.
+type netRTT struct {
+	srtt, rttvar time.Duration
+	peak, prev   time.Duration // the largest sample in this half second and in the one before
+	peakFrom     time.Time
+}
+
+const kcpRTTPeakSpan = 500 * time.Millisecond
+
+func (r *netRTT) sample(d time.Duration, now time.Time) {
+	if r.srtt == 0 {
+		r.srtt, r.rttvar = d, d/2
+	} else {
+		diff := r.srtt - d
+		if diff < 0 {
+			diff = -diff
+		}
+		r.rttvar = (3*r.rttvar + diff) / 4
+		r.srtt = (7*r.srtt + d) / 8
+	}
+	if now.Sub(r.peakFrom) >= kcpRTTPeakSpan {
+		r.prev, r.peak, r.peakFrom = r.peak, 0, now
+	}
+	r.peak = max(r.peak, d)
+}
+
+// timeout: how long after a copy left the carrier, with nothing sent after it acked, a resend is due (0: no samples
+// yet). The recent peak keeps a queue that grows on the call's server between samples from making copies that are
+// merely slow look lost.
+func (r *netRTT) timeout() time.Duration {
+	if r.srtt == 0 {
+		return 0
+	}
+	return max(r.srtt+max(4*r.rttvar, 2*kcpUpdateInterval), max(r.peak, r.prev)+2*kcpUpdateInterval)
 }
 
 func newTrackKCPSession(parent *MultiTrackKCPTunnel, vp8 *VP8DataTunnel, conv uint32, window int) *trackKCPSession {
@@ -93,40 +206,224 @@ func newTrackKCPSession(parent *MultiTrackKCPTunnel, vp8 *VP8DataTunnel, conv ui
 		parent:  parent,
 		recvBuf: make([]byte, kcpReceiveBufSize),
 	}
-	session.kcp = kcp.NewKCP(conv, func(buf []byte, size int) {
-		if size <= 0 {
-			return
-		}
-		segment := make([]byte, size+1)
-		segment[0] = kcpChannelReliable
-		copy(segment[1:], buf[:size])
-		parent.outputSegments.Add(1)
-		if !session.vp8.TrySendData(segment) {
-			parent.droppedSegments.Add(1)
-		}
-	})
+	session.kcp = kcp.NewKCP(conv, session.output)
 	session.kcp.NoDelay(1, 10, 2, 1)
-	session.kcp.WndSize(window, window)
+	session.kcp.WndSize(parent.span(window), parent.span(window))
 	session.kcp.SetMtu(kcpSegmentMTU)
 	return session
 }
 
+// output: one packet from KCP onto the carrier (called inside KCP, kcpMu held).
+func (s *trackKCPSession) output(buf []byte, size int) {
+	if size <= 0 {
+		return
+	}
+	var pushBuf [kcpPushesPerPacket]segPush
+	route, pushes := s.route(buf[:size], pushBuf[:])
+	if route == routeHold {
+		s.parent.heldResends.Add(1) // KCP tries again on its timer
+		return
+	}
+	segment := make([]byte, size+1)
+	segment[0] = kcpChannelReliable
+	copy(segment[1:], buf[:size])
+	s.parent.outputSegments.Add(1)
+	var place framePlace
+	ok := false
+	if route == routeAhead {
+		place, ok = s.vp8.trySendPlaced(segment, true)
+	}
+	if !ok {
+		place, ok = s.vp8.trySendPlaced(segment, false)
+	}
+	if !ok {
+		s.parent.droppedSegments.Add(1)
+	}
+	for _, p := range pushes {
+		c := &s.copies[p.sn%kcpSnRing]
+		if p.fresh {
+			*c = segCopy{}
+			s.pending = max(s.pending-1, 0)
+		} else {
+			s.parent.resentSegments.Add(1)
+		}
+		c.place, c.ts = place, p.ts
+	}
+}
+
+// departed: when a segment's last copy left the carrier (0: it still waits there, -1: unknown or long ago).
+func (s *trackKCPSession) departed(c *segCopy) int64 {
+	if c.place.seq == 0 {
+		return -1
+	}
+	return s.vp8.departedAt(c.place)
+}
+
+// route: where a packet from KCP goes. The track keeps order, so a copy that left before one the far side has acked
+// is lost: its resend goes ahead. A resend whose last copy still waits in the carrier, or left too recently to be
+// missed, is held: KCP times its resends from when it hands a segment over, queue and all.
+func (s *trackKCPSession) route(pkt []byte, buf []segPush) (outRoute, []segPush) {
+	tuning := &s.parent.tuning
+	pushes := buf[:0]
+	var fresh, other, repeat, lost, due bool
+	now := time.Now().UnixNano()
+	timeout := int64(s.rtt.timeout())
+	for len(pkt) >= kcp.IKCP_OVERHEAD {
+		cmd := pkt[4]
+		ts := binary.LittleEndian.Uint32(pkt[8:12])
+		sn := binary.LittleEndian.Uint32(pkt[12:16])
+		n := int(binary.LittleEndian.Uint32(pkt[20:24]))
+		switch {
+		case cmd != kcp.IKCP_CMD_PUSH:
+			other = true
+		case !s.sentAny || int32(sn-s.maxSN) > 0:
+			s.sentAny, s.maxSN = true, sn
+			fresh = true
+		default:
+			repeat = true
+			switch dep := s.departed(&s.copies[sn%kcpSnRing]); {
+			case dep < 0:
+				due = true
+			case dep == 0:
+			case dep < s.rack:
+				lost = true
+			case timeout == 0 || now-dep >= timeout:
+				due = true
+			}
+		}
+		if cmd == kcp.IKCP_CMD_PUSH && len(pushes) < cap(pushes) {
+			pushes = append(pushes, segPush{sn, ts, fresh && int32(sn-s.maxSN) == 0})
+		}
+		if n < 0 || kcp.IKCP_OVERHEAD+n > len(pkt) {
+			break
+		}
+		pkt = pkt[kcp.IKCP_OVERHEAD+n:]
+	}
+	switch {
+	case fresh:
+		return routeQueue, pushes
+	case !repeat || lost:
+		if tuning.urgent {
+			return routeAhead, pushes
+		}
+		return routeQueue, pushes
+	case due || other || !tuning.resendGuard:
+		return routeQueue, pushes
+	}
+	return routeHold, pushes
+}
+
+// sampleAcks: acks of our last copies (the timestamp tells which copy) give the network round trip and the latest
+// copy known to have arrived.
+func (s *trackKCPSession) sampleAcks(pkt []byte) {
+	now := time.Now()
+	var rtt int64
+	if len(pkt) >= kcp.IKCP_OVERHEAD {
+		s.advanceUna(binary.LittleEndian.Uint32(pkt[16:20]))
+	}
+	for len(pkt) >= kcp.IKCP_OVERHEAD {
+		cmd := pkt[4]
+		ts := binary.LittleEndian.Uint32(pkt[8:12])
+		sn := binary.LittleEndian.Uint32(pkt[12:16])
+		n := int(binary.LittleEndian.Uint32(pkt[20:24]))
+		if c := &s.copies[sn%kcpSnRing]; cmd == kcp.IKCP_CMD_ACK {
+			if !c.acked && s.inFlight(sn) {
+				c.acked = true
+				s.sacked++
+			}
+			if c.ts == ts {
+				if dep := s.departed(c); dep > 0 && now.UnixNano() > dep {
+					rtt = now.UnixNano() - dep
+					s.rack = max(s.rack, dep)
+				}
+			}
+		}
+		if n < 0 || kcp.IKCP_OVERHEAD+n > len(pkt) {
+			break
+		}
+		pkt = pkt[kcp.IKCP_OVERHEAD+n:]
+	}
+	if rtt > 0 {
+		s.rtt.sample(time.Duration(rtt), now)
+	}
+}
+
+// advanceUna: the far side has everything before una.
+func (s *trackKCPSession) advanceUna(una uint32) {
+	gap := int32(una - s.peerUna)
+	if gap <= 0 || !s.sentAny || int32(una-s.maxSN) > 1 {
+		return
+	}
+	if gap >= kcpSnRing {
+		for i := range s.copies {
+			s.copies[i].acked = false
+		}
+		s.peerUna, s.sacked = una, 0
+		return
+	}
+	for ; s.peerUna != una; s.peerUna++ {
+		if c := &s.copies[s.peerUna%kcpSnRing]; c.acked {
+			c.acked = false
+			s.sacked--
+		}
+	}
+}
+
+// inFlight: the segment was sent and the far side has not got all before it.
+func (s *trackKCPSession) inFlight(sn uint32) bool {
+	return s.sentAny && int32(sn-s.peerUna) >= 0 && int32(sn-s.maxSN) <= 0
+}
+
+// flight: segments out and not acked (one acked past a gap counts as arrived).
+func (s *trackKCPSession) flight() int {
+	if !s.sentAny {
+		return 0
+	}
+	return max(int(s.maxSN+1-s.peerUna)-s.sacked, 0)
+}
+
+// trySend: hands the frame to KCP if what is in flight, and waiting in KCP, stays under limit; without the gate, while
+// KCP holds less than limit*kcpWaitSndFactor.
+func (s *trackKCPSession) trySend(frame []byte, limit int, gate bool) bool {
+	s.kcpMu.Lock()
+	defer s.kcpMu.Unlock()
+	waiting := s.kcp.WaitSnd()
+	if gate {
+		if s.flight()+s.pending >= limit || waiting >= s.parent.span(limit)*kcpWaitSndFactor {
+			return false
+		}
+	} else if waiting >= limit*kcpWaitSndFactor {
+		return false
+	}
+	s.queue(frame)
+	return true
+}
+
 func (s *trackKCPSession) setWindow(window int) {
 	s.kcpMu.Lock()
-	s.kcp.WndSize(window, window)
+	s.kcp.WndSize(s.parent.span(window), s.parent.span(window))
 	s.kcpMu.Unlock()
 }
 
 func (s *trackKCPSession) send(frame []byte) {
 	s.kcpMu.Lock()
-	s.kcp.Send(frame)
-	s.kcp.Update()
+	s.queue(frame)
 	s.kcpMu.Unlock()
+}
+
+// queue: the frame to KCP, counting the segments it makes until they go out (kcpMu held).
+func (s *trackKCPSession) queue(frame []byte) {
+	const mss = kcpSegmentMTU - kcp.IKCP_OVERHEAD
+	if s.kcp.Send(frame) == 0 {
+		s.pending += max((len(frame)+mss-1)/mss, 1)
+	}
+	s.kcp.Update()
 }
 
 func (s *trackKCPSession) input(segment []byte) [][]byte {
 	s.kcpMu.Lock()
-	s.kcp.Input(segment, kcp.IKCP_PACKET_REGULAR, true)
+	s.sampleAcks(segment)
+	s.kcp.Input(segment, kcp.IKCP_PACKET_REGULAR, s.parent.tuning.ackEach)
 	var messages [][]byte
 	for {
 		size := s.kcp.PeekSize()
@@ -162,8 +459,9 @@ func (s *trackKCPSession) waitSnd() int {
 }
 
 type MultiTrackKCPTunnel struct {
-	mt    *MultiTrackTunnel
-	logFn func(string, ...any)
+	mt     *MultiTrackTunnel
+	logFn  func(string, ...any)
+	tuning kcpTuning
 
 	mu       sync.Mutex
 	sessions []*trackKCPSession
@@ -190,12 +488,19 @@ type MultiTrackKCPTunnel struct {
 	rawSent           atomic.Uint64
 	rawReceived       atomic.Uint64
 	droppedSegments   atomic.Uint64
+	heldResends       atomic.Uint64
+	resentSegments    atomic.Uint64
 }
 
 func NewMultiTrackKCPTunnel(mt *MultiTrackTunnel, logFn func(string, ...any)) *MultiTrackKCPTunnel {
+	return newMultiTrackKCPTunnel(mt, logFn, kcpTuningDefault)
+}
+
+func newMultiTrackKCPTunnel(mt *MultiTrackTunnel, logFn func(string, ...any), tuning kcpTuning) *MultiTrackKCPTunnel {
 	t := &MultiTrackKCPTunnel{
 		mt:      mt,
 		logFn:   logFn,
+		tuning:  tuning,
 		convMap: make(map[uint32]*trackKCPSession),
 		connPin: make(map[uint32]int),
 		stopCh:  make(chan struct{}),
@@ -204,7 +509,7 @@ func NewMultiTrackKCPTunnel(mt *MultiTrackTunnel, logFn func(string, ...any)) *M
 	subs := mt.SubTunnels()
 	window := kcpWindowFloor
 	if len(subs) > 0 {
-		window = computeKCPWindow(subs[0].FPS(), subs[0].Batch())
+		window = computeKCPWindow(subs[0].FPS(), subs[0].Batch(), tuning.carrierRTT)
 	}
 	t.currentWindow.Store(int32(window))
 	for i, sub := range subs {
@@ -258,8 +563,8 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 	t.mu.Unlock()
 
 	if msgType == tunnel.MsgData {
-		sndCap := int(t.currentWindow.Load()) * kcpWaitSndFactor
-		for session.waitSnd() >= sndCap {
+		limit := int(t.currentWindow.Load())
+		for !session.trySend(frame, limit, t.tuning.flightGate) {
 			if !session.ready() {
 				return // winger: its session was removed or went deaf; the connection is closed with it
 			}
@@ -269,10 +574,10 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 			case <-time.After(kcpBackpressurePoll):
 			}
 		}
+	} else {
+		session.send(frame)
 	}
-
 	t.sentMessages.Add(1)
-	session.send(frame)
 
 	if msgType == tunnel.MsgClose {
 		t.mu.Lock()
@@ -456,7 +761,7 @@ func (t *MultiTrackKCPTunnel) SetOnClose(fn func()) {
 
 func (t *MultiTrackKCPTunnel) Reconfigure(fps, batch int) {
 	t.mt.Reconfigure(fps, batch)
-	window := computeKCPWindow(fps, batch)
+	window := computeKCPWindow(fps, batch, t.tuning.carrierRTT)
 	t.applyWindow(window)
 	if t.logFn != nil {
 		t.logFn("kcptunnel: reconfigure fps=%d batch=%d -> window=%d", fps, batch, window)
@@ -648,6 +953,7 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 		case <-t.stopCh:
 			return
 		case <-t.nudge:
+			idleTicks = 0 // winger: something came or went; acks may be waiting for the next flush
 			if !fast {
 				fast = true
 				idleTicks = 0
@@ -686,10 +992,10 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 			}
 			ticks++
 			if common.Debug && ticks%kcpStatsEvery == 0 && t.logFn != nil {
-				t.logFn("kcptunnel: sessions=%d window=%d sent=%d delivered=%d out_segs=%d in_segs=%d raw_out=%d raw_in=%d dropped=%d",
+				t.logFn("kcptunnel: sessions=%d window=%d sent=%d delivered=%d out_segs=%d in_segs=%d raw_out=%d raw_in=%d dropped=%d resent=%d held=%d",
 					len(sessions), t.currentWindow.Load(), t.sentMessages.Load(), t.deliveredMessages.Load(),
 					t.outputSegments.Load(), t.inputSegments.Load(),
-					t.rawSent.Load(), t.rawReceived.Load(), t.droppedSegments.Load())
+					t.rawSent.Load(), t.rawReceived.Load(), t.droppedSegments.Load(), t.resentSegments.Load(), t.heldResends.Load())
 				snmp := kcp.DefaultSnmp.Copy()
 				t.logFn("kcptunnel: kcp_out=%d kcp_in=%d retrans=%d fastretrans=%d lost=%d repeat=%d",
 					snmp.OutSegs, snmp.InSegs, snmp.RetransSegs, snmp.FastRetransSegs, snmp.LostSegs, snmp.RepeatSegs)

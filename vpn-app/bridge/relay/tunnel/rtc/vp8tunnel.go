@@ -20,6 +20,11 @@ const (
 	keepaliveIdleMax    = 200 * time.Millisecond
 	keepalivePadMax     = 176
 	sendQueueDepth      = 128
+	// winger: a few frames that go out ahead of the queue (the reliable layer's acks and quick resends); more than this
+	// at once wait in the queue like the rest
+	urgentQueueDepth = 16
+	// winger: how many of the last frames' departure times are kept (more than the deepest queue)
+	departRing = 4096
 
 	paceBatchFloorPercent = 80
 	paceDriftMin          = 5 * time.Second
@@ -34,6 +39,7 @@ type VP8DataTunnel struct {
 	obf       *tunnel.TunnelObfuscator
 	stopCh    chan struct{}
 	sendQueue chan []byte
+	urgent    chan []byte
 	cfgChan   chan struct{}
 
 	stopOnce sync.Once
@@ -49,6 +55,9 @@ type VP8DataTunnel struct {
 	sentFrames      atomic.Uint64
 	recvFrames      atomic.Uint64
 	keepaliveFrames atomic.Uint64
+
+	queued       departures
+	urgentQueued departures
 
 	OnData        func([]byte)
 	OnClose       func()
@@ -75,6 +84,7 @@ func NewVP8DataTunnelWithQueue(track *webrtc.TrackLocalStaticSample, obf *tunnel
 		logFn:           logFn,
 		stopCh:          make(chan struct{}),
 		sendQueue:       make(chan []byte, queueDepth),
+		urgent:          make(chan []byte, urgentQueueDepth),
 		cfgChan:         make(chan struct{}, 1),
 		fps:             defaultVP8FPS,
 		batch:           defaultVP8Batch,
@@ -139,22 +149,82 @@ func (t *VP8DataTunnel) SendData(data []byte) {
 	}
 	select {
 	case t.sendQueue <- data:
+		t.queued.put()
 	case <-t.stopCh:
 	}
 }
 
 func (t *VP8DataTunnel) TrySendData(data []byte) bool {
+	_, ok := t.trySendPlaced(data, false)
+	return ok
+}
+
+// winger: the reliable layer wants to know when each of its frames actually went out (its timers otherwise count the
+// time a frame waits in the queue as time on the way).
+
+// framePlace: a frame's place in the queue or in the short lane ahead of it (seq 0: nowhere).
+type framePlace struct {
+	seq    uint64
+	urgent bool
+}
+
+// departures: when the frames taken from one queue went out, by their place in it. The writer alone takes frames.
+type departures struct {
+	in, out atomic.Uint64
+	at      [departRing]atomic.Int64
+}
+
+// put: one frame more in the queue; its place (give or take a frame another sender put in at the same moment).
+func (d *departures) put() uint64 { return d.in.Add(1) }
+
+// took: the writer took the next frame: its time first, then the count that shows it.
+func (d *departures) took() {
+	seq := d.out.Load() + 1
+	d.at[seq%departRing].Store(time.Now().UnixNano())
+	d.out.Store(seq)
+}
+
+// when: when the frame at this place went out (unix nanoseconds); 0 while it waits, -1 when unknown or long ago.
+func (d *departures) when(seq uint64) int64 {
+	done := d.out.Load()
+	if seq > done {
+		return 0
+	}
+	if seq == 0 || done-seq >= departRing-1 {
+		return -1
+	}
+	return d.at[seq%departRing].Load()
+}
+
+// trySendPlaced: TrySendData, or with urgent ahead of everything queued (false: no room); and where the frame went.
+func (t *VP8DataTunnel) trySendPlaced(data []byte, urgent bool) (framePlace, bool) {
 	if len(data) == 0 {
-		return true
+		return framePlace{}, true
+	}
+	if urgent {
+		select {
+		case t.urgent <- data:
+			return framePlace{seq: t.urgentQueued.put(), urgent: true}, true
+		default:
+			return framePlace{}, false
+		}
 	}
 	select {
 	case t.sendQueue <- data:
-		return true
+		return framePlace{seq: t.queued.put()}, true
 	case <-t.stopCh:
-		return false
+		return framePlace{}, false
 	default:
-		return false
+		return framePlace{}, false
 	}
+}
+
+// departedAt: when the frame put there went out (0: it still waits, -1: unknown or long ago).
+func (t *VP8DataTunnel) departedAt(p framePlace) int64 {
+	if p.urgent {
+		return t.urgentQueued.when(p.seq)
+	}
+	return t.queued.when(p.seq)
 }
 
 func (t *VP8DataTunnel) Start(fps, batch int) {
@@ -287,7 +357,16 @@ func (t *VP8DataTunnel) writerLoop() {
 					repace()
 				case <-ticker.C:
 					select {
+					case data := <-t.urgent:
+						t.urgentQueued.took()
+						emit(t.obf.EncodeData(data), false)
+						idleTicks = 0
+						continue
+					default:
+					}
+					select {
 					case data := <-t.sendQueue:
+						t.queued.took()
 						emit(t.obf.EncodeData(data), false)
 						idleTicks = 0
 					default:
@@ -316,7 +395,20 @@ func (t *VP8DataTunnel) writerLoop() {
 				reconfigure = true
 			case <-drift.C:
 				repace()
+			case data := <-t.urgent:
+				t.urgentQueued.took()
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				emit(t.obf.EncodeData(data), false)
+				idleTicks = 0
+				spinning = true
+				ticker.Reset(sampleInterval)
 			case data := <-t.sendQueue:
+				t.queued.took()
 				if !idle.Stop() {
 					select {
 					case <-idle.C:

@@ -65,14 +65,23 @@ func newReliablePipe(tb testing.TB) *reliablePipe {
 func (p *reliablePipe) pump(l pipeLink) {
 	defer p.wg.Done()
 	for {
-		select {
-		case <-p.stop:
-			return
-		case data := <-l.from.sendQueue:
-			frame := l.from.obf.EncodeData(data)
-			p.frames.Add(1)
-			l.to.HandleFrame(frame)
+		var data []byte
+		select { // the short lane ahead of the queue first, as the writer takes it
+		case data = <-l.from.urgent:
+			l.from.urgentQueued.took()
+		default:
+			select {
+			case <-p.stop:
+				return
+			case data = <-l.from.urgent:
+				l.from.urgentQueued.took()
+			case data = <-l.from.sendQueue:
+				l.from.queued.took()
+			}
 		}
+		frame := l.from.obf.EncodeData(data)
+		p.frames.Add(1)
+		l.to.HandleFrame(frame)
 	}
 }
 

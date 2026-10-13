@@ -15,6 +15,9 @@ import (
 // track; the joiner (Winger) publishes one track, keeps a reliable session for each of the creator's tracks and sends
 // on the first only. Frames are carried in memory here, a few of them lost on the way.
 
+// kcpTuningOlder: the reliable layer as programs before its tuning ran, to stand in for an older creator or Winger.
+var kcpTuningOlder = kcpTuning{ackEach: true, carrierRTT: 250 * time.Millisecond}
+
 type lossyWire struct {
 	mu     sync.Mutex
 	rnd    *rand.Rand
@@ -71,7 +74,7 @@ func msg(conn uint32, i int) []byte {
 
 type pair struct {
 	creator, joiner   *MultiTrackKCPTunnel
-	cam, share        *lossyWire
+	cam, share, pub   *lossyWire
 	creatorShareTrack *VP8DataTunnel
 	creatorTracks     *MultiTrackTunnel
 }
@@ -83,6 +86,11 @@ func newPair(t *testing.T, creatorShare, joinerShare bool, loss float64) *pair {
 }
 
 func newPairDepth(t *testing.T, creatorShare, joinerShare bool, loss float64, depth int) *pair {
+	return newPairTuned(t, creatorShare, joinerShare, loss, depth, kcpTuningDefault, kcpTuningDefault)
+}
+
+// newPairTuned: the same with each side's reliable layer as given (kcpTuningOlder: a program before its tuning).
+func newPairTuned(t *testing.T, creatorShare, joinerShare bool, loss float64, depth int, creatorTuning, joinerTuning kcpTuning) *pair {
 	t.Helper()
 	secret := tunnel.DeriveSecretFromJoinLink("https://telemost.yandex.ru/j/7777777777")
 	cobf, _ := tunnel.NewTunnelObfuscator(secret)
@@ -100,20 +108,20 @@ func newPairDepth(t *testing.T, creatorShare, joinerShare bool, loss float64, de
 
 	cmt := NewMultiTrackTunnel([]*VP8DataTunnel{cam})
 	cmt.Start(50, 20)
-	ckcp := NewMultiTrackKCPTunnel(cmt, nil)
+	ckcp := newMultiTrackKCPTunnel(cmt, nil, creatorTuning)
 	cmt.AddSubTunnel(share) // the screenshare track is on in every case: what differs is who keeps a session for it
 	if creatorShare {
 		ckcp.AddSession(share)
 	}
 	jmt := NewMultiTrackTunnel([]*VP8DataTunnel{pub})
 	jmt.Start(50, 20)
-	jkcp := NewMultiTrackKCPTunnel(jmt, nil)
+	jkcp := newMultiTrackKCPTunnel(jmt, nil, joinerTuning)
 	if joinerShare {
 		jkcp.AddSession(pub)
 		jkcp.SetSendSessions(1)
 	}
 	t.Cleanup(func() { ckcp.Stop(); jkcp.Stop() })
-	return &pair{creator: ckcp, joiner: jkcp, cam: camW, share: shareW, creatorShareTrack: share, creatorTracks: cmt}
+	return &pair{creator: ckcp, joiner: jkcp, cam: camW, share: shareW, pub: pubW, creatorShareTrack: share, creatorTracks: cmt}
 }
 
 // run: the creator sends `down` messages over 16 connections, the joiner `up`; both arrive whole and in order.
