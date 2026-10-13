@@ -227,7 +227,7 @@
       }
       else if (u.new) line(`Доступна v${u.latest} · у вас v${u.current}`, u.notes || "");
       else line(`v${u.current} — последняя ✓`, u.checked ? "Проверено " + new Date(u.checked * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "");
-      if (!running && p.state === "finished" && p.version && !p.ok) line(`⚠️ Обновление до v${p.version} не прошло`, "Сервер работает на прежней версии. Подробности — в событиях.");
+      if (!running && p.state === "finished" && p.version && !p.ok) line(`⚠️ Обновление до v${p.version} не прошло`, "Сервер работает на прежней версии. Почему — спросите в «🛠 Claude».");
       if (u.foreign) line("Новая версия собрана не для этого сервера", "Пришлите ключ обновлений тому, кто её собирает (кнопка ниже).");
       const row = el("div", { class: "big-actions", style: "margin-top:8px" });
       if (u.new && !running) {
@@ -525,7 +525,7 @@
         stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
       if (host && !urgentHost) drawHosting(host);
       if (u && u.ready) scroll.append(updateCard(u, urgentUpdate ? "extras" : "all"));
-      scroll.append(actionsCard(d, cl));
+      scroll.append(actionsCard(cl));
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
     const BRIDGES = [
@@ -638,7 +638,7 @@
         } catch (e) { toast(problem(e)); }
       } });
     }
-    function actionsCard(d, cl) {
+    function actionsCard(cl) {
       return el("div", { class: "card" }, el("h3", { text: "🔧 Действия с сервером" }), diagButton(cl),
         el("button", { class: "btn line wide", text: "💾 Резервная копия сейчас", onclick: async () => {
           if (await confirmBox("Сделать резервную копию сейчас? Через минуту-две она ляжет на Яндекс Диск (папка «Семейный сервер — копии»), а без Диска придёт на почту.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — на Яндекс Диск");
