@@ -29,4 +29,4 @@ jobs:
           { jq -r .notes release.json; printf '\nsha256: %s\nfor: %s\n' "$SHA" "$FP"; } > notes.txt
           gh release delete "server-v$V" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
           gh release create "server-v$V" installer.enc key.enc --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "Сервер v$V" --notes-file notes.txt
+            --title "Сервер v$(( V >= 1000 ? V - 1000 : V ))" --notes-file notes.txt
