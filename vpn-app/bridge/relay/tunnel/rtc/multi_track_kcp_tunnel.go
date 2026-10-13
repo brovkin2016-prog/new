@@ -12,6 +12,13 @@ import (
 	"whitelist-bypass/relay/tunnel"
 )
 
+// winger: VP8FramePacketBudget — the longest frame a track sends as one RTP packet. The track's packetizer cuts a frame
+// at 1200 less the 12-byte RTP header, and its VP8 payloader (headless-client's, as Chrome's: with a picture id) puts a
+// 4-byte descriptor before each piece (3 for the first 128 frames, 1 for the very first). A longer frame goes as two
+// packets: twice the packets, twice the frames lost (the far side throws away a frame with a piece missing), and a
+// late repaired piece no longer saves its frame. The screenshare track's own packetizer cuts the same way.
+const VP8FramePacketBudget = 1200 - 12 - 4
+
 const (
 	kcpConvBase           = 0x77627374
 	kcpUpdateInterval     = 10 * time.Millisecond
@@ -19,13 +26,16 @@ const (
 	kcpIdleAfterTicks     = 50
 	// One KCP segment must ride in a single RTP packet so a dropped packet
 	// loses only its own frame, not a two-packet frame that readVP8Track
-	// would discard whole. 1200 RTP budget - 1 VP8 descriptor - interframe
-	// header - 24 XChaCha20 nonce - 16 Poly1305 tag - 1 channel tag.
-	kcpSegmentMTU     = 1200 - 1 - tunnel.InterframeHdrLen - 24 - 16 - 1
+	// would discard whole. RTP budget - interframe header - 24 XChaCha20
+	// nonce - 16 Poly1305 tag - 1 channel tag.
+	// winger: the budget is VP8FramePacketBudget (1184), not 1200 - 1: with 1199 bytes every full segment went as two
+	// packets, the second of 15 bytes.
+	kcpSegmentMTU     = VP8FramePacketBudget - tunnel.InterframeHdrLen - 24 - 16 - 1
 	kcpReceiveBufSize = 128 * 1024
 	// winger: what one TCP read may take on the reliable way: a whole number of full segments (segment data = MTU
 	// - 24 KCP header) less the relay frame's own 9 bytes. A plain 1126-byte read made 1135 bytes, two segments of
 	// which the second carried 22 bytes and still took a packet of its own: half the call's packets nearly empty.
+	// (31833 with the segment of one packet; 32268 before.)
 	KCPReadBufSize = 29*(kcpSegmentMTU-24) - 4 - tunnel.WireHeaderLen
 	kcpStatsEvery  = 500
 

@@ -12,9 +12,9 @@ import (
 //   go test ./relay/tunnel/ -run '^$' -bench 'Obfuscator|Frames' -benchmem
 
 const (
-	benchSegment = 1 + 1137 // channel byte + one full KCP segment
+	benchSegment = 1 + 1122 // channel byte + one full KCP segment (rtc.kcpSegmentMTU)
 	benchAck     = 1 + 24   // channel byte + one KCP ack
-	benchRead    = 32268
+	benchRead    = 31833    // rtc.KCPReadBufSize
 )
 
 func benchObfuscators(b *testing.B) (*TunnelObfuscator, *TunnelObfuscator) {

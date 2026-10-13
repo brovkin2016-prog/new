@@ -23,9 +23,11 @@ const (
 	HandshakeBuf = 258
 	UDPBufSize   = 4096
 	RTPBufSize   = 65536
-	// VP8BufSize fits one RTP packet: 1200 MTU - 1 VP8 descriptor - 64 tunnel wrapper - 9 protocol frame
-	// (tunnel wrapper = 20 vp8 keepalive header + 4 epoch + 24 XChaCha20 nonce + 16 Poly1305 tag)
-	VP8BufSize = 1126
+	// VP8BufSize fits one RTP packet: 1200 MTU - 12 RTP header - 4 VP8 descriptor - 61 tunnel wrapper - 9 protocol
+	// frame (tunnel wrapper = 17 vp8 interframe header + 4 epoch + 24 XChaCha20 nonce + 16 Poly1305 tag).
+	// winger: was 1126 (counted 1 descriptor byte and no RTP header): each full read went as two packets, the second
+	// of 12 bytes; rtc.VP8FramePacketBudget says why, rtc's packet-budget test checks it
+	VP8BufSize = 1114
 	DCBufSize  = 32768
 )
 
