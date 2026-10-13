@@ -225,9 +225,10 @@ func newTrackKCPSession(parent *MultiTrackKCPTunnel, vp8 *VP8DataTunnel, conv ui
 	return session
 }
 
-// output: one packet from KCP onto the carrier (called inside KCP, kcpMu held).
+// output: one packet from KCP onto the carrier (called inside KCP, kcpMu held). winger: nothing once the layer stopped
+// (StopLayer).
 func (s *trackKCPSession) output(buf []byte, size int) {
-	if size <= 0 {
+	if size <= 0 || s.parent.stopped() {
 		return
 	}
 	var pushBuf [kcpPushesPerPacket]segPush
@@ -544,6 +545,9 @@ func (s *trackKCPSession) fecReport(expected, received uint32) {
 
 // sendParity (winger, kcpMu held): parity frames go after their group's data on the same track, never waiting for room.
 func (s *trackKCPSession) sendParity(frames [][]byte) {
+	if s.parent.stopped() {
+		return
+	}
 	for _, f := range frames {
 		s.parent.fecParity.Add(1)
 		if !s.vp8.TrySendData(f) {
@@ -671,7 +675,7 @@ func newMultiTrackKCPTunnel(mt *MultiTrackTunnel, logFn func(string, ...any), tu
 }
 
 func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
-	if len(frame) < 9 {
+	if len(frame) < 9 || t.stopped() {
 		return
 	}
 	connID := binary.BigEndian.Uint32(frame[4:8])
@@ -1000,7 +1004,7 @@ func (t *MultiTrackKCPTunnel) sendFECReports(now time.Time) {
 	}
 	t.fecReports = now
 	t.mu.Lock()
-	if len(t.fecDec) == 0 || len(t.sessions) == 0 {
+	if len(t.fecDec) == 0 || len(t.sessions) == 0 || t.stopped() {
 		t.mu.Unlock()
 		return
 	}
@@ -1111,8 +1115,29 @@ func (t *MultiTrackKCPTunnel) Stop() {
 	t.mt.Stop()
 }
 
+// StopLayer: the layer stops and leaves its carriers to a new one. winger: it is silent from then on. Its sessions
+// still put out what they were given (the old relay's goroutines send through it: the closes of their connections once
+// their targets are closed, data that was on the way) and any resend due whenever they were given something: on the
+// shared tracks, with the conv the new layer uses, so the new far side took them for the new layer's own segments.
 func (t *MultiTrackKCPTunnel) StopLayer() {
 	t.stopOnce.Do(func() { close(t.stopCh) })
+	t.mu.Lock()
+	sessions := append([]*trackKCPSession(nil), t.sessions...)
+	t.mu.Unlock()
+	for _, s := range sessions {
+		s.kcpMu.Lock() // an output under way ends before this returns; any later one sees the stop
+		s.kcpMu.Unlock()
+	}
+}
+
+// stopped: the layer was stopped (StopLayer, Stop, or its carrier closed).
+func (t *MultiTrackKCPTunnel) stopped() bool {
+	select {
+	case <-t.stopCh:
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *MultiTrackKCPTunnel) handleInnerClose() {
