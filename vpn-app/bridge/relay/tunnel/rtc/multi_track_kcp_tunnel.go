@@ -39,11 +39,10 @@ const (
 	KCPReadBufSize = 29*(kcpSegmentMTU-24) - 4 - tunnel.WireHeaderLen
 	kcpStatsEvery  = 500
 
-	kcpWindowFloor      = 64
-	kcpWindowCeiling    = 512
-	kcpCarrierRTT       = 250 * time.Millisecond
-	kcpWaitSndFactor    = 2
-	kcpBackpressurePoll = 2 * time.Millisecond
+	kcpWindowFloor   = 64
+	kcpWindowCeiling = 512
+	kcpCarrierRTT    = 250 * time.Millisecond
+	kcpWaitSndFactor = 2
 
 	kcpChannelReliable byte = 0x00
 	kcpChannelRaw      byte = 0x01
@@ -144,6 +143,9 @@ type trackKCPSession struct {
 	peerUna uint32
 	sacked  int
 	pending int
+
+	// winger: data waiting for room in it, least served connection first (kcp_gate.go)
+	gate sessionGate
 }
 
 // ready: new connections may go on it.
@@ -573,16 +575,10 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 	t.mu.Unlock()
 
 	if msgType == tunnel.MsgData {
-		limit := int(t.currentWindow.Load())
-		for !session.trySend(frame, limit, t.tuning.flightGate) {
-			if !session.ready() {
-				return // winger: its session was removed or went deaf; the connection is closed with it
-			}
-			select {
-			case <-t.stopCh:
-				return
-			case <-time.After(kcpBackpressurePoll):
-			}
+		// winger: in turn with the other connections once KCP is full (kcp_gate.go); let go unsent when the session
+		// was removed or went deaf (the connection is closed with it) or the tunnel stopped
+		if !session.admit(connID, frame, t.stopCh) {
+			return
 		}
 	} else {
 		session.send(frame)
@@ -593,6 +589,7 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 		t.mu.Lock()
 		delete(t.connPin, connID)
 		t.mu.Unlock()
+		session.gate.book.forget(connID)
 	}
 }
 
@@ -684,14 +681,23 @@ const retiredPin = -1
 func (t *MultiTrackKCPTunnel) retire(index int) {
 	t.mu.Lock()
 	var conns []uint32
+	closed := map[uint32]bool{}
 	for id, i := range t.connPin {
 		if i == index {
 			conns = append(conns, id)
+			closed[id] = true
 			t.connPin[id] = retiredPin
 		}
 	}
+	var gone *trackKCPSession
+	if index < len(t.sessions) {
+		gone = t.sessions[index]
+	}
 	callback := t.onData
 	t.mu.Unlock()
+	if gone != nil {
+		gone.gate.drop(closed) // what of theirs waits for room goes unsent
+	}
 	for _, id := range conns {
 		frame := tunnel.EncodeFrame(id, tunnel.MsgClose, nil)
 		t.mu.Lock()
@@ -748,6 +754,7 @@ func (t *MultiTrackKCPTunnel) handleDecodedSegment(payload []byte) {
 		t.logFn("kcptunnel: session %d answered by the far side, in use", conv-kcpConvBase)
 	}
 	messages := session.input(body)
+	session.pump() // winger: acks may have made room
 	if callback == nil {
 		return
 	}
@@ -786,6 +793,7 @@ func (t *MultiTrackKCPTunnel) applyWindow(window int) {
 	t.mu.Unlock()
 	for _, session := range sessions {
 		session.setWindow(window)
+		session.pump()
 	}
 }
 
@@ -838,6 +846,7 @@ func (t *MultiTrackKCPTunnel) RemoveLastSession() {
 		delete(t.convMap, last.conv)
 	}
 	t.mu.Unlock()
+	last.gate.shut() // winger: what still waits for it would never get room (its connections are closed)
 }
 
 func (t *MultiTrackKCPTunnel) Stop() {
@@ -978,8 +987,15 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 			now := time.Now()
 			for i, session := range sessions {
 				session.update()
+				session.pump()
 				waiting := session.waitSnd()
 				pending += waiting
+				if session.gate.hasWaiting() {
+					pending++ // winger: data waits for room; keep the quick tick
+				}
+				if ticks%kcpPruneEvery == 0 {
+					session.gate.book.prune(now)
+				}
 				session.trackBusy(waiting, now)
 				if session.probed {
 					t.watchProbed(i, session, sessions[0], now)
