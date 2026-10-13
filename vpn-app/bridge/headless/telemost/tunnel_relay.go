@@ -47,6 +47,7 @@ type SFURelay struct {
 	shareSub    *rtc.VP8DataTunnel // winger: the screenshare track's tunnel, while it is on
 	kcpShare    bool               // winger: the joiner keeps a reliable session for it (ConfigKCPEveryTrack)
 	shareSyncMu sync.Mutex         // winger: one syncShareSession at a time (the joiner's config, the data channel)
+	layerEpoch  uint32             // winger: the epoch of the joiner the reliable layer is for (SetEpochConv)
 
 	readBufSize int
 	tunFired    bool
@@ -168,6 +169,19 @@ func (r *SFURelay) SetFEC(on bool) {
 	r.mu.Unlock()
 	if kcptun != nil {
 		kcptun.SetFEC(on)
+	}
+}
+
+// SetEpochConv (winger): the joiner takes reliable frames on the convs of its epoch (tunnel.ConfigKCPEpochConv): the
+// creator sends on them, so that what a layer it ran for an earlier joiner on the same tracks still puts out never
+// reaches this joiner's sessions. An older joiner never says so and gets the usual convs.
+func (r *SFURelay) SetEpochConv(on bool) {
+	r.mu.Lock()
+	kcptun, _ := r.delivered.(*rtc.MultiTrackKCPTunnel)
+	epoch := r.layerEpoch
+	r.mu.Unlock()
+	if on && kcptun != nil && epoch != 0 {
+		kcptun.UseEpochConv(epoch)
 	}
 }
 
@@ -297,8 +311,13 @@ func (r *SFURelay) activate(mt *rtc.MultiTrackTunnel, payload []byte) {
 		log.Println("[relay] per-track kcp reliability active over video tunnel")
 	}
 	log.Printf("[relay] auto-detected active tunnel: %T", delivered)
+	var epoch uint32
+	if r.obf != nil {
+		epoch = r.obf.PeerEpoch() // winger: the joiner whose frame this is
+	}
 	r.mu.Lock()
 	r.delivered = delivered
+	r.layerEpoch = epoch
 	r.mu.Unlock()
 	if r.OnConnected != nil {
 		r.OnConnected(delivered)
@@ -328,6 +347,14 @@ func (r *SFURelay) resetForNewPeer() {
 	r.mu.Unlock()
 	if kcp, ok := old.(*rtc.MultiTrackKCPTunnel); ok {
 		kcp.StopLayer()
+		// winger: what the stopped layer queued on the tracks (up to a window and more of frames) goes too: it would
+		// reach the new joiner first, on the conv an older one takes for its own new layer's, and its cumulative ack
+		// would count the new joiner's first segments as delivered though this side never got them
+		if mt != nil {
+			if n := mt.DropQueued(); n > 0 {
+				log.Printf("[relay] %d frames of the old joiner's tunnel thrown away", n)
+			}
+		}
 	}
 	if mt != nil {
 		mt.SetOnData(func(payload []byte) { r.activate(mt, payload) })

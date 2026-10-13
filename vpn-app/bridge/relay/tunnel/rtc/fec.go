@@ -30,6 +30,8 @@ import (
 // The stream is the session's index (its conv less kcpConvBase), which stands for the conv the data frame leaves out:
 // a data frame is one byte shorter than a plain one, a parity frame no longer than the longest plain one, so neither
 // needs an RTP packet more than before. Data frames are handed on at once; only what was lost waits for the parity.
+// The output's first length goes XORed with the conv left out, so the receiving side reads it right only with the conv
+// it went with: a frame of another layer's (another conv: AcceptEpochConv), rebuilt or not, is never taken for its own.
 
 const (
 	kcpChannelFECData   byte = 0x02
@@ -126,6 +128,9 @@ func (e *fecEncoder) frame(out []byte, now time.Time) []byte {
 	f[1] = e.stream
 	binary.BigEndian.PutUint16(f[2:4], e.seq)
 	copy(f[fecConvLen:], out[fecConvLen:])
+	if len(out) >= kcp.IKCP_OVERHEAD {
+		binary.LittleEndian.PutUint32(f[20:24], binary.LittleEndian.Uint32(out[20:24])^binary.LittleEndian.Uint32(out))
+	}
 	if fecParityFor(e.loss) > 0 {
 		if len(e.group) >= fecGroupData { // a full group the answer goes on past: closed, without parity
 			e.group = e.group[:0]
@@ -200,6 +205,7 @@ func (e *fecEncoder) report(expected, received uint32) {
 type fecDecoder struct {
 	mu        sync.Mutex
 	conv      uint32
+	alt       uint32 // winger: the session's other conv the far side may send on (AcceptEpochConv; 0: none)
 	stream    byte
 	ring      [fecRing]fecSlot
 	groups    map[uint16]*fecGroup
@@ -247,13 +253,42 @@ func (d *fecDecoder) advance(seq uint16, span uint32) {
 	}
 }
 
-// data: a data frame's seq and what it carries after its header.
-func (d *fecDecoder) data(seq uint16, shard []byte) {
+// data: a data frame's seq and what it carries after its header; the KCP output it holds, nil if it is not this
+// session's (winger: another layer's frame, which is not counted either).
+func (d *fecDecoder) data(seq uint16, shard []byte) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	out := d.restore(shard, false)
+	if out == nil {
+		return nil
+	}
 	d.advance(seq, 1)
 	d.received++
 	d.ring[seq%fecRing] = fecSlot{seq: seq, data: shard}
+	return out
+}
+
+// restore (d.mu held; winger): the KCP output a frame's shard holds (the output less its conv, its first length XORed
+// with that conv), with whichever of this session's convs it went with; nil if none (another layer's frame) or not
+// whole. rebuilt: from parity, zeros after it.
+func (d *fecDecoder) restore(shard []byte, rebuilt bool) []byte {
+	if fecConvLen+len(shard) < kcp.IKCP_OVERHEAD {
+		return nil
+	}
+	seg := make([]byte, fecConvLen+len(shard))
+	copy(seg[fecConvLen:], shard)
+	folded := binary.LittleEndian.Uint32(seg[20:24])
+	for _, conv := range [2]uint32{d.alt, d.conv} {
+		if conv == 0 {
+			continue
+		}
+		binary.LittleEndian.PutUint32(seg, conv)
+		binary.LittleEndian.PutUint32(seg[20:24], folded^conv)
+		if out := trimKCPOutput(seg, conv); out != nil && (rebuilt || len(out) == len(seg)) {
+			return out
+		}
+	}
+	return nil
 }
 
 // parity: one parity frame; the outputs (conv restored) it rebuilt, if any. It also tells which frames were sent: a
@@ -328,14 +363,12 @@ func (d *fecDecoder) parity(first uint16, n, m, j int, shard []byte) [][]byte {
 	}
 	var out [][]byte
 	for _, i := range missing {
-		seg := make([]byte, fecConvLen+size)
-		binary.LittleEndian.PutUint32(seg, d.conv)
-		copy(seg[fecConvLen:], shards[i])
-		if seg = trimKCPOutput(seg, d.conv); seg == nil {
+		seg := d.restore(shards[i], true)
+		if seg == nil {
 			continue
 		}
 		seq := first + uint16(i)
-		d.ring[seq%fecRing] = fecSlot{seq: seq, data: seg[fecConvLen:]}
+		d.ring[seq%fecRing] = fecSlot{seq: seq, data: shards[i][:len(seg)-fecConvLen]}
 		d.recovered++
 		out = append(out, seg)
 	}

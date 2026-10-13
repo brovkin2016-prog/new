@@ -129,6 +129,15 @@ func (m *MultiTrackTunnel) DeliverData(data []byte) {
 	}
 }
 
+// DropQueued (winger): what waits to be sent on every track is thrown away (VP8DataTunnel.DropQueued); how many frames.
+func (m *MultiTrackTunnel) DropQueued() int {
+	n := 0
+	for _, tun := range m.SubTunnels() {
+		n += tun.DropQueued()
+	}
+	return n
+}
+
 func (m *MultiTrackTunnel) SubTunnels() []*VP8DataTunnel {
 	m.mu.Lock()
 	defer m.mu.Unlock()

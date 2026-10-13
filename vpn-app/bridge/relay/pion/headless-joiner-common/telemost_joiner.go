@@ -572,6 +572,11 @@ func (j *TelemostHeadlessJoiner) initPC() {
 				mt := rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{vp8tun})
 				kcpTun := rtc.NewMultiTrackKCPTunnel(mt, j.logFn)
 				flags = tunnel.ConfigFEC // winger: this side reads frames with parity; a creator that knows them adds them
+				// winger: the creator's reliable frames on convs of this tunnel's own epoch too: a layer the creator ran
+				// for this side's tunnel before a reconnect, still sending until it sees the new one, is never taken for
+				// the new one's (a newer creator then sends on them; an older one keeps the usual, still taken)
+				kcpTun.AcceptEpochConv(j.obf.LocalEpoch())
+				flags |= tunnel.ConfigKCPEpochConv
 				active = kcpTun
 				j.logFn("telemost-joiner: per-track kcp reliability active over video tunnel")
 				if j.dualTrack {

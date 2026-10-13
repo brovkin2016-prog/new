@@ -66,6 +66,14 @@ const ConfigKCPEveryTrack byte = 0x01
 // (0x02 and 0x04 were used by experiments that were not taken; they stay unused.)
 const ConfigFEC byte = 0x10
 
+// winger: ConfigKCPEpochConv: the joiner takes the creator's reliable frames on convs of its own epoch too (rtc's
+// AcceptEpochConv), so the creator sends on those (UseEpochConv). A reliable layer the creator ran for an earlier joiner
+// on the same tracks (this one before a reconnect, or another Winger) used other convs: what of it is still on the way,
+// or still sent until the creator sees the new joiner, never reaches the new joiner's sessions, which took its
+// cumulative ack for their own and lost their first segments for good. An older creator ignores the bit and sends on
+// the usual convs, which the joiner still takes; an older joiner never sets it and gets the usual convs.
+const ConfigKCPEpochConv byte = 0x20
+
 func EncodeVP8ConfigFlags(fps, batch, trackCount int, flags byte) []byte {
 	frame := EncodeVP8Config(fps, batch, trackCount)
 	if flags == 0 {

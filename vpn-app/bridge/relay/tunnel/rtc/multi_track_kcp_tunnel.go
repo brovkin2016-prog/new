@@ -64,6 +64,35 @@ const (
 	kcpSpanFactor = 2
 )
 
+// kcpEpochConv (winger): the conv base for a Telemost joiner of this epoch (tunnel.ConfigKCPEpochConv): its sessions
+// are base+0, base+1, ..., never one of the usual kcpConvBase+i, and two epochs' bases almost always differ in their
+// high bits (an FEC frame's folded length then reads as nonsense with the other's conv).
+func kcpEpochConv(epoch uint32) uint32 {
+	base := (epoch * 0x9E3779B1) &^ 0xFF
+	if base == kcpConvBase&^0xFF {
+		base ^= 0x80000000
+	}
+	return base
+}
+
+// relabelKCP (winger): every segment of a KCP output is on conv `from` and whole; it is put on `to`. False if not.
+func relabelKCP(pkt []byte, from, to uint32) bool {
+	for len(pkt) >= kcp.IKCP_OVERHEAD {
+		if binary.LittleEndian.Uint32(pkt) != from {
+			return false
+		}
+		if from != to {
+			binary.LittleEndian.PutUint32(pkt, to)
+		}
+		n := int(binary.LittleEndian.Uint32(pkt[20:24]))
+		if n < 0 || kcp.IKCP_OVERHEAD+n > len(pkt) {
+			return false
+		}
+		pkt = pkt[kcp.IKCP_OVERHEAD+n:]
+	}
+	return true
+}
+
 // kcpTuning: how this side runs its reliable sessions. All of it is local: the far side sees ordinary KCP either way,
 // so a side with it and an older program without it work together.
 type kcpTuning struct {
@@ -243,6 +272,9 @@ func (s *trackKCPSession) output(buf []byte, size int) {
 
 // put (kcpMu held): one KCP packet onto the carrier, ahead of the queue or in turn; where its segments went is noted.
 func (s *trackKCPSession) put(pkt []byte, ahead bool, pushes []segPush) {
+	if base := s.parent.epochOut.Load(); base != 0 {
+		relabelKCP(pkt, s.conv, base+s.conv-kcpConvBase) // winger: on the far side's epoch convs (UseEpochConv)
+	}
 	size := len(pkt)
 	var segment []byte
 	if enc := s.fec; enc != nil && size > fecConvLen {
@@ -556,8 +588,21 @@ func (s *trackKCPSession) sendParity(frames [][]byte) {
 	}
 }
 
-func (s *trackKCPSession) input(segment []byte) [][]byte {
+// input: one KCP output of the far side's (on one of this session's convs) into KCP; what that completes, and false
+// if it was not the far side's. winger: KCP takes a packet's cumulative ack (una) before anything else, and drops every
+// segment of its own below it as delivered, never to be sent again. A packet whose una is past all this session ever
+// sent is another layer's (one the far side ran before, for an earlier tunnel of this side's, on the same tracks): it
+// would count this session's first segments as delivered though the far side never got them, and the far side would
+// wait at that hole for good. Such a packet, or one not whole, is not taken, nor counted as a word from the far side.
+func (s *trackKCPSession) input(segment []byte) ([][]byte, bool) {
+	if len(segment) < kcp.IKCP_OVERHEAD || !relabelKCP(segment, binary.LittleEndian.Uint32(segment), s.conv) {
+		return nil, false
+	}
 	s.kcpMu.Lock()
+	if una := binary.LittleEndian.Uint32(segment[16:20]); s.sentAny && int32(una-s.maxSN) > 1 || !s.sentAny && una != 0 {
+		s.kcpMu.Unlock()
+		return nil, false
+	}
 	s.sampleAcks(segment)
 	s.kcp.Input(segment, kcp.IKCP_PACKET_REGULAR, s.parent.tuning.ackEach)
 	var messages [][]byte
@@ -576,7 +621,7 @@ func (s *trackKCPSession) input(segment []byte) [][]byte {
 		messages = append(messages, message[:n])
 	}
 	s.kcpMu.Unlock()
-	return messages
+	return messages, true
 }
 
 func (s *trackKCPSession) update() {
@@ -620,6 +665,9 @@ type MultiTrackKCPTunnel struct {
 	fecOn      atomic.Bool            // winger: this side sends with parity (the far side said it reads it)
 	fecDec     map[uint32]*fecDecoder // winger: per conv, once the far side sends with parity (t.mu)
 	fecReports time.Time              // updateLoop only
+
+	epochIn  atomic.Uint32 // winger: a conv base the far side may send on besides kcpConvBase (AcceptEpochConv; 0: none)
+	epochOut atomic.Uint32 // winger: the conv base this side sends on instead of kcpConvBase (UseEpochConv; 0: none)
 
 	probe          []byte       // winger: a frame the far side's relay takes as nothing new (AddProbedSession; t.mu)
 	lastFirstProbe int64        // updateLoop only (monoNow)
@@ -897,6 +945,9 @@ func (t *MultiTrackKCPTunnel) handleDecodedSegment(payload []byte) {
 	conv := binary.LittleEndian.Uint32(body[0:4])
 	t.mu.Lock()
 	session := t.convMap[conv]
+	if base := t.epochIn.Load(); session == nil && base != 0 && conv-base < uint32(len(t.sessions)) {
+		session = t.sessions[conv-base] // winger: on this side's epoch convs (AcceptEpochConv)
+	}
 	t.mu.Unlock()
 	t.inputKCP(session, body)
 }
@@ -906,6 +957,10 @@ func (t *MultiTrackKCPTunnel) inputKCP(session *trackKCPSession, body []byte) {
 	if session == nil {
 		return
 	}
+	messages, ok := session.input(body)
+	if !ok {
+		return // winger: not the far side's (another layer's, or damaged): nothing taken, not a word from it either
+	}
 	t.mu.Lock()
 	callback := t.onData
 	t.mu.Unlock()
@@ -914,7 +969,6 @@ func (t *MultiTrackKCPTunnel) inputKCP(session *trackKCPSession, body []byte) {
 	if session.probed && session.heard.CompareAndSwap(false, true) && t.logFn != nil {
 		t.logFn("kcptunnel: session %d answered by the far side, in use", session.conv-kcpConvBase)
 	}
-	messages := session.input(body)
 	session.pump() // winger: acks may have made room
 	t.wake()       // winger: acks to send wait for the update loop's next tick; an idle loop is woken for them
 	if callback == nil {
@@ -943,6 +997,9 @@ func (t *MultiTrackKCPTunnel) handleFECFrame(channel byte, body []byte) {
 	dec := t.fecDec[conv]
 	if dec == nil && session != nil {
 		dec = newFECDecoder(conv, stream)
+		if base := t.epochIn.Load(); base != 0 {
+			dec.alt = base + uint32(stream)
+		}
 		t.fecDec[conv] = dec
 	}
 	t.mu.Unlock()
@@ -950,11 +1007,9 @@ func (t *MultiTrackKCPTunnel) handleFECFrame(channel byte, body []byte) {
 		return
 	}
 	if channel == kcpChannelFECData {
-		dec.data(seq, shard)
-		segment := make([]byte, fecConvLen+len(shard))
-		binary.LittleEndian.PutUint32(segment, conv)
-		copy(segment[fecConvLen:], shard)
-		t.inputKCP(session, segment)
+		if segment := dec.data(seq, shard); segment != nil {
+			t.inputKCP(session, segment)
+		}
 		return
 	}
 	for _, segment := range dec.parity(parity.first, parity.n, parity.m, parity.j, parity.shard) {
@@ -995,6 +1050,27 @@ func (t *MultiTrackKCPTunnel) SetFEC(on bool) {
 	if t.logFn != nil {
 		t.logFn("kcptunnel: parity (FEC) on=%v", on)
 	}
+}
+
+// AcceptEpochConv (winger, the Telemost joiner): the far side may send on the convs of this side's epoch as well as on
+// the usual ones (it does once told so: tunnel.ConfigKCPEpochConv). A layer the far side ran for an earlier tunnel of
+// this side's on the same tracks sent on other convs: what of it still comes is not taken for this layer's own.
+func (t *MultiTrackKCPTunnel) AcceptEpochConv(epoch uint32) {
+	base := kcpEpochConv(epoch)
+	t.epochIn.Store(base)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for conv, dec := range t.fecDec {
+		dec.mu.Lock()
+		dec.alt = base + conv - kcpConvBase
+		dec.mu.Unlock()
+	}
+}
+
+// UseEpochConv (winger, the Telemost creator): send on the convs of the far side's epoch (it said it takes them:
+// tunnel.ConfigKCPEpochConv). Its own segments still come on the usual convs.
+func (t *MultiTrackKCPTunnel) UseEpochConv(epoch uint32) {
+	t.epochOut.Store(kcpEpochConv(epoch))
 }
 
 // sendFECReports (winger, updateLoop): tell a far side that sends with parity what we got of each of its sessions.

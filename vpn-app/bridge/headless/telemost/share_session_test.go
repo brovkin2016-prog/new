@@ -104,6 +104,8 @@ type shareRig struct {
 	secret          []byte
 	joinerObf       *tunnel.TunnelObfuscator
 	joinerHeard     atomic.Int32 // the joiner's tunnel saw the creator's start afresh (a new epoch)
+	pubDeaf         bool         // joinerUp: the new track does not reach the creator yet (pubW.deaf)
+	olderJoiner     bool         // joinerUp: a Winger before the epoch convs (tunnel.ConfigKCPEpochConv)
 	mu              sync.Mutex
 	stops           []func()
 }
@@ -114,9 +116,15 @@ var quietLog = func(string, ...any) {}
 // screenshare track on as the server does when the sharing data channel opens. The joiner's track reaches the creator
 // the way the server reads it (handleVideoFrame).
 func newShareRig(t *testing.T, loss float64) *shareRig {
+	return newShareRigOf(t, loss, false)
+}
+
+// newShareRigOf: the same with a Winger before the epoch convs (olderJoiner) or a current one.
+func newShareRigOf(t *testing.T, loss float64, olderJoiner bool) *shareRig {
 	t.Helper()
 	rig := &shareRig{end: &joinerEnd{got: map[uint32][][]byte{}, closed: map[uint32]bool{}},
-		connected: make(chan *rtc.MultiTrackKCPTunnel, 4), secret: tunnel.DeriveSecretFromJoinLink("https://telemost.yandex.ru/j/4242424242")}
+		connected: make(chan *rtc.MultiTrackKCPTunnel, 4), secret: tunnel.DeriveSecretFromJoinLink("https://telemost.yandex.ru/j/4242424242"),
+		olderJoiner: olderJoiner}
 	t.Cleanup(func() {
 		rig.mu.Lock()
 		defer rig.mu.Unlock()
@@ -168,7 +176,10 @@ func (rig *shareRig) creatorUp(loss float64) {
 			tunnel.DecodeFrames(data, func(conn uint32, msgType byte, payload []byte) {
 				switch {
 				case conn == tunnel.ControlConnID && msgType == tunnel.MsgConfig:
-					r.SetKCPOnShare(tunnel.VP8ConfigFlags(payload)&tunnel.ConfigKCPEveryTrack != 0)
+					flags := tunnel.VP8ConfigFlags(payload) // as main.go's onPeerConfig
+					r.SetEpochConv(flags&tunnel.ConfigKCPEpochConv != 0)
+					r.SetKCPOnShare(flags&tunnel.ConfigKCPEveryTrack != 0)
+					r.SetFEC(flags&tunnel.ConfigFEC != 0)
 				case msgType == tunnel.MsgClose:
 					rig.closedByCreator.Store(conn, true)
 				}
@@ -202,6 +213,7 @@ func (rig *shareRig) joinerUp(obf *tunnel.TunnelObfuscator, loss float64) {
 	pub := rtc.NewVP8DataTunnelWithQueue(nil, obf, quietLog, rtc.KCPCarrierQueueDepth)
 	rig.pub = pub
 	rig.pubW = &shareWire{rnd: rand.New(rand.NewSource(13)), loss: loss, to: rig.relay.handleVideoFrame}
+	rig.pubW.deaf.Store(rig.pubDeaf)
 	pub.WriteFrame = rig.pubW.send
 	jmt := rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{pub})
 	jmt.SetOnPeerRestart(func() { rig.joinerHeard.Add(1) })
@@ -211,11 +223,16 @@ func (rig *shareRig) joinerUp(obf *tunnel.TunnelObfuscator, loss float64) {
 	rig.joiner.AddSession(pub)
 	rig.joiner.SetSendSessions(1)
 	rig.joiner.SetOnData(rig.end.take)
+	flags := tunnel.ConfigKCPEveryTrack
+	if !rig.olderJoiner { // as initPC
+		rig.joiner.AcceptEpochConv(obf.LocalEpoch())
+		flags |= tunnel.ConfigFEC | tunnel.ConfigKCPEpochConv
+	}
 	// winger: the creator's tracks reach the new track only once it is wired: the creator's writers would otherwise
 	// hand it frames while its tunnels are still being built (a data race)
 	rig.camW.setTo(pub.HandleFrame)
 	rig.shareW.setTo(pub.HandleFrame)
-	rig.joiner.SendData(tunnel.EncodeVP8ConfigFlags(50, 20, 2, tunnel.ConfigKCPEveryTrack))
+	rig.joiner.SendData(tunnel.EncodeVP8ConfigFlags(50, 20, 2, flags))
 }
 
 // waitReady: the creator's screenshare session is in use.

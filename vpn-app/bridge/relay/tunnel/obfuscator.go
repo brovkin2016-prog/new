@@ -97,6 +97,13 @@ func NewTunnelObfuscator(secret []byte) (*TunnelObfuscator, error) {
 
 func (o *TunnelObfuscator) LocalEpoch() uint32 { return o.localEpoch }
 
+// PeerEpoch (winger): the epoch of the far side's last frame that decrypted (0: none yet).
+func (o *TunnelObfuscator) PeerEpoch() uint32 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.peerEpoch
+}
+
 // winger: every frame is built in one allocation: header, nonce and sealed payload go straight into the buffer that
 // leaves (it was three: header, nonce, frame). Same bytes as before.
 

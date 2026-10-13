@@ -750,6 +750,7 @@ func (b *Bridge) initRelay() {
 		b.activeBridge.SetUpstreamSocks(b.upstreamSocks, b.upstreamUser, b.upstreamPass)
 		bridge := b.activeBridge
 		b.activeBridge.SetOnPeerConfig(func(fps, batch, trackCount int) {
+			relay.SetEpochConv(bridge.PeerFlags()&tunnel.ConfigKCPEpochConv != 0)   // winger: on the joiner's own convs
 			relay.SetKCPOnShare(bridge.PeerFlags()&tunnel.ConfigKCPEveryTrack != 0) // winger: before the track comes
 			relay.SetFEC(bridge.PeerFlags()&tunnel.ConfigFEC != 0)                  // winger: parity only to a joiner that reads it
 			if trackCount >= 2 {

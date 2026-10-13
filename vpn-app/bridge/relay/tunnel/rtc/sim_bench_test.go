@@ -52,6 +52,8 @@ import (
 //                      the other way round
 //   FEC=1              the creator sends with parity (as to a joiner that says it reads it): a parity frame at the
 //                      end of each answer, so a lost last frame needs no resend
+//   EPOCH=1            the creator sends on the joiner's epoch convs, as two current programs do (the joiner said so:
+//                      tunnel.ConfigKCPEpochConv)
 //   GATE_MS=n PLI=1    every n ms (about) the server re-binds each track and forwards nothing of it until a keyframe
 //                      passes, asking the sender for one (PLI) on the way and again each second while it waits, as
 //                      mediasoup, LiveKit and Jitsi do (whether Telemost's server does is not known); PLI=0: the
@@ -398,6 +400,10 @@ func simRun(t testing.TB, c simConfig) simResult {
 		}
 		if envInt("FEC", 0) == 1 {
 			ck.SetFEC(true)
+		}
+		if envInt("EPOCH", 0) == 1 {
+			jk.AcceptEpochConv(jobf.LocalEpoch())
+			ck.UseEpochConv(jobf.LocalEpoch())
 		}
 		creator, joiner = ck, jk
 	}

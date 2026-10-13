@@ -61,6 +61,7 @@ type VP8DataTunnel struct {
 
 	queued       departures
 	urgentQueued departures
+	dropReq      chan chan int // winger: DropQueued, done by the writer (which alone takes frames)
 
 	// winger: a keyframe the call's server asked for (PLI/FIR), sent ahead of the queued data
 	keyframeWanted atomic.Bool
@@ -97,6 +98,7 @@ func NewVP8DataTunnelWithQueue(track *webrtc.TrackLocalStaticSample, obf *tunnel
 		urgent:          make(chan []byte, urgentQueueDepth),
 		cfgChan:         make(chan struct{}, 1),
 		keyframeNudge:   make(chan struct{}, 1),
+		dropReq:         make(chan chan int),
 		fps:             defaultVP8FPS,
 		batch:           defaultVP8Batch,
 		keepaliveMin:    keepaliveIdleMin,
@@ -236,6 +238,36 @@ func (t *VP8DataTunnel) trySendPlaced(data []byte, urgent bool) (framePlace, boo
 		return framePlace{}, false
 	default:
 		return framePlace{}, false
+	}
+}
+
+// DropQueued (winger): what waits in the queue and in the lane ahead of it is thrown away, counted as gone; how many
+// frames. The Telemost creator does it when a new joiner comes: what waits is the stopped layer's, and the new joiner
+// would take it for its new layer's own. The writer, which alone takes frames, does it, so every later frame keeps its
+// place in departures.
+func (t *VP8DataTunnel) DropQueued() int {
+	if !t.running.Load() {
+		return t.dropQueued()
+	}
+	reply := make(chan int, 1)
+	select {
+	case t.dropReq <- reply:
+		return <-reply
+	case <-t.stopCh:
+		return 0
+	}
+}
+
+func (t *VP8DataTunnel) dropQueued() int {
+	for n := 0; ; n++ {
+		select {
+		case <-t.urgent:
+			t.urgentQueued.took()
+		case <-t.sendQueue:
+			t.queued.took()
+		default:
+			return n
+		}
 	}
 }
 
@@ -408,6 +440,8 @@ func (t *VP8DataTunnel) writerLoop() {
 					reconfigure = true
 				case <-drift.C:
 					repace()
+				case reply := <-t.dropReq:
+					reply <- t.dropQueued()
 				case <-ticker.C:
 					if t.keyframeWanted.Swap(false) {
 						emit(t.obf.EncodeKeepalive(keepalivePad), true)
@@ -454,6 +488,8 @@ func (t *VP8DataTunnel) writerLoop() {
 				reconfigure = true
 			case <-drift.C:
 				repace()
+			case reply := <-t.dropReq:
+				reply <- t.dropQueued()
 			case data := <-t.urgent:
 				t.urgentQueued.took()
 				if !idle.Stop() {
