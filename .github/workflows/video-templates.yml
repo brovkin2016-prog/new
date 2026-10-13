@@ -1,0 +1,41 @@
+# Checks the AI app's video templates (ai-app/server/templates.json) where the free stock sites can be reached: finds each
+# template's direct file, fetches it and cuts it the way the family server will; asks the Hugging Face Spaces that put
+# a person into a template for their API. Publishes only manifest.json (addresses, sizes, the Spaces' API) as a
+# prerelease — no video is kept or published. The family server takes the addresses from the pinned manifest.
+name: video-templates
+
+on:
+  push:
+    paths: ["ai-app/server/templates.json", "ai-app/server/templates_check.py", ".github/workflows/video-templates.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: video-templates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+          pip install -q gradio_client opencv-python-headless
+      - name: Check the templates and the Spaces
+        run: |
+          mkdir -p out
+          python3 ai-app/server/templates_check.py ai-app/server/templates.json out 2>&1 | tee out/check.log
+          ls -la out
+      - name: Manifest as a release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -s out/manifest.json ] || { echo "no manifest"; exit 1; }
+          gh release create "video-templates-${{ github.run_number }}" out/manifest.json out/check.log --prerelease --target "$GITHUB_SHA" \
+            --title "Шаблоны видео: проверка ${{ github.run_number }}" --notes "Проверенные адреса шаблонов и API Spaces (видео не публикуются)."

@@ -285,34 +285,29 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (the connection's button)"
 echo "connection buttons: the server's and the bridge's shown, the server's switches on through it"
 
-# the automatic choice: the chosen server does not answer → Winger moves to another one by itself; once the chosen one
-step "the automatic choice: the chosen server does not answer → Winger moves to another one by i"
-# answers again (a second test server comes up on its port), it goes back to it
+# no going over by itself (the owner: it ran over all the connections): the chosen server does not answer → Winger
+# stays on it and tries again, its button says so; once it answers (a second test server comes up on its port) it is on
+step "no going over by itself: the chosen server does not answer → Winger stays on it and tries"
 DEAD='hysteria2://family:test-pass-123@10.0.2.2:4999/?sni=vpn.test.local&insecure=1#Запасной'
 adb logcat -c
 adb shell "am start -a android.intent.action.VIEW -d '$DEAD' -n $ACT" >/dev/null
 sleep 2
 mark
-adb shell am start -n $ACT --el test_back 20000 --ez test_connect true >/dev/null
-wait_log "auto: «Запасной» не отвечает" 150 || fail "did not move on by itself when the chosen server did not answer"
-since | grep -q "retry 2: " && fail "the dead chosen server was tried again and again instead of being passed over at once"
-wait_log "connected via 10.0.2.2" 60 || fail "the other server did not connect after the automatic move"
-sleep 2
-adb exec-out screencap -p > "$OUT/7-auto.png"
-# (the screen is read from what it logs: while the VPN is on its button glows, and uiautomator cannot read a moving screen)
-step "(the screen is read from what it logs: while the VPN is on its button glows, and uiautomat"
-wait_log "button «Тест»: ● Включено само" 15 || fail "the screen does not say it moved by itself"
+adb shell am start -n $ACT --ez test_connect true >/dev/null
+wait_since "retry 2: " 120 || fail "did not try the chosen server again when it did not answer"
+since | grep -q "auto: " && fail "moved to another connection by itself"
+since | grep -q "connected via" && fail "connected somewhere while the chosen server does not answer"
+wait_since "button «Запасной»: \(Подключаюсь\|Переподключаюсь\)" 15 || fail "the chosen one's button does not say it is trying again"
+adb exec-out screencap -p > "$OUT/7-stays.png"
 sed -e 's/^listen: :4443/listen: :4999/' -e '/^trafficStats:/,$d' /tmp/t/hy.yaml > /tmp/t/hy2.yaml
 ( cd /tmp/t && HYSTERIA_LOG_LEVEL=info nohup ./hysteria server -c hy2.yaml < /dev/null > hy2.log 2>&1 & )
-wait_log "auto: «Запасной» answers again" 120 || fail "did not notice the chosen server answering again"
-wait_log "Выбранный сервер снова отвечает" 30 || fail "did not go back to the chosen server"
-for _ in $(seq 1 60); do [ "$(adb logcat -d -s AIVPN:I | grep -c 'connected via 10.0.2.2')" -ge 2 ] && break; sleep 1; done
-[ "$(adb logcat -d -s AIVPN:I | grep -c 'connected via 10.0.2.2')" -ge 2 ] || fail "not connected again through the chosen server"
+wait_since "connected via 10.0.2.2" 90 || fail "not connected once the chosen server answered"
 grep -q "client connected" /tmp/t/hy2.log || fail "the chosen server saw no connection"
+since | grep -q "auto: " && fail "moved to another connection by itself"
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
-wait_log "stopped" 20 || fail "did not switch off (automatic choice)"
+wait_log "stopped" 20 || fail "did not switch off (the chosen server)"
 pkill -f "hysteria server -c hy2.yaml" || true  # the second test server is not needed further (nor left running)
-echo "automatic choice: moved to the other server by itself, went back once the chosen one answered"
+echo "no going over by itself: stayed on the chosen server, tried again, connected once it answered"
 
 # the shade's tile: Winger on and off without opening the app (if this Android's shell can press a tile)
 step "the shade's tile: Winger on and off without opening the app (if this Android's shell can p"
