@@ -272,6 +272,9 @@ func (s *trackKCPSession) output(buf []byte, size int) {
 
 // put (kcpMu held): one KCP packet onto the carrier, ahead of the queue or in turn; where its segments went is noted.
 func (s *trackKCPSession) put(pkt []byte, ahead bool, pushes []segPush) {
+	if s.parent.stopped() { // winger: a stopped layer puts nothing on the carrier, held resends included (a tick under way)
+		return
+	}
 	if base := s.parent.epochOut.Load(); base != 0 {
 		relabelKCP(pkt, s.conv, base+s.conv-kcpConvBase) // winger: on the far side's epoch convs (UseEpochConv)
 	}

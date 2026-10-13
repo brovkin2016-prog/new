@@ -391,6 +391,9 @@ func (t *VP8DataTunnel) writerLoop() {
 			if sample == nil {
 				return
 			}
+			if isKeepalive { // winger: noted before it goes, so a request that crosses it on the wire is not taken twice
+				t.lastKeyframe.Store(monoNow())
+			}
 			if t.WriteFrame != nil {
 				if err := t.WriteFrame(sample); err != nil {
 					if common.Debug {
@@ -407,7 +410,6 @@ func (t *VP8DataTunnel) writerLoop() {
 			n := t.sentFrames.Add(1)
 			if isKeepalive {
 				t.keepaliveFrames.Add(1)
-				t.lastKeyframe.Store(monoNow())
 			}
 			if common.Debug && (n <= 5 || n%500 == 0) {
 				keepalives := t.keepaliveFrames.Load()

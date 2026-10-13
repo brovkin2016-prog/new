@@ -52,7 +52,8 @@ func TestNoResendsWithoutLoss(t *testing.T) {
 		run(t, p, 4000, 50)
 		out, resent, held := p.creator.outputSegments.Load(), p.creator.resentSegments.Load(), p.creator.heldResends.Load()
 		t.Logf("%s: %d packets out, %d of them resends, %d resends held back", name, out, resent, held)
-		if name == "tuned" && resent*100 > out {
+		// the race detector's stalls (tens of ms on round trips of a few) count as due: a looser bound there
+		if name == "tuned" && resent*100 > out*raceBound {
 			t.Fatalf("%d of %d packets were resends with nothing lost", resent, out)
 		}
 	}
