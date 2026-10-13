@@ -305,6 +305,70 @@ jobs:
           $code = Run-Line (& $line 'client') (Join-Path $out 'client-2.log')
           Check ($code -eq 0) 'client.ps1 run again finished well'
           Check ((Get-Item -LiteralPath $portable).LastWriteTimeUtc -eq $before) 'run again, it did not fetch RustDesk again'
+
+          # 8. a real connection: the portable RustDesk started as the shortcut starts it (plus the password, for this
+          # test only) takes our server and key from its own file name, hbbs lets it through with that key, and the
+          # laptop's service lets it in with the permanent password. Only a login brings the laptop's own details
+          # (its name, Windows) back: the portable keeps them in its notes on that peer
+          $peer = Join-Path $env:APPDATA "RustDesk\config\peers\$($hello.id).toml"
+          Remove-Item -LiteralPath $peer -Force -ErrorAction SilentlyContinue
+          Start-Process -FilePath $portable -ArgumentList '--connect', $hello.id, '--password', $password -WorkingDirectory (Split-Path $portable) | Out-Null
+          $info = @{}
+          for ($i = 0; $i -lt 60 -and -not $info['platform']; $i++) {
+              Start-Sleep -Seconds 2
+              if (Test-Path -LiteralPath $peer) { try { $info = Read-Toml $peer 'info' } catch { $info = @{} } }
+          }
+          Write-Host "the portable's notes on the laptop: platform '$($info['platform'])', hostname '$($info['hostname'])'"
+          $hbbs = (Get-Content (Join-Path $out 'hbbs.log') -Raw -ErrorAction SilentlyContinue) + (Get-Content (Join-Path $out 'hbbs-err.log') -Raw -ErrorAction SilentlyContinue)
+          Check (-not ($hbbs -match 'invalid key')) 'hbbs took the key the portable has from its file name'
+          Check ($info['platform'] -eq 'Windows' -and $info['hostname']) 'the portable RustDesk logged in to the laptop with the permanent password'
+          # the controlling side closed again (the laptop's service stays)
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'rustdesk*' -and $_.ExecutablePath -and
+              -not $_.ExecutablePath.StartsWith($env:ProgramFiles, [StringComparison]::OrdinalIgnoreCase) } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+          # 9. the line host.ps1 hands to Windows when it has no administrator rights (Start-Elevated): built by host.ps1's
+          # own Get-RelaunchArguments and run by Windows PowerShell 5.1 the way Windows runs it, minus the question (this
+          # runner is an administrator already); Enter for its «Нажмите Enter» at the end
+          $hostText = (Invoke-WebRequest -UseBasicParsing -Uri "$api/api/remote/host.ps1?t=$token").Content
+          $ast = [System.Management.Automation.Language.Parser]::ParseInput($hostText, [ref]$null, [ref]$null)
+          $fn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Get-RelaunchArguments' }, $true)
+          Check ([bool]$fn) 'host.ps1 has Get-RelaunchArguments'
+          . ([scriptblock]::Create($fn.Extent.Text))
+          $stale = [regex]::Match($hostText, "\`$stale = '([^']+)'").Groups[1].Value
+          Check ($stale -match 'устарела') 'host.ps1 has its line for an old command'
+          function Run-Relaunch([string]$Arguments, [string]$Log) {
+              $psi = New-Object System.Diagnostics.ProcessStartInfo
+              $psi.FileName = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $psi.Arguments = $Arguments
+              $psi.UseShellExecute = $false
+              $psi.RedirectStandardInput = $true
+              $psi.RedirectStandardOutput = $true
+              $psi.RedirectStandardError = $true
+              $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+              $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+              $p = [Diagnostics.Process]::Start($psi)
+              $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync()
+              $p.StandardInput.WriteLine(''); $p.StandardInput.Close()
+              if (-not $p.WaitForExit(900000)) { $p.Kill(); throw "$(Split-Path -Leaf $Log): the window did not close in 15 minutes" }
+              $text = $o.Result + $e.Result
+              [IO.File]::WriteAllText($Log, $text)
+              Write-Host "----- $(Split-Path -Leaf $Log) (exit $($p.ExitCode))"; Write-Host $text
+              Check (-not $text.Contains($password)) "$(Split-Path -Leaf $Log): the password is not shown"
+              return @{ Code = $p.ExitCode; Text = $text }
+          }
+          $count = (Get-Content (Join-Path $out 'hello.json') -Raw | ConvertFrom-Json).count
+          $r = Run-Relaunch (Get-RelaunchArguments $stale) (Join-Path $out 'host-elevated.log')
+          Check ($r.Code -eq 0 -and $r.Text.Contains('Готово!')) 'the relaunched window set the laptop up'
+          Check ((Get-Content (Join-Path $out 'hello.json') -Raw | ConvertFrom-Json).count -eq $count + 1) 'the relaunched window told the ID'
+          # an old command: the window says so in its own line (the one with «» and Cyrillic in it) and waits for Enter.
+          # (Get-RelaunchArguments reads $Token, which is $token: PowerShell's names know no case)
+          $good = $token; $token = '0' * 32
+          $r = Run-Relaunch (Get-RelaunchArguments $stale) (Join-Path $out 'host-elevated-stale.log')
+          $token = $good
+          Check ($r.Code -eq 0 -and $r.Text -notmatch 'ParserError|Exception|Готово') 'the relaunched window with an old command stops there, and waits for Enter'
+          if ($r.Text.Contains($stale)) { Write-Host 'ok: …saying the command is old, in its own words' }
+          else { Write-Host '::warning::the old-command line did not come through as UTF-8 here (the line itself ran: see above)' }
           Write-Host 'All checks passed.'
 
       - name: Logs (the job's own log cannot be read from outside, so the ends go into the run's notes too)

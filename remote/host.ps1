@@ -58,14 +58,11 @@ function Test-Admin {
     return $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Start-Elevated([string]$Stale) {
-    # The same one-line command again, in a 64-bit Windows PowerShell with administrator rights (Windows asks). That
-    # window fetches the script once more: on a weak line it tries a few times, and when it still cannot (or the server
-    # says no) it says why and waits for Enter. Without that a failed fetch would close the new window at once.
-    $ps = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
-        $ps = Join-Path $env:windir 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
-    }
+function Get-RelaunchArguments([string]$Stale) {
+    # The command line of the window with administrator rights: the same one-line command again. That window fetches
+    # the script once more: on a weak line it tries a few times, and when it still cannot (or the server says no) it
+    # says why and waits for Enter. Without that a failed fetch would close the new window at once. (A function of its
+    # own: the Windows test runs exactly this line.)
     $url = $Api + '/api/remote/host.ps1?t=' + $Token
     # one line inside "..." on the command line: no double quotes in it (and the values put in have no single ones)
     $lines = @'
@@ -76,9 +73,19 @@ foreach ($i in 1..4) { try { $s = irm '<url>' -TimeoutSec 60 -ErrorAction Stop; 
 if ($s) { $s | iex } else { if ($code -eq 403) { $t = '<stale>' } elseif ($code -eq 429) { $t = 'Слишком много попыток. Подождите 10 минут и запустите команду ещё раз.' } else { $t = 'Не удалось скачать настройку. Проверьте интернет (или включите Winger) и запустите команду ещё раз.' }; Write-Host $t -ForegroundColor Red; [void](Read-Host 'Нажмите Enter, чтобы закрыть окно') }
 '@
     $cmd = (($lines -split "`r?`n" | Where-Object { $_.Trim() }) -join '; ').Replace('<url>', $url).Replace('<stale>', $Stale)
+    return '-NoProfile -ExecutionPolicy Bypass -Command "' + $cmd + '"'
+}
+
+function Start-Elevated([string]$Stale) {
+    # The rest in a 64-bit Windows PowerShell with administrator rights (Windows asks).
+    $ps = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+        $ps = Join-Path $env:windir 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+    }
+    $arguments = Get-RelaunchArguments $Stale
     Say 'Windows сейчас спросит разрешение — нажмите «Да». Настройка продолжится в новом окне.' 'Yellow'
     try {
-        Start-Process -FilePath $ps -Verb RunAs -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -Command "' + $cmd + '"')
+        Start-Process -FilePath $ps -Verb RunAs -ArgumentList $arguments
     } catch {
         Fail 'Без разрешения Windows настроить не получится. Запустите команду ещё раз и нажмите «Да».'
     }
