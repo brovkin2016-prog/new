@@ -569,10 +569,16 @@ public class MainActivity extends Activity implements State.Listener {
                 note.setGravity(Gravity.START);
                 col.addView(note, new LinearLayout.LayoutParams(-2, -2));
                 row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
-                TextView more = label("⋯", 20, muted, true);
-                more.setPadding(dp(14), dp(6), dp(12), dp(6));
-                more.setOnClickListener(v -> options(at));
-                row.addView(more, new LinearLayout.LayoutParams(-2, -2));
+                // its speed check: a small round button (removing: a long press on the button)
+                TextView fast = label("⚡", 17, text, false);
+                fast.setGravity(Gravity.CENTER);
+                fast.setBackground(press(round(dark ? 0xFF2A3140 : 0xFFF1F3F7, 20, 0), 20));
+                fast.setContentDescription("Проверить скорость");
+                fast.setOnClickListener(v -> speed(Profile.all(this).get(at)));
+                LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(dp(40), dp(40));
+                fp.leftMargin = dp(8);
+                fp.rightMargin = dp(6);
+                row.addView(fast, fp);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
                 lp.bottomMargin = dp(8);
                 conns.addView(row, lp);
@@ -659,30 +665,6 @@ public class MainActivity extends Activity implements State.Listener {
                 Toast.makeText(this, "«" + p.name + "»: " + (r == null ? "не получилось проверить" : r), Toast.LENGTH_LONG).show();
             });
         }, "speed").start();
-    }
-
-    /** ⋯ on a connection: the automatic choice (for all of them) and removing this one. */
-    private void options(int at) {
-        boolean auto = Apps.autoBridge(this);
-        String[] items = {"⚡ Проверить скорость", auto ? "✓ Сам выбирать рабочее подключение" : "Сам выбирать рабочее подключение",
-                "Удалить подключение"};
-        new AlertDialog.Builder(this)
-                .setTitle(Profile.all(this).get(at).name)
-                .setItems(items, (d, w) -> {
-                    if (w == 0) {
-                        speed(Profile.all(this).get(at));
-                        return;
-                    }
-                    if (w == 2) {
-                        remove(Profile.all(this), at);
-                        return;
-                    }
-                    Apps.setAutoBridge(this, !auto);
-                    Toast.makeText(this, !auto ? "Если выбранный не отвечает — Winger сам включит другой (мост) и вернётся, когда тот оживёт"
-                            : "Только выбранное подключение", Toast.LENGTH_LONG).show();
-                })
-                .setNegativeButton("Закрыть", null)
-                .show();
     }
 
     private void remove(List<Profile> all, int i) {

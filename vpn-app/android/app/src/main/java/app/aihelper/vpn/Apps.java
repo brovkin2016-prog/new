@@ -167,13 +167,12 @@ final class Apps {
         return android.text.TextUtils.join(", ", names.subList(0, 3)) + " и ещё " + (names.size() - 3);
     }
 
-    /** When the chosen server does not answer, Winger moves to a bridge by itself (and back once the server answers). */
+    /**
+     * Winger does not go from one connection to another by itself any more (the owner: it ran over all of them): the
+     * chosen one stays, its button says when it does not answer, and a tap (or «Через мост» in the notification) moves.
+     */
     static boolean autoBridge(Context c) {
-        return prefs(c).getBoolean("autoBridge", true);
-    }
-
-    static void setAutoBridge(Context c, boolean on) {
-        prefs(c).edit().putBoolean("autoBridge", on).apply();
+        return false;
     }
 
     /** The VPN should come back by itself after a reboot unless the owner of the phone switched it off. */

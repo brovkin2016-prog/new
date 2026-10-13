@@ -401,7 +401,7 @@ func (e *Engine) quickChoice(g int) {
 	e.mu.Lock()
 	p, pref := e.profile, e.preferred
 	e.mu.Unlock()
-	if p.Bridge || e.st.Get().Manual || pref == nil || pref.Link != p.Link {
+	if !autoChoice || p.Bridge || pref == nil || pref.Link != p.Link {
 		return
 	}
 	bridge := false
@@ -451,8 +451,13 @@ func (e *Engine) moved(g int, p *Profile) bool {
 	return true
 }
 
+// autoChoice: Winger does not go from one connection to another by itself any more, as on the phone (the owner: it ran
+// over all of them): the chosen one stays, its button says when it does not answer, a click (or «Через мост» at the
+// tray icon) moves.
+const autoChoice = false
+
 func (e *Engine) nextChoice(from *Profile) *Profile {
-	if e.st.Get().Manual {
+	if !autoChoice || e.st.Get().Manual {
 		return nil
 	}
 	return e.nextChoiceFrom(from)

@@ -1,5 +1,5 @@
 // Winger for Windows' window (the phone's screen): opened by its key, a link added, on through a real server, the
-// connection's button that switches it off, ⋯, the programs list, the journal
+// connection's button that switches it off, its ⚡, the programs list, the journal
 const { chromium } = require("playwright");
 const fs = require("fs");
 (async () => {
@@ -30,9 +30,7 @@ const fs = require("fs");
     await page.waitForSelector("#note:has-text('Включено')");
     await page.screenshot({ path: (process.env.OUT || ".") + "/win-on" + (process.env.DARK ? "-d" : "") + ".png" });
     want((await page.innerText("#conns")).includes("● Включено — нажмите, чтобы выключить"), "the connection's button says it is on");
-    await page.click("#conns .conn .icon");
-    want((await page.innerText(".sheet")).includes("Сам выбирать рабочее подключение"), "⋯: the automatic choice");
-    await page.click(".sheet button:has-text('Закрыть')");
+    want(await page.$("#conns .conn .fast") && !(await page.innerText("#conns")).includes("⋯"), "a ⚡ speed button on the row, no ⋯ menu");
     await page.click("#mode button[data-only='1']");
     await page.waitForSelector("#apps label");
     want((await page.$$("#apps label")).length > 0, "the running programs are listed");

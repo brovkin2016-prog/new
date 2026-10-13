@@ -1,6 +1,6 @@
 "use strict";
-// Winger for Windows: the same screen as Winger on the phone — the big button, the connections as buttons (a tap: on
-// through it, or off when it is the one in use; ⋯: the speed, the automatic choice, removing), the programs, a link
+// Winger for Windows: the same screen as Winger on the phone — the big button, the connections as buttons (a click: on
+// through it, or off when it is the one in use; ⚡: its speed; a right click: remove it), the programs, a link
 const $ = (s) => document.querySelector(s);
 const el = (tag, props, ...kids) => {
   const n = document.createElement(tag);
@@ -97,7 +97,8 @@ function drawConns(s) {
       list.append(el("div", { class: "conn", onclick: () => use(i), oncontextmenu: (e) => { e.preventDefault(); remove(i, S.conns[i]); } },
         el("span", { class: "ic", text: c.bridge ? "🌉" : "🌐" }),
         el("div", { class: "grow" }, el("b", { class: "name", text: c.name }), el("small", { class: "cnote" })),
-        el("button", { class: "icon", title: "Ещё", text: "⋯", onclick: (e) => { e.stopPropagation(); options(i, S.conns[i]); } })));
+        el("button", { class: "fast", title: "Проверить скорость (удалить — правый щелчок по строке)", text: "⚡",
+          onclick: (e) => { e.stopPropagation(); speed(i, S.conns[i]); } })));
     });
   }
   const cur = Math.max(0, s.conns.findIndex((c) => c.chosen));
@@ -137,24 +138,6 @@ async function refresh() {
 // a connection's button: on through it (switching over from another one), or off when it is the one in use
 async function use(i) {
   try { await call("use", { i }); refresh(); } catch (e) { toast(e.message); }
-}
-// ⋯ on a connection: its speed, the automatic choice (for all of them), removing this one
-function options(i, c) {
-  sheet(c.name, (box, close) => {
-    const item = (text, fn) => el("button", { class: "menu", text, onclick: () => { close(); fn(); } });
-    box.append(
-      item("⚡ Проверить скорость", () => speed(i, c)),
-      item((S.auto ? "✓ " : "") + "Сам выбирать рабочее подключение", async () => {
-        try {
-          await call("auto", { on: !S.auto });
-          toast(!S.auto ? "Если выбранный не отвечает — Winger сам включит другой (мост) и вернётся, когда тот оживёт"
-            : "Только выбранное подключение", 6000);
-          refresh();
-        } catch (e) { toast(e.message); }
-      }),
-      item("Удалить подключение", () => remove(i, c)),
-      el("button", { class: "btn line wide", text: "Закрыть", onclick: close }));
-  });
 }
 async function speed(i, c) {
   if (c.bridge && !(S.status.phase === "on" && c.active)) {

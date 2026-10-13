@@ -226,11 +226,6 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 	mux.HandleFunc("/api/processes", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"processes": Processes()})
 	})
-	mux.HandleFunc("/api/auto", func(w http.ResponseWriter, r *http.Request) {
-		on, _ := body(r)["on"].(bool)
-		st.Update(func(s *Settings) { s.Manual = !on })
-		reply(w, map[string]bool{"ok": true})
-	})
 	mux.HandleFunc("/api/update", func(w http.ResponseWriter, r *http.Request) {
 		go fam.CheckUpdate()
 		go fam.SyncBridges(0)
