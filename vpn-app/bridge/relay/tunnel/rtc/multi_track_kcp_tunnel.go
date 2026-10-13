@@ -141,6 +141,7 @@ type trackKCPSession struct {
 	peerUna uint32
 	sacked  int
 	pending int
+	held    []heldResend // winger: resends the guard held, sent once due (releaseHeld)
 
 	// winger: data waiting for room in it, least served connection first (kcp_gate.go)
 	gate sessionGate
@@ -232,21 +233,28 @@ func (s *trackKCPSession) output(buf []byte, size int) {
 	var pushBuf [kcpPushesPerPacket]segPush
 	route, pushes := s.route(buf[:size], pushBuf[:])
 	if route == routeHold {
-		s.parent.heldResends.Add(1) // KCP tries again on its timer
+		s.parent.heldResends.Add(1)
+		s.hold(buf[:size], pushes) // the update loop sends it once due (releaseHeld)
 		return
 	}
+	s.put(buf[:size], route == routeAhead, pushes)
+}
+
+// put (kcpMu held): one KCP packet onto the carrier, ahead of the queue or in turn; where its segments went is noted.
+func (s *trackKCPSession) put(pkt []byte, ahead bool, pushes []segPush) {
+	size := len(pkt)
 	var segment []byte
 	if enc := s.fec; enc != nil && size > fecConvLen {
-		segment = enc.frame(buf[:size], time.Now()) // winger: numbered for parity (fec.go)
+		segment = enc.frame(pkt, time.Now()) // winger: numbered for parity (fec.go)
 	} else {
 		segment = make([]byte, size+1)
 		segment[0] = kcpChannelReliable
-		copy(segment[1:], buf[:size])
+		copy(segment[1:], pkt)
 	}
 	s.parent.outputSegments.Add(1)
 	var place framePlace
 	ok := false
-	if route == routeAhead {
+	if ahead {
 		place, ok = s.vp8.trySendPlaced(segment, true)
 	}
 	if !ok {
@@ -265,6 +273,76 @@ func (s *trackKCPSession) output(buf []byte, size int) {
 		}
 		c.place, c.ts = place, p.ts
 	}
+}
+
+// winger: a resend the guard held. KCP asks again only on its next timer, which it has meanwhile backed off by half its
+// timeout, so a segment lost after all went again that much later than due: the end of an answer, which nothing after
+// it shows lost, came on an idle line twice as late as before the guard (p95 198 -> 382 ms at 3% loss). The update
+// loop now sends a held resend itself once it is due by the guard's own measure; one the far side has acked meanwhile,
+// or that a newer copy covers, is forgotten. KCP's asks stay the bound: each held one goes at most once.
+type heldResend struct {
+	pkt    []byte
+	pushes []segPush
+	places []framePlace // where each segment's last copy was when held
+}
+
+const kcpHeldMax = 64
+
+// hold (kcpMu held): keep a held resend for releaseHeld.
+func (s *trackKCPSession) hold(pkt []byte, pushes []segPush) {
+	if len(pushes) == 0 {
+		return
+	}
+	h := heldResend{pkt: append([]byte(nil), pkt...), pushes: append([]segPush(nil), pushes...),
+		places: make([]framePlace, len(pushes))}
+	for i, p := range pushes {
+		h.places[i] = s.copies[p.sn%kcpSnRing].place
+	}
+	if len(s.held) >= kcpHeldMax {
+		copy(s.held, s.held[1:])
+		s.held = s.held[:len(s.held)-1]
+	}
+	s.held = append(s.held, h)
+}
+
+// releaseHeld (kcpMu held, each update): held resends now due go out (ahead of the queue when a later copy was acked:
+// lost); those no longer needed are forgotten.
+func (s *trackKCPSession) releaseHeld(now int64) {
+	if len(s.held) == 0 {
+		return
+	}
+	timeout := int64(s.rtt.timeout())
+	kept := s.held[:0]
+	for _, h := range s.held {
+		needed, due, lost := false, false, false
+		for i, p := range h.pushes {
+			c := &s.copies[p.sn%kcpSnRing]
+			if c.place != h.places[i] || !s.inFlight(p.sn) || c.acked {
+				continue // a newer copy went, or the far side has it
+			}
+			needed = true
+			switch dep := s.departed(c); {
+			case dep < 0:
+				due = true
+			case dep == 0: // still waits in the carrier
+			case dep < s.rack:
+				due, lost = true, true
+			case timeout == 0 || now-dep >= timeout:
+				due = true
+			}
+		}
+		switch {
+		case !needed:
+		case due:
+			s.put(h.pkt, lost && s.parent.tuning.urgent, h.pushes)
+		default:
+			kept = append(kept, h)
+		}
+	}
+	for i := len(kept); i < len(s.held); i++ {
+		s.held[i] = heldResend{}
+	}
+	s.held = kept
 }
 
 // departed: when a segment's last copy left the carrier (0: it still waits there, -1: unknown or long ago).
@@ -497,6 +575,7 @@ func (s *trackKCPSession) update() {
 	busy := s.gate.hasWaiting() // winger: data waits for room: not an answer's end (asked first: the gate locks first)
 	s.kcpMu.Lock()
 	s.kcp.Update()
+	s.releaseHeld(time.Now().UnixNano())
 	if s.fec != nil && !busy && s.fec.due(time.Now()) {
 		s.sendParity(s.fec.seal())
 	}
