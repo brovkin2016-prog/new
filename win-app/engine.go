@@ -112,8 +112,12 @@ func (e *Engine) Connect() error {
 	e.mu.Lock()
 	e.gen++
 	g := e.gen
+	since := int64(0)
+	if e.wanted { // over from another connection: «Включено N мин» goes on, as on the phone (only off starts it again)
+		since = e.status.Since
+	}
 	e.wanted, e.preferred, e.profile, e.tunnel = true, p, p, p.TunnelMode
-	e.status = Status{Phase: "connecting", Active: p.Link, PingMs: -1}
+	e.status = Status{Phase: "connecting", Active: p.Link, PingMs: -1, Since: since}
 	e.backWait = backFirst
 	prev, done := e.runDone, make(chan struct{})
 	e.runDone = done
@@ -337,7 +341,7 @@ func (e *Engine) watch(g int) error {
 			e.status.Phase, e.status.Note = "on", ""
 		}
 		e.mu.Unlock()
-		if auto && time.Now().After(back) {
+		if auto && time.Now().After(back) && !e.st.Get().Manual { // the automatic choice switched off: stays where it is
 			e.mu.Lock()
 			pref := e.preferred
 			e.mu.Unlock()
@@ -491,7 +495,7 @@ func (e *Engine) switchTo(g int, next *Profile, byItself bool, why string) {
 	e.profile, e.tunnel = next, next.TunnelMode
 	e.status.Active = next.Link
 	e.status.Auto = byItself && e.preferred != nil && next.Link != e.preferred.Link
-	e.status.Since, e.status.PingMs = 0, -1
+	e.status.PingMs = -1
 	e.backAt = time.Now().Add(e.backWait)
 	e.status.Phase, e.status.Note = "connecting", why
 	e.mu.Unlock()
@@ -532,24 +536,20 @@ func (e *Engine) SpeedOf(p *Profile) (string, error) {
 	return line, nil
 }
 
-// PingNow: the response time looked at again (a tap on it in the window), while the VPN is on.
+// PingNow: the response time looked at again (a click on it in the window), while the VPN is on; back when it is known.
 func (e *Engine) PingNow() {
 	e.mu.Lock()
-	g := e.gen
-	if e.status.Phase != "on" {
-		e.mu.Unlock()
+	g, on := e.gen, e.status.Phase == "on"
+	e.mu.Unlock()
+	if !on {
 		return
 	}
-	e.status.PingMs = -1
+	ms := Ping(e.probePort, 10*time.Second)
+	e.mu.Lock()
+	if e.gen == g && e.wanted {
+		e.status.PingMs = ms
+	}
 	e.mu.Unlock()
-	go func() {
-		ms := Ping(e.probePort, 10*time.Second)
-		e.mu.Lock()
-		if e.gen == g && e.wanted {
-			e.status.PingMs = ms
-		}
-		e.mu.Unlock()
-	}()
 }
 
 // Rates: bytes a second down and up through the VPN now.

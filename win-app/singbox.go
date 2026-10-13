@@ -129,7 +129,8 @@ type Box struct {
 	traffic  traffic
 }
 
-// traffic counts the bytes sing-box carries (all its runs together), for the window's «↓ … ↑ …» line.
+// traffic counts the bytes that go through the VPN (all its runs together), for the window's «↓ … ↑ …» line: as on the
+// phone, only what the programs send through the tunnel — not what goes straight past it, nor Winger's own checks.
 type traffic struct {
 	up, down atomic.Int64
 	mu       sync.Mutex
@@ -140,11 +141,21 @@ type traffic struct {
 	rateDown float64
 }
 
-func (t *traffic) RoutedConnection(_ context.Context, conn net.Conn, _ adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
+func counted(m adapter.InboundContext, o adapter.Outbound) bool {
+	return o != nil && o.Tag() == "proxy" && m.Inbound != "probe-in"
+}
+
+func (t *traffic) RoutedConnection(_ context.Context, conn net.Conn, m adapter.InboundContext, _ adapter.Rule, o adapter.Outbound) net.Conn {
+	if !counted(m, o) {
+		return conn
+	}
 	return bufio.NewInt64CounterConn(conn, []*atomic.Int64{&t.up}, []*atomic.Int64{&t.down})
 }
 
-func (t *traffic) RoutedPacketConnection(_ context.Context, conn N.PacketConn, _ adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
+func (t *traffic) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, o adapter.Outbound) N.PacketConn {
+	if !counted(m, o) {
+		return conn
+	}
 	return bufio.NewInt64CounterPacketConn(conn, []*atomic.Int64{&t.up}, nil, []*atomic.Int64{&t.down}, nil)
 }
 

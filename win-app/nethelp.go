@@ -127,33 +127,40 @@ func Ping(probePort int, timeout time.Duration) int {
 	return 0
 }
 
-// Speed: Mbit/s of an 8-second download through the connection, and the ms to its first byte (0, 0 when nothing came).
+// Speed, as the phone measures it: Mbit/s over 8 seconds of download counted from its first byte, and the ms to that
+// first byte (0, 0 when nothing came).
 func Speed(probePort int) (float64, int) {
-	c := client(probePort, 12*time.Second)
-	t := time.Now()
+	c := client(probePort, 30*time.Second)
+	t0 := time.Now()
 	r, err := c.Get("https://speed.cloudflare.com/__down?bytes=50000000")
 	if err != nil {
 		return 0, 0
 	}
 	defer r.Body.Close()
-	var n int64
-	first := 0
 	buf := make([]byte, 64<<10)
-	for time.Since(t) < 8*time.Second {
+	var got int64
+	var first time.Time
+	for first.IsZero() {
 		k, err := r.Body.Read(buf)
-		if k > 0 && n == 0 {
-			first = max(1, int(time.Since(t).Milliseconds()))
+		if k > 0 {
+			first, got = time.Now(), int64(k)
 		}
-		n += int64(k)
+		if err != nil {
+			if first.IsZero() {
+				return 0, 0
+			}
+			break
+		}
+	}
+	for time.Since(first) < 8*time.Second {
+		k, err := r.Body.Read(buf)
+		got += int64(k)
 		if err != nil {
 			break
 		}
 	}
-	sec := time.Since(t).Seconds()
-	if sec <= 0 || n == 0 {
-		return 0, 0
-	}
-	return float64(n) * 8 / sec / 1e6, first
+	sec := max(0.2, time.Since(first).Seconds())
+	return float64(got) * 8 / 1e6 / sec, max(1, int(first.Sub(t0).Milliseconds()))
 }
 
 // FreePort: a free TCP port on this computer.

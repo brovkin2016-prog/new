@@ -84,10 +84,22 @@ function draw(s) {
   $("#ver").textContent = "Winger " + s.version + " · Проверить обновление" + (s.update && s.update.state === "downloading" ? " · загружаю новую версию…" : "");
   if (!appsOpen) drawApps();
 }
-// the connections as buttons, as on the phone: what a tap does now, and the last speed check
+// the connections as buttons, as on the phone: made again only when the list changes (a click is never lost to a
+// redraw), their lines follow the VPN — what a tap does now, and the last speed check
+let connsKey = "";
 function drawConns(s) {
   const st = s.status, on = st.phase !== "off", list = $("#conns");
-  list.innerHTML = "";
+  const key = s.conns.map((c) => (c.bridge ? "b|" : "s|") + c.name).join("\n");
+  if (key !== connsKey) {
+    connsKey = key;
+    list.innerHTML = "";
+    s.conns.forEach((c, i) => {
+      list.append(el("div", { class: "conn", onclick: () => use(i), oncontextmenu: (e) => { e.preventDefault(); remove(i, S.conns[i]); } },
+        el("span", { class: "ic", text: c.bridge ? "🌉" : "🌐" }),
+        el("div", { class: "grow" }, el("b", { class: "name", text: c.name }), el("small", { class: "cnote" })),
+        el("button", { class: "icon", title: "Ещё", text: "⋯", onclick: (e) => { e.stopPropagation(); options(i, S.conns[i]); } })));
+    });
+  }
   const cur = Math.max(0, s.conns.findIndex((c) => c.chosen));
   let act = s.conns.findIndex((c) => c.active);
   if (act < 0) act = cur;
@@ -107,10 +119,12 @@ function drawConns(s) {
       if (i === cur) edge = "chosen";
     }
     if (c.speed) note += "\n" + c.speed;
-    list.append(el("div", { class: "conn " + edge, onclick: () => use(i), oncontextmenu: (e) => { e.preventDefault(); remove(i, c); } },
-      el("span", { class: "ic", text: c.bridge ? "🌉" : "🌐" }),
-      el("div", { class: "grow" }, el("b", { class: "name", text: c.name }), el("small", { class: "cnote " + color, text: note })),
-      el("button", { class: "icon", title: "Ещё", text: "⋯", onclick: (e) => { e.stopPropagation(); options(i, c); } })));
+    const row = list.children[i];
+    if (!row) return;
+    if (row.className !== "conn " + edge) row.className = "conn " + edge;
+    const n = row.querySelector(".cnote");
+    if (n.textContent !== note) n.textContent = note;
+    if (n.className !== "cnote " + color) n.className = "cnote " + color;
   });
 }
 async function refresh() {
@@ -185,13 +199,16 @@ $("#power").onclick = async () => {
     refresh();
   } catch (e) { toast(e.message, 5000); }
 };
+// a click on the response time: «Проверяю отклик…» until the new one comes (the service answers when it knows)
 $("#ping").onclick = async () => {
-  if (!S || S.status.phase !== "on") return;
   const p = $("#ping");
+  if (!S || S.status.phase !== "on" || p.dataset.asking) return;
   p.dataset.asking = "1";
   p.textContent = "Проверяю отклик…";
+  p.className = "ping";
   try { await call("ping", {}); } catch (e) { /* the next look shows it */ }
-  setTimeout(() => { delete p.dataset.asking; refresh(); }, 1500);
+  delete p.dataset.asking;
+  refresh();
 };
 $("#add").onclick = paste;
 async function drawApps() {

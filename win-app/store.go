@@ -38,7 +38,22 @@ func OpenStore(dir string) *Store {
 	if b, err := os.ReadFile(st.path); err == nil {
 		_ = json.Unmarshal(b, &st.s)
 	}
+	if dualNames(st.s.Profiles) {
+		st.save()
+	}
 	return st
+}
+
+// dualNames: Winger before 123 kept the two-track Telemost trial in place of the usual bridge, under the usual one's
+// name — such a row gets the name its own link carries («… 2 трека (проверка)»). Whether any changed.
+func dualNames(list []Saved) bool {
+	changed := false
+	for i, sv := range list {
+		if p, err := ParseLink(sv.Link); err == nil && p.Bridge && p.DualTrack && p.Name != "" && sv.Name != p.Name {
+			list[i].Name, changed = p.Name, true
+		}
+	}
+	return changed
 }
 
 func (st *Store) save() {
@@ -91,11 +106,7 @@ func (st *Store) Chosen() *Profile {
 	if len(all) == 0 {
 		return nil
 	}
-	i := st.Get().Current
-	if i < 0 || i >= len(all) {
-		i = 0
-	}
-	return all[i]
+	return all[max(0, min(st.Get().Current, len(all)-1))]
 }
 
 // Add: a link the person added (as Winger on the phone does it) — it replaces the same server and person, or the
@@ -125,6 +136,7 @@ func (st *Store) Keep(p *Profile) bool {
 		if s.Current >= 0 && s.Current < len(s.Profiles) {
 			chosen = s.Profiles[s.Current].Link
 		}
+		changed = dualNames(s.Profiles)
 		at := same(s.Profiles, p)
 		if at >= 0 {
 			o, _ := ParseLink(s.Profiles[at].Link)

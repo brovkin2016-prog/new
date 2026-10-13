@@ -163,10 +163,10 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 			}
 			return
 		}
-		was := eng.Status().Phase != "off"
+		now := eng.Status()
 		st.Add(p)
 		Logf("added %s", map[bool]string{true: "a bridge", false: "a server"}[p.Bridge])
-		if was {
+		if now.Phase != "off" && now.Active != p.Link { // on: over to it (the one in use already: nothing to do)
 			_ = eng.Connect()
 		}
 		reply(w, map[string]any{"ok": true, "bridge": p.Bridge, "name": p.Name})

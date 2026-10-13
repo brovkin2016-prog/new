@@ -108,10 +108,13 @@ func TestKeepLikeThePhone(t *testing.T) {
 	dual := "winger-bridge://telemost?" + call + "&fps=24&batch=45&reliable=1&dual=1#" + "%D0%9C%D0%BE%D1%81%D1%82%20%C2%B7%20%D0%A2%D0%B5%D0%BB%D0%B5%D0%BC%D0%BE%D1%81%D1%82%20%C2%B7%202%20%D1%82%D1%80%D0%B5%D0%BA%D0%B0%20%28%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0%29"
 	st.Add(mustParse(t, "hysteria2://u:k@vpn.example.ru:443/?sni=vpn.example.ru#Дом"))
 	// what Winger 121 left: the two-track link under the usual one's name
-	st.Update(func(s *Settings) { s.Profiles = append(s.Profiles, Saved{Name: "Мост · Телемост", Link: dual}) })
-	if !st.Keep(mustParse(t, usual)) || !st.Keep(mustParse(t, dual)) {
-		t.Fatal("the usual bridge or the name were not put right")
+	st.Update(func(s *Settings) {
+		s.Profiles = append(s.Profiles, Saved{Name: "Мост · Телемост", Link: dual})
+	})
+	if !st.Keep(mustParse(t, usual)) {
+		t.Fatal("the usual bridge was not added")
 	}
+	st.Keep(mustParse(t, dual))
 	all := st.Profiles()
 	if len(all) != 3 || all[1].Name != "Мост · Телемост · 2 трека (проверка)" || !all[1].DualTrack || all[2].Name != "Мост · Телемост" || all[2].DualTrack {
 		t.Fatalf("%+v %+v", all[1], all[2])
@@ -183,5 +186,25 @@ func TestOtherLikeTheNotification(t *testing.T) {
 	e.preferred = all[1]
 	if o := e.Other(); o == nil || o.Name != "Один" {
 		t.Fatal("from a bridge chosen by hand: not the first server")
+	}
+}
+
+// the old two-track row is put right as soon as Winger starts, whatever settings its link has; an out-of-range choice
+// is the last one, as everywhere else
+func TestDualNameRepairedOnStart(t *testing.T) {
+	dir := t.TempDir()
+	st := OpenStore(dir)
+	old := "winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234&batch=30&dual=1#" +
+		"%D0%9C%D0%BE%D1%81%D1%82%202%20%D1%82%D1%80%D0%B5%D0%BA%D0%B0"
+	st.Update(func(s *Settings) {
+		s.Profiles = []Saved{{Name: "Сервер", Link: "hysteria2://a:1@one.example.ru:443/#Сервер"}, {Name: "Мост · Телемост", Link: old}}
+		s.Current = 7
+	})
+	st = OpenStore(dir)
+	if all := st.Profiles(); all[1].Name != "Мост 2 трека" || all[0].Name != "Сервер" {
+		t.Fatalf("not repaired: %q", all[1].Name)
+	}
+	if st.Chosen().Name != "Мост 2 трека" {
+		t.Fatal("an out-of-range choice is not the last one")
 	}
 }
