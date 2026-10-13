@@ -125,16 +125,16 @@ type trackKCPSession struct {
 	probed  bool
 	heard   atomic.Bool
 	removed atomic.Bool
-	lastIn  atomic.Int64 // unix ns: the far side's last segment on it
+	lastIn  atomic.Int64 // monoNow: the far side's last segment on it
 	// updateLoop only
-	busySince time.Time // something has waited on it, unanswered, since then (zero: nothing waits)
+	busySince int64 // monoNow: something has waited on it, unanswered, since then (0: nothing waits)
 
 	// winger: what the packets KCP puts out carry and where they went (all under kcpMu)
 	sentAny bool
 	maxSN   uint32
 	copies  [kcpSnRing]segCopy
 	rtt     netRTT
-	rack    int64 // when the latest-sent copy the far side acked went out
+	rack    int64 // when the latest-sent copy the far side acked went out (monoNow)
 
 	// winger: the far side's next expected segment, how many past it it has acked one by one, and the segments handed
 	// to KCP not yet put out: what is in flight is the rest
@@ -322,7 +322,7 @@ func (s *trackKCPSession) releaseHeld(now int64) {
 			}
 			needed = true
 			switch dep := s.departed(c); {
-			case dep < 0:
+			case dep < 0 || dep > now+kcpClockSlack:
 				due = true
 			case dep == 0: // still waits in the carrier
 			case dep < s.rack:
@@ -345,7 +345,11 @@ func (s *trackKCPSession) releaseHeld(now int64) {
 	s.held = kept
 }
 
-// departed: when a segment's last copy left the carrier (0: it still waits there, -1: unknown or long ago).
+// winger: kcpClockSlack: a copy that seems to have left more than this after now did not (the times are monoNow, so
+// only a broken clock does that): its resend is not held for it.
+const kcpClockSlack = int64(kcpUpdateInterval)
+
+// departed: when a segment's last copy left the carrier (monoNow; 0: it still waits there, -1: unknown or long ago).
 func (s *trackKCPSession) departed(c *segCopy) int64 {
 	if c.place.seq == 0 {
 		return -1
@@ -360,7 +364,7 @@ func (s *trackKCPSession) route(pkt []byte, buf []segPush) (outRoute, []segPush)
 	tuning := &s.parent.tuning
 	pushes := buf[:0]
 	var fresh, other, repeat, lost, due bool
-	now := time.Now().UnixNano()
+	now := monoNow()
 	timeout := int64(s.rtt.timeout())
 	for len(pkt) >= kcp.IKCP_OVERHEAD {
 		cmd := pkt[4]
@@ -376,7 +380,7 @@ func (s *trackKCPSession) route(pkt []byte, buf []segPush) (outRoute, []segPush)
 		default:
 			repeat = true
 			switch dep := s.departed(&s.copies[sn%kcpSnRing]); {
-			case dep < 0:
+			case dep < 0 || dep > now+kcpClockSlack:
 				due = true
 			case dep == 0:
 			case dep < s.rack:
@@ -410,7 +414,7 @@ func (s *trackKCPSession) route(pkt []byte, buf []segPush) (outRoute, []segPush)
 // sampleAcks: acks of our last copies (the timestamp tells which copy) give the network round trip and the latest
 // copy known to have arrived.
 func (s *trackKCPSession) sampleAcks(pkt []byte) {
-	now := time.Now()
+	now, mono := time.Now(), monoNow()
 	var rtt int64
 	if len(pkt) >= kcp.IKCP_OVERHEAD {
 		s.advanceUna(binary.LittleEndian.Uint32(pkt[16:20]))
@@ -426,8 +430,8 @@ func (s *trackKCPSession) sampleAcks(pkt []byte) {
 				s.sacked++
 			}
 			if c.ts == ts {
-				if dep := s.departed(c); dep > 0 && now.UnixNano() > dep {
-					rtt = now.UnixNano() - dep
+				if dep := s.departed(c); dep > 0 && mono > dep {
+					rtt = mono - dep
 					s.rack = max(s.rack, dep)
 				}
 			}
@@ -575,7 +579,7 @@ func (s *trackKCPSession) update() {
 	busy := s.gate.hasWaiting() // winger: data waits for room: not an answer's end (asked first: the gate locks first)
 	s.kcpMu.Lock()
 	s.kcp.Update()
-	s.releaseHeld(time.Now().UnixNano())
+	s.releaseHeld(monoNow())
 	if s.fec != nil && !busy && s.fec.due(time.Now()) {
 		s.sendParity(s.fec.seal())
 	}
@@ -614,7 +618,7 @@ type MultiTrackKCPTunnel struct {
 	fecReports time.Time              // updateLoop only
 
 	probe          []byte       // winger: a frame the far side's relay takes as nothing new (AddProbedSession; t.mu)
-	lastFirstProbe time.Time    // updateLoop only
+	lastFirstProbe int64        // updateLoop only (monoNow)
 	unanswered     atomic.Int64 // winger: see Unanswered
 
 	sentMessages      atomic.Uint64
@@ -894,7 +898,7 @@ func (t *MultiTrackKCPTunnel) inputKCP(session *trackKCPSession, body []byte) {
 	callback := t.onData
 	t.mu.Unlock()
 	t.inputSegments.Add(1)
-	session.lastIn.Store(time.Now().UnixNano())
+	session.lastIn.Store(monoNow())
 	if session.probed && session.heard.CompareAndSwap(false, true) && t.logFn != nil {
 		t.logFn("kcptunnel: session %d answered by the far side, in use", session.conv-kcpConvBase)
 	}
@@ -1118,22 +1122,22 @@ func (t *MultiTrackKCPTunnel) handleInnerClose() {
 // track, or its data channel closed): its connections are closed and new ones go elsewhere until the far side answers
 // on it again (its resends get through). A first session with nothing waiting gets the probe now and then, so that a
 // far side with nothing to send still says whether it is there.
-func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, now time.Time) {
-	if s.busySince.IsZero() || !s.heard.Load() || s == first {
+func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, now int64) {
+	if s.busySince == 0 || !s.heard.Load() || s == first {
 		return // not in use: nothing on it to close
 	}
-	quiet := now.Sub(s.busySince)
+	quiet := time.Duration(now - s.busySince)
 	if quiet < kcpDeafMargin {
 		return
 	}
 	t.mu.Lock()
 	probe := t.probe
 	t.mu.Unlock()
-	if probe != nil && now.Sub(t.lastFirstProbe) >= kcpProbeEvery && first.waitSnd() == 0 {
+	if probe != nil && now-t.lastFirstProbe >= int64(kcpProbeEvery) && first.waitSnd() == 0 {
 		t.lastFirstProbe = now
 		first.send(probe)
 	}
-	if quiet < kcpDeafAfter || !time.Unix(0, first.lastIn.Load()).After(s.busySince.Add(kcpDeafMargin)) {
+	if quiet < kcpDeafAfter || first.lastIn.Load() <= s.busySince+int64(kcpDeafMargin) {
 		return
 	}
 	if s.heard.CompareAndSwap(true, false) {
@@ -1145,22 +1149,22 @@ func (t *MultiTrackKCPTunnel) watchProbed(index int, s, first *trackKCPSession, 
 }
 
 // trackBusy (updateLoop): since when something has waited on the session without an answer from the far side on it.
-func (s *trackKCPSession) trackBusy(waiting int, now time.Time) {
+func (s *trackKCPSession) trackBusy(waiting int, now int64) {
 	if waiting == 0 || s.removed.Load() {
-		s.busySince = time.Time{}
+		s.busySince = 0
 		return
 	}
-	if s.busySince.IsZero() {
+	if s.busySince == 0 {
 		s.busySince = now
 	}
-	if last := time.Unix(0, s.lastIn.Load()); last.After(s.busySince) {
+	if last := s.lastIn.Load(); last > s.busySince {
 		s.busySince = last
 	}
 }
 
 // noteUnanswered (updateLoop): the longest something has waited on a session this side sends on with no word from
 // the far side on any session meanwhile (Unanswered).
-func (t *MultiTrackKCPTunnel) noteUnanswered(sessions []*trackKCPSession, now time.Time) {
+func (t *MultiTrackKCPTunnel) noteUnanswered(sessions []*trackKCPSession, now int64) {
 	var heard int64
 	for _, s := range sessions {
 		if in := s.lastIn.Load(); in > heard {
@@ -1173,14 +1177,10 @@ func (t *MultiTrackKCPTunnel) noteUnanswered(sessions []*trackKCPSession, now ti
 	}
 	var worst time.Duration
 	for _, s := range sessions[:n] {
-		if s.busySince.IsZero() {
+		if s.busySince == 0 {
 			continue
 		}
-		since := s.busySince
-		if last := time.Unix(0, heard); last.After(since) {
-			since = last
-		}
-		if quiet := now.Sub(since); quiet > worst {
+		if quiet := time.Duration(now - max(s.busySince, heard)); quiet > worst {
 			worst = quiet
 		}
 	}
@@ -1248,7 +1248,7 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 			copy(sessions, t.sessions)
 			t.mu.Unlock()
 			pending := 0
-			now := time.Now()
+			now, mono := time.Now(), monoNow()
 			for i, session := range sessions {
 				session.update()
 				session.pump()
@@ -1260,12 +1260,12 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 				if ticks%kcpPruneEvery == 0 {
 					session.gate.book.prune(now)
 				}
-				session.trackBusy(waiting, now)
+				session.trackBusy(waiting, mono)
 				if session.probed {
-					t.watchProbed(i, session, sessions[0], now)
+					t.watchProbed(i, session, sessions[0], mono)
 				}
 			}
-			t.noteUnanswered(sessions, now)
+			t.noteUnanswered(sessions, mono)
 			t.sendFECReports(now)
 			// winger: segments received since the last tick leave acks for the next flush: the loop keeps its quick
 			// pace while they come in (they no longer nudge it each)

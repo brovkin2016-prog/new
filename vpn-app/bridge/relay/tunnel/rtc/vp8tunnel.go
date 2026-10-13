@@ -179,6 +179,15 @@ type framePlace struct {
 	urgent bool
 }
 
+// winger: monoNow: the clock the carrier and the reliable layer keep their times on, nanoseconds since the program
+// started, never 0 or -1 (they mean "waits" and "unknown"). They were wall-clock readings: a step of the wall clock (an
+// NTP or network time correction on a phone, a laptop that wakes up) made a copy that left before a backward step look
+// as if it left in the future, and the resend guard held its resend for as long as the step; a forward step made the
+// far side look silent that much longer.
+var monoStart = time.Now()
+
+func monoNow() int64 { return int64(time.Since(monoStart)) + 1 }
+
 // departures: when the frames taken from one queue went out, by their place in it. The writer alone takes frames.
 type departures struct {
 	in, out atomic.Uint64
@@ -191,11 +200,11 @@ func (d *departures) put() uint64 { return d.in.Add(1) }
 // took: the writer took the next frame: its time first, then the count that shows it.
 func (d *departures) took() {
 	seq := d.out.Load() + 1
-	d.at[seq%departRing].Store(time.Now().UnixNano())
+	d.at[seq%departRing].Store(monoNow())
 	d.out.Store(seq)
 }
 
-// when: when the frame at this place went out (unix nanoseconds); 0 while it waits, -1 when unknown or long ago.
+// when: when the frame at this place went out (monoNow); 0 while it waits, -1 when unknown or long ago.
 func (d *departures) when(seq uint64) int64 {
 	done := d.out.Load()
 	if seq > done {
@@ -260,8 +269,11 @@ func (t *VP8DataTunnel) Start(fps, batch int) {
 // the last keyframe, as a browser would ignore it too.
 func (t *VP8DataTunnel) RequestKeyframe() bool {
 	t.keyframeAsked.Add(1)
-	if last := t.lastKeyframe.Load(); last != 0 && time.Since(time.Unix(0, last)) < keyframeMinInterval {
-		return false
+	// winger: a last keyframe that looks later than now is not to be trusted (the clock moved): the request is taken
+	if last := t.lastKeyframe.Load(); last != 0 {
+		if since := monoNow() - last; since >= 0 && since < int64(keyframeMinInterval) {
+			return false
+		}
 	}
 	t.keyframeWanted.Store(true)
 	select {
@@ -363,7 +375,7 @@ func (t *VP8DataTunnel) writerLoop() {
 			n := t.sentFrames.Add(1)
 			if isKeepalive {
 				t.keepaliveFrames.Add(1)
-				t.lastKeyframe.Store(time.Now().UnixNano())
+				t.lastKeyframe.Store(monoNow())
 			}
 			if common.Debug && (n <= 5 || n%500 == 0) {
 				keepalives := t.keepaliveFrames.Load()
