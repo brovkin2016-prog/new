@@ -139,8 +139,9 @@ func parseBridge(s string) (*Profile, error) {
 			p.TunnelMode = "video"
 		}
 	}
-	if p.Name == "" {
-		p.Name = "Мост · " + p.Service()
+	if p.Name == "" { // as Winger on the phone names it
+		p.Name = map[string]string{"telemost": "Мост Телемост", "wbstream": "Мост WB Stream", "dion": "Мост DION",
+			"bitrix": "Мост Битрикс24", "vk": "Мост VK"}[p.Platform]
 	}
 	return p, nil
 }
@@ -183,7 +184,7 @@ func max0(a, b int) int {
 	return b
 }
 
-// Service is the call service's name for the screen.
+// Service is the call service's name for the screen, as Winger on the phone says it («через звонок Телемоста»).
 func (p *Profile) Service() string {
 	switch p.Platform {
 	case "wbstream":
@@ -195,7 +196,7 @@ func (p *Profile) Service() string {
 	case "vk":
 		return "VK"
 	default:
-		return "Телемост"
+		return "звонок Телемоста"
 	}
 }
 

@@ -67,7 +67,7 @@ func (f *Family) SyncBridges(_ int) int {
 	}
 	n := 0
 	for _, l := range out.Links {
-		if p, err := ParseLink(l); err == nil && p.Bridge && f.st.Add(p, false) {
+		if p, err := ParseLink(l); err == nil && p.Bridge && f.st.Keep(p) {
 			n++
 		}
 	}
@@ -177,17 +177,32 @@ func (f *Family) download(c *http.Client, url, want string) (string, error) {
 	return path, nil
 }
 
-// Loop: a minute after the start, then every hour.
+// Loop: a minute after the start, then every hour; the bridges every 20 minutes while there is none yet (as the phone).
 func (f *Family) Loop() {
 	time.Sleep(time.Minute)
+	var last time.Time
 	for {
-		f.SyncBridges(0)
-		if p := f.st.Chosen(); p != nil && !p.Bridge {
-			f.RenewNow(p)
+		if last.IsZero() || time.Since(last) >= time.Hour {
+			last = time.Now()
+			f.SyncBridges(0)
+			if p := f.st.Chosen(); p != nil && !p.Bridge {
+				f.RenewNow(p)
+			}
+			f.CheckUpdate()
+		} else if !f.hasBridge() {
+			f.SyncBridges(0)
 		}
-		f.CheckUpdate()
-		time.Sleep(time.Hour)
+		time.Sleep(20 * time.Minute)
 	}
+}
+
+func (f *Family) hasBridge() bool {
+	for _, p := range f.st.Profiles() {
+		if p.Bridge {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *Family) UpdateInfo() UpdateInfo {

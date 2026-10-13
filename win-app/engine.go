@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,7 +14,7 @@ type Status struct {
 	Note   string `json:"note"`  // the reason when it is not working, in plain words
 	Active string `json:"active"`
 	Auto   bool   `json:"auto"` // in use because the chosen one did not answer
-	PingMs int    `json:"ping"`
+	PingMs int    `json:"ping"` // -1: being checked, 0: no answer
 	Since  int64  `json:"since"`
 }
 
@@ -112,7 +113,7 @@ func (e *Engine) Connect() error {
 	e.gen++
 	g := e.gen
 	e.wanted, e.preferred, e.profile, e.tunnel = true, p, p, p.TunnelMode
-	e.status = Status{Phase: "connecting", Active: p.Link}
+	e.status = Status{Phase: "connecting", Active: p.Link, PingMs: -1}
 	e.backWait = backFirst
 	prev, done := e.runDone, make(chan struct{})
 	e.runDone = done
@@ -490,32 +491,93 @@ func (e *Engine) switchTo(g int, next *Profile, byItself bool, why string) {
 	e.profile, e.tunnel = next, next.TunnelMode
 	e.status.Active = next.Link
 	e.status.Auto = byItself && e.preferred != nil && next.Link != e.preferred.Link
-	e.status.Since = 0
+	e.status.Since, e.status.PingMs = 0, -1
 	e.backAt = time.Now().Add(e.backWait)
 	e.status.Phase, e.status.Note = "connecting", why
 	e.mu.Unlock()
 	Logf("auto: %s", why)
 }
 
-// SpeedOf: Mbit/s through a connection — the one that is on, or a short-lived one to a server that is not.
-func (e *Engine) SpeedOf(p *Profile) (float64, error) {
+const bridgeSpeedOff = "Скорость моста проверяется, когда он включён: включите его кнопкой и проверьте снова"
+
+// SpeedOf: how fast a connection is, as its row on the phone says it — «⚡ 23,4 Мбит/с · 45 мс», «⚡ не отвечает»,
+// «⚡ ничего не скачалось» — measured through the one that is on, or a short-lived client of a server that is not (what
+// is on is not touched); kept with its time for the row. A bridge is measured while it is on.
+func (e *Engine) SpeedOf(p *Profile) (string, error) {
 	st := e.Status()
-	if st.Phase == "on" && st.Active == p.Link {
-		return Speed(e.probePort), nil
+	port := e.probePort
+	if st.Phase != "on" || st.Active != p.Link {
+		if p.Bridge {
+			return "", errors.New(bridgeSpeedOff)
+		}
+		var b Box
+		port = FreePort()
+		err := b.Start(Config(EngineOptions{Profile: p, ProbePort: port}))
+		if err == nil {
+			defer b.Stop()
+		}
+		if err != nil || Ping(port, 8*time.Second) == 0 {
+			Logf("speed «%s»: does not answer", p.Name)
+			e.st.SetSpeed(p.Link, "⚡ не отвечает · "+time.Now().Format("15:04"))
+			return "⚡ не отвечает", nil
+		}
 	}
-	if p.Bridge {
-		return 0, errors.New("Мост меряется, когда он включён.")
+	mbit, ms := Speed(port)
+	line := "⚡ ничего не скачалось"
+	if mbit > 0 {
+		line = strings.Replace(fmt.Sprintf("⚡ %.1f Мбит/с · %d мс", mbit, ms), ".", ",", 1)
 	}
-	var b Box
-	port := FreePort()
-	if err := b.Start(Config(EngineOptions{Profile: p, ProbePort: port})); err != nil {
-		return 0, err
+	Logf("speed «%s»: %.2f Mbit/s, first byte %d ms", p.Name, mbit, ms)
+	e.st.SetSpeed(p.Link, line+" · "+time.Now().Format("15:04"))
+	return line, nil
+}
+
+// PingNow: the response time looked at again (a tap on it in the window), while the VPN is on.
+func (e *Engine) PingNow() {
+	e.mu.Lock()
+	g := e.gen
+	if e.status.Phase != "on" {
+		e.mu.Unlock()
+		return
 	}
-	defer b.Stop()
-	if Ping(port, 8*time.Second) == 0 {
-		return 0, errors.New("Сервер не отвечает.")
+	e.status.PingMs = -1
+	e.mu.Unlock()
+	go func() {
+		ms := Ping(e.probePort, 10*time.Second)
+		e.mu.Lock()
+		if e.gen == g && e.wanted {
+			e.status.PingMs = ms
+		}
+		e.mu.Unlock()
+	}()
+}
+
+// Rates: bytes a second down and up through the VPN now.
+func (e *Engine) Rates() (down, up float64) {
+	return e.box.Rates()
+}
+
+// Other: the phone notification's one-tap switch — from a server to the first bridge, from a bridge back to the chosen
+// server (else the first one); nil while the VPN is off or there is nothing to switch to.
+func (e *Engine) Other() *Profile {
+	e.mu.Lock()
+	now, pref, on := e.profile, e.preferred, e.wanted
+	e.mu.Unlock()
+	if !on || now == nil {
+		return nil
 	}
-	return Speed(port), nil
+	all := e.st.Profiles()
+	for _, x := range all {
+		if now.Bridge && pref != nil && !pref.Bridge && x.Link == pref.Link {
+			return x
+		}
+	}
+	for _, x := range all {
+		if x.Bridge != now.Bridge {
+			return x
+		}
+	}
+	return nil
 }
 
 // Shutdown: off because the service stops (the computer shuts down, an update): «on after a restart» stays.

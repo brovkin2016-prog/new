@@ -22,6 +22,8 @@ type Settings struct {
 	Apps     []string `json:"apps"`     // their files: telegram.exe, chrome.exe…
 	Manual   bool     `json:"manual"`   // the automatic choice switched off
 	KeepOn   bool     `json:"keepOn"`   // on again after a restart of the computer
+	// the last speed check of each connection (by its link), as its row shows it: «⚡ 23,4 Мбит/с · 45 мс · 15:03»
+	Speeds map[string]string `json:"speeds,omitempty"`
 }
 
 // Store keeps the settings in a file in Winger's data folder.
@@ -54,6 +56,10 @@ func (st *Store) Get() Settings {
 	s := st.s
 	s.Profiles = append([]Saved(nil), st.s.Profiles...)
 	s.Apps = append([]string(nil), st.s.Apps...)
+	s.Speeds = map[string]string{}
+	for k, v := range st.s.Speeds {
+		s.Speeds[k] = v
+	}
 	return s
 }
 
@@ -92,37 +98,50 @@ func (st *Store) Chosen() *Profile {
 	return all[i]
 }
 
-// Add adds a link (or renews it when the same server and person, or a bridge of the same service, is there).
-// choose: it becomes the chosen one. Returns the profile and whether anything changed.
-func (st *Store) Add(p *Profile, choose bool) bool {
+// Add: a link the person added (as Winger on the phone does it) — it replaces the same server and person, or the
+// bridge of the same service and track count, else comes last; it becomes the chosen one either way.
+func (st *Store) Add(p *Profile) {
+	st.Update(func(s *Settings) {
+		at := same(s.Profiles, p)
+		item := Saved{Name: p.Name, Link: p.Link}
+		if at >= 0 {
+			s.Profiles[at] = item
+		} else {
+			s.Profiles, at = append(s.Profiles, item), len(s.Profiles)
+		}
+		s.Current = at
+	})
+}
+
+// Keep: a bridge the family server keeps ready for this computer — added or renewed without choosing it (the phone's
+// rule): the same link stays; the same call with other settings stays as it is (the person's own way, say the video on
+// a network where the data channel does not carry); a new call of the service replaces it, with the server's name.
+// The name the server gives is put right on the same link too: Winger before 123 kept the two-track trial in place of
+// the usual Telemost bridge, under the usual one's name. Whether anything changed.
+func (st *Store) Keep(p *Profile) bool {
 	changed := false
 	st.Update(func(s *Settings) {
 		chosen := ""
 		if s.Current >= 0 && s.Current < len(s.Profiles) {
 			chosen = s.Profiles[s.Current].Link
 		}
-		at := -1
-		for i, sv := range s.Profiles {
-			if o, err := ParseLink(sv.Link); err == nil && o.Same(p) {
-				at = i
+		at := same(s.Profiles, p)
+		if at >= 0 {
+			o, _ := ParseLink(s.Profiles[at].Link)
+			switch {
+			case s.Profiles[at].Link == p.Link:
+				if s.Profiles[at].Name != p.Name {
+					s.Profiles[at].Name, changed = p.Name, true
+				}
+				return
+			case o != nil && o.JoinLink != "" && o.JoinLink == p.JoinLink:
+				return
 			}
+			s.Profiles[at] = Saved{Name: p.Name, Link: p.Link}
+		} else {
+			s.Profiles = append(s.Profiles, Saved{Name: p.Name, Link: p.Link})
 		}
-		item := Saved{Name: p.Name, Link: p.Link}
-		switch {
-		case at >= 0 && s.Profiles[at].Link == p.Link:
-		case at >= 0:
-			item.Name = s.Profiles[at].Name // a new call or key of the same: its name stays
-			if chosen == s.Profiles[at].Link {
-				chosen = p.Link
-			}
-			s.Profiles[at], changed = item, true
-		default:
-			s.Profiles, at, changed = append(s.Profiles, item), len(s.Profiles), true
-		}
-		if choose {
-			s.Current = at
-			return
-		}
+		changed = true
 		for i, sv := range s.Profiles {
 			if sv.Link == chosen {
 				s.Current = i
@@ -130,6 +149,17 @@ func (st *Store) Add(p *Profile, choose bool) bool {
 		}
 	})
 	return changed
+}
+
+// same: where the same connection already is (-1: nowhere) — the last one, as on the phone.
+func same(list []Saved, p *Profile) int {
+	at := -1
+	for i, sv := range list {
+		if o, err := ParseLink(sv.Link); err == nil && o.Same(p) {
+			at = i
+		}
+	}
+	return at
 }
 
 // Renew: the family server moved to a new address — the saved server with this login takes the link the server gives
@@ -155,16 +185,33 @@ func (st *Store) Renew(auth string, main, hop *Profile) bool {
 	return changed
 }
 
-// Remove takes a connection away.
+// Remove takes a connection away; the one in use stays chosen, and when the chosen one goes, the first one is.
 func (st *Store) Remove(i int) {
 	st.Update(func(s *Settings) {
 		if i < 0 || i >= len(s.Profiles) {
 			return
 		}
+		cur := max(0, min(s.Current, len(s.Profiles)-1))
+		delete(s.Speeds, s.Profiles[i].Link)
 		s.Profiles = append(s.Profiles[:i], s.Profiles[i+1:]...)
-		if s.Current >= i && s.Current > 0 {
-			s.Current--
+		switch {
+		case i < cur:
+			s.Current = cur - 1
+		case i == cur:
+			s.Current = 0
+		default:
+			s.Current = cur
 		}
+	})
+}
+
+// SetSpeed keeps a connection's last speed check for its row.
+func (st *Store) SetSpeed(link, line string) {
+	st.Update(func(s *Settings) {
+		if s.Speeds == nil {
+			s.Speeds = map[string]string{}
+		}
+		s.Speeds[link] = line
 	})
 }
 

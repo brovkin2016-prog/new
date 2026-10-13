@@ -89,3 +89,99 @@ func TestBridgeSameKeepsTwoTrackTrialApart(t *testing.T) {
 		t.Fatal("a new call of the usual bridge did not replace the old one")
 	}
 }
+
+func mustParse(t *testing.T, link string) *Profile {
+	t.Helper()
+	p, err := ParseLink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// the server's bridges, as the phone keeps them: not chosen; the same call with other settings stays the person's;
+// the two-track trial that Winger before 123 kept in place of the usual bridge gets its own name back
+func TestKeepLikeThePhone(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	const call = "link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234"
+	usual := "winger-bridge://telemost?" + call + "&fps=24&batch=45&reliable=1&dual=0#" + "%D0%9C%D0%BE%D1%81%D1%82%20%C2%B7%20%D0%A2%D0%B5%D0%BB%D0%B5%D0%BC%D0%BE%D1%81%D1%82"
+	dual := "winger-bridge://telemost?" + call + "&fps=24&batch=45&reliable=1&dual=1#" + "%D0%9C%D0%BE%D1%81%D1%82%20%C2%B7%20%D0%A2%D0%B5%D0%BB%D0%B5%D0%BC%D0%BE%D1%81%D1%82%20%C2%B7%202%20%D1%82%D1%80%D0%B5%D0%BA%D0%B0%20%28%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0%29"
+	st.Add(mustParse(t, "hysteria2://u:k@vpn.example.ru:443/?sni=vpn.example.ru#Дом"))
+	// what Winger 121 left: the two-track link under the usual one's name
+	st.Update(func(s *Settings) { s.Profiles = append(s.Profiles, Saved{Name: "Мост · Телемост", Link: dual}) })
+	if !st.Keep(mustParse(t, usual)) || !st.Keep(mustParse(t, dual)) {
+		t.Fatal("the usual bridge or the name were not put right")
+	}
+	all := st.Profiles()
+	if len(all) != 3 || all[1].Name != "Мост · Телемост · 2 трека (проверка)" || !all[1].DualTrack || all[2].Name != "Мост · Телемост" || all[2].DualTrack {
+		t.Fatalf("%+v %+v", all[1], all[2])
+	}
+	if st.Chosen().Bridge {
+		t.Fatal("a bridge from the server was chosen")
+	}
+	if st.Keep(mustParse(t, usual)) || st.Keep(mustParse(t, dual)) {
+		t.Fatal("the same links changed something")
+	}
+	// the person's own way on the same call stays
+	if st.Keep(mustParse(t, "winger-bridge://telemost?"+call+"&fps=20&batch=30&reliable=1&dual=0#x")) {
+		t.Fatal("the same call with other settings replaced the person's own")
+	}
+	// a new call replaces the old one, with the server's name
+	if !st.Keep(mustParse(t, "winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F99999999999999&dual=0#new")) || st.Profiles()[2].Name != "new" {
+		t.Fatal("a new call did not replace the old one")
+	}
+}
+
+// a pasted link is chosen; removing one keeps the one in use chosen, removing the chosen one chooses the first
+func TestAddRemoveLikeThePhone(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://a:1@one.example.ru:443/#Один"))
+	st.Add(mustParse(t, "hysteria2://b:2@two.example.ru:443/#Два"))
+	st.Add(mustParse(t, "winger-bridge://vk?link=https%3A%2F%2Fvk.com%2Fcall%2Fjoin%2Fabcdefghijkl#Мост"))
+	if st.Get().Current != 2 || !st.Chosen().Bridge {
+		t.Fatal("a pasted bridge was not chosen")
+	}
+	st.Add(mustParse(t, "hysteria2://a:9@one.example.ru:443/#Новый"))
+	if all := st.Profiles(); len(all) != 3 || all[0].Name != "Новый" || st.Get().Current != 0 {
+		t.Fatalf("the same server and person: replaced with its new name and chosen (%d)", st.Get().Current)
+	}
+	st.Update(func(s *Settings) { s.Current = 2 })
+	st.SetSpeed(st.Profiles()[1].Link, "⚡ 1,0 Мбит/с · 5 мс · 10:00")
+	st.Remove(1)
+	if st.Get().Current != 1 || !st.Chosen().Bridge || len(st.Get().Speeds) != 0 {
+		t.Fatal("the one in use did not stay chosen, or the removed one's speed stayed")
+	}
+	st.Remove(1)
+	if st.Get().Current != 0 || st.Chosen().Name != "Новый" {
+		t.Fatal("removing the chosen one did not choose the first")
+	}
+	if activeIndex(st.Profiles(), "nothing", 5) != 0 {
+		t.Fatal("activeIndex")
+	}
+}
+
+// the tray's one click, as the phone's notification: from a server to the first bridge, from a bridge back to the
+// chosen server, else the first server; nothing while off
+func TestOtherLikeTheNotification(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://a:1@one.example.ru:443/#Один"))
+	st.Add(mustParse(t, "winger-bridge://vk?link=https%3A%2F%2Fvk.com%2Fcall%2Fjoin%2Fabcdefghijkl#Мост VK"))
+	st.Add(mustParse(t, "hysteria2://b:2@two.example.ru:443/#Два"))
+	all := st.Profiles()
+	e := NewEngine(st, t.TempDir(), "", nil, false)
+	if e.Other() != nil {
+		t.Fatal("a switch while off")
+	}
+	e.wanted, e.profile, e.preferred = true, all[2], all[2]
+	if o := e.Other(); o == nil || o.Name != "Мост VK" {
+		t.Fatal("from a server: not the bridge")
+	}
+	e.profile = all[1]
+	if o := e.Other(); o == nil || o.Name != "Два" {
+		t.Fatal("from a bridge: not the chosen server")
+	}
+	e.preferred = all[1]
+	if o := e.Other(); o == nil || o.Name != "Один" {
+		t.Fatal("from a bridge chosen by hand: not the first server")
+	}
+}

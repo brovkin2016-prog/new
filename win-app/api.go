@@ -41,6 +41,17 @@ type connView struct {
 	Service string `json:"service"`
 	Chosen  bool   `json:"chosen"`
 	Active  bool   `json:"active"`
+	Speed   string `json:"speed,omitempty"` // the last speed check, with its time
+}
+
+// activeIndex: the row of the connection in use now (the chosen one, or the one Winger moved to by itself).
+func activeIndex(all []*Profile, active string, current int) int {
+	for i, p := range all {
+		if p.Link == active {
+			return i
+		}
+	}
+	return max(0, min(current, len(all)-1))
 }
 
 // API is the window's side of things: the state, the buttons, the settings.
@@ -67,14 +78,25 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		return int(i)
 	}
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
-		s, status := st.Get(), eng.Status()
-		conns := []connView{}
-		for i, p := range st.Profiles() {
-			conns = append(conns, connView{Name: p.Name, Bridge: p.Bridge, Service: p.Service(), Chosen: i == s.Current,
-				Active: status.Phase != "off" && status.Active == p.Link})
+		s, status, all := st.Get(), eng.Status(), st.Profiles()
+		cur := max(0, min(s.Current, len(all)-1))
+		conns, name := []connView{}, ""
+		for i, p := range all {
+			c := connView{Name: p.Name, Bridge: p.Bridge, Service: p.Service(), Chosen: i == cur,
+				Active: status.Phase != "off" && status.Active == p.Link, Speed: s.Speeds[p.Link]}
+			if c.Active {
+				name = p.Name
+			}
+			conns = append(conns, c)
+		}
+		down, up := eng.Rates()
+		other := ""
+		if o := eng.Other(); o != nil {
+			other = map[bool]string{true: "Через мост", false: "Через сервер"}[o.Bridge]
 		}
 		reply(w, map[string]any{"status": status, "conns": conns, "onlyApps": s.OnlyApps, "apps": s.Apps,
-			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo(), "captcha": Captcha()})
+			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo(), "captcha": Captcha(),
+			"down": down, "up": up, "activeName": name, "switch": other})
 	})
 	mux.HandleFunc("/api/connect", func(w http.ResponseWriter, r *http.Request) {
 		if err := eng.Connect(); err != nil {
@@ -87,26 +109,66 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		eng.Disconnect()
 		reply(w, map[string]bool{"ok": true})
 	})
+	// a connection's button, as on the phone: on through it (switching over from another one), or off when it is the
+	// one in use
 	mux.HandleFunc("/api/use", func(w http.ResponseWriter, r *http.Request) {
 		i := index(r)
-		if i < 0 || i >= len(st.Profiles()) {
+		all := st.Profiles()
+		if i < 0 || i >= len(all) {
 			fail(w, "нет такого подключения")
 			return
 		}
+		status := eng.Status()
+		if status.Phase != "off" && i == activeIndex(all, status.Active, st.Get().Current) {
+			eng.Disconnect()
+			reply(w, map[string]bool{"ok": true, "off": true})
+			return
+		}
 		st.Update(func(s *Settings) { s.Current = i })
+		_ = eng.Connect() // on, or over from the old connection to this one
+		reply(w, map[string]bool{"ok": true})
+	})
+	// the tray's one click to the other kind of connection (the phone's notification button «Через мост» / «Через сервер»)
+	mux.HandleFunc("/api/switch", func(w http.ResponseWriter, r *http.Request) {
+		o := eng.Other()
+		if o == nil {
+			fail(w, "некуда переключаться")
+			return
+		}
+		at := -1
+		for i, p := range st.Profiles() {
+			if p.Link == o.Link {
+				at = i
+			}
+		}
+		if at < 0 {
+			fail(w, "нет такого подключения")
+			return
+		}
+		st.Update(func(s *Settings) { s.Current = at })
 		_ = eng.Connect()
 		reply(w, map[string]bool{"ok": true})
 	})
+	// a link the person pasted: added (or put in place of the same one) and chosen; on — over to it at once
 	mux.HandleFunc("/api/add", func(w http.ResponseWriter, r *http.Request) {
 		text, _ := body(r)["text"].(string)
 		link := FindLink(text)
 		p, err := ParseLink(link)
 		if link == "" || err != nil {
-			fail(w, "В тексте нет ссылки VPN или моста (hysteria2:// или winger-bridge://).")
+			f := strings.ToLower(strings.TrimSpace(text))
+			if strings.HasPrefix(f, "vless://") || strings.HasPrefix(f, "vmess://") {
+				fail(w, "Это ссылка другого типа. Нужна ссылка, которая начинается с hysteria2://")
+			} else {
+				fail(w, "Это не ссылка VPN. Нужна ссылка, которая начинается с hysteria2://")
+			}
 			return
 		}
-		st.Add(p, !p.Bridge || len(st.Profiles()) == 0)
+		was := eng.Status().Phase != "off"
+		st.Add(p)
 		Logf("added %s", map[bool]string{true: "a bridge", false: "a server"}[p.Bridge])
+		if was {
+			_ = eng.Connect()
+		}
 		reply(w, map[string]any{"ok": true, "bridge": p.Bridge, "name": p.Name})
 	})
 	mux.HandleFunc("/api/remove", func(w http.ResponseWriter, r *http.Request) {
@@ -116,8 +178,8 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 			fail(w, "нет такого подключения")
 			return
 		}
-		if s := eng.Status(); s.Phase != "off" && s.Active == all[i].Link {
-			eng.Disconnect()
+		if cur := max(0, min(st.Get().Current, len(all)-1)); i == cur && eng.Status().Phase != "off" {
+			eng.Disconnect() // the chosen one goes: off, as on the phone
 		}
 		st.Remove(i)
 		reply(w, map[string]bool{"ok": true})
@@ -129,13 +191,16 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 			fail(w, "нет такого подключения")
 			return
 		}
-		mbit, err := eng.SpeedOf(all[i])
+		line, err := eng.SpeedOf(all[i])
 		if err != nil {
 			fail(w, err.Error())
 			return
 		}
-		Logf("speed «%s»: %.1f Mbit/s", all[i].Name, mbit)
-		reply(w, map[string]any{"mbit": mbit})
+		reply(w, map[string]any{"line": line})
+	})
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		eng.PingNow()
+		reply(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("/api/apps", func(w http.ResponseWriter, r *http.Request) {
 		m := body(r)

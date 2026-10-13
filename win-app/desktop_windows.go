@@ -4,6 +4,7 @@ package main
 
 import (
 	_ "embed"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -118,9 +119,12 @@ func runTray() error {
 		systray.SetTooltip("Winger")
 		open := systray.AddMenuItem("Открыть Winger", "")
 		toggle := systray.AddMenuItem("Включить VPN", "")
+		// the phone notification's one tap: to a bridge from the server, to the server from a bridge
+		other := systray.AddMenuItem("Через мост", "")
+		other.Hide()
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Убрать значок", "VPN продолжит работать")
-		on, shown := false, ""
+		shown, was := "", ""
 		go func() {
 			for {
 				b, err := api("state")
@@ -131,18 +135,53 @@ func runTray() error {
 				} else if err == nil && m == nil {
 					shown = "" // passed: the next check, even on the same page, opens again
 				}
-				now := err == nil && strings.Contains(string(b), `"phase":"on"`)
-				busy := err == nil && (strings.Contains(string(b), `"phase":"connecting"`) || strings.Contains(string(b), `"phase":"retrying"`))
-				if now != on || busy {
-					on = now
-					if on {
+				var s struct {
+					Status struct {
+						Phase  string `json:"phase"`
+						Auto   bool   `json:"auto"`
+						PingMs int    `json:"ping"`
+					} `json:"status"`
+					ActiveName string `json:"activeName"`
+					Switch     string `json:"switch"`
+				}
+				if err != nil || json.Unmarshal(b, &s) != nil {
+					s.Status.Phase = "off"
+				}
+				// as the phone's notification: the connection's name, then «Защищено · отклик N мс» or what it is doing
+				tip, title := "Winger: выключен", "Выключить VPN"
+				switch s.Status.Phase {
+				case "on":
+					tip = "Защищено"
+					if s.Status.PingMs > 0 {
+						tip += " · отклик " + itoa(s.Status.PingMs) + " мс"
+					}
+					if s.Status.Auto {
+						tip += " · сам перешёл: выбранный не отвечал"
+					}
+				case "connecting":
+					tip = "Подключаюсь…"
+				case "retrying":
+					tip = "Переподключаюсь…"
+				default:
+					title = "Включить VPN"
+				}
+				if s.Status.Phase != "off" && s.ActiveName != "" {
+					tip = s.ActiveName + "\n" + tip
+				}
+				if now := s.Status.Phase + "|" + tip + "|" + s.Switch; now != was {
+					was = now
+					if s.Status.Phase == "on" {
 						systray.SetIcon(iconOn)
-						systray.SetTooltip("Winger: VPN включён")
-						toggle.SetTitle("Выключить VPN")
 					} else {
 						systray.SetIcon(iconOff)
-						systray.SetTooltip(map[bool]string{true: "Winger: подключаюсь…", false: "Winger: выключен"}[busy])
-						toggle.SetTitle(map[bool]string{true: "Выключить VPN", false: "Включить VPN"}[busy])
+					}
+					systray.SetTooltip(tip)
+					toggle.SetTitle(title)
+					if s.Switch != "" {
+						other.SetTitle(s.Switch)
+						other.Show()
+					} else {
+						other.Hide()
 					}
 				}
 				time.Sleep(3 * time.Second)
@@ -159,6 +198,8 @@ func runTray() error {
 					} else {
 						_, _ = api("disconnect")
 					}
+				case <-other.ClickedCh:
+					_, _ = api("switch")
 				case <-quit.ClickedCh:
 					systray.Quit()
 				}

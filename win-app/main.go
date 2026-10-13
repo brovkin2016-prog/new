@@ -118,7 +118,7 @@ func selftest(args []string) error {
 	if err != nil {
 		return err
 	}
-	st.Add(p, true)
+	st.Add(p)
 	if only != "" {
 		st.Update(func(s *Settings) { s.OnlyApps, s.Apps = true, strings.Split(strings.ToLower(only), ",") })
 	}

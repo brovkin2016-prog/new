@@ -11,19 +11,16 @@
 <main id="app">
   <header>
     <img src="icon.svg" alt="" class="logo">
-    <div><h1>Winger</h1><small id="sub">VPN семьи</small></div>
+    <div><h1>Winger</h1><small id="sub">VPN от Бровкина Алексея</small></div>
   </header>
   <section class="hero">
     <button id="power" class="power" aria-label="Включить или выключить VPN"><span>⏻</span></button>
     <div id="state" class="state">Выключено</div>
     <div id="note" class="note"></div>
+    <button id="ping" class="ping" hidden></button>
   </section>
-  <section class="card">
-    <h2>Подключения</h2>
-    <div id="conns"></div>
-    <button id="add" class="btn soft wide">➕ Добавить: вставить ссылку</button>
-  </section>
-  <section class="card">
+  <div id="conns"></div>
+  <section class="card" id="appsCard" hidden>
     <h2>Какие программы через VPN</h2>
     <div class="seg" id="mode">
       <button data-only="0">Все программы</button>
@@ -31,10 +28,7 @@
     </div>
     <div id="apps" class="apps"></div>
   </section>
-  <section class="card">
-    <label class="row switch"><span class="grow">Сам выбирать рабочее подключение<small>Если сервер не отвечает — мост, потом обратно</small></span>
-      <input type="checkbox" id="auto"></label>
-  </section>
+  <button id="add" class="btn soft wide">📋 Вставить ссылку</button>
   <footer>
     <button id="ver" class="link">Winger · Проверить обновление</button>
     <button id="journal" class="link">📋 Скопировать журнал и проверку связи</button>

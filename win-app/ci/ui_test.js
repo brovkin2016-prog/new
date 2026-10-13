@@ -1,4 +1,5 @@
-// Winger for Windows' window: opened by its key, a link added, on through a real server, the programs list, the journal
+// Winger for Windows' window (the phone's screen): opened by its key, a link added, on through a real server, the
+// connection's button that switches it off, ⋯, the programs list, the journal
 const { chromium } = require("playwright");
 const fs = require("fs");
 (async () => {
@@ -17,17 +18,21 @@ const fs = require("fs");
     await page.goto("http://127.0.0.1:47710/?t=wrong");
     want((await page.content()).includes("Откройте Winger"), "a wrong key: refused");
     await page.goto("http://127.0.0.1:47710/?t=" + token);
-    await page.waitForSelector("text=Пока ни одного");
+    await page.waitForSelector("#state:has-text('Добавьте VPN')");
     await page.click("#add");
     await page.fill(".sheet textarea", "Ваш VPN:\n" + process.env.WLINK + "\nИмпорт — в Winger");
     await page.click(".sheet button:has-text('Добавить')");
     await page.waitForSelector(".toast:has-text('Добавлен сервер')");
-    await page.waitForSelector("#conns .row:has-text('Тест')");
+    await page.waitForSelector("#conns .conn:has-text('Тест')");
     await page.click("#power");
-    await page.waitForSelector("#state:has-text('Включено')", { timeout: 40000 });
-    await page.waitForSelector("#note:has-text('Отклик')", { timeout: 10000 });
+    await page.waitForSelector("#state:has-text('Защищено')", { timeout: 40000 });
+    await page.waitForSelector("#ping:has-text('Отклик')", { timeout: 10000 });
+    await page.waitForSelector("#note:has-text('Включено')");
     await page.screenshot({ path: (process.env.OUT || ".") + "/win-on" + (process.env.DARK ? "-d" : "") + ".png" });
-    want((await page.innerText("#conns")).includes("● включено"), "the connection's row says it is on");
+    want((await page.innerText("#conns")).includes("● Включено — нажмите, чтобы выключить"), "the connection's button says it is on");
+    await page.click("#conns .conn .icon");
+    want((await page.innerText(".sheet")).includes("Сам выбирать рабочее подключение"), "⋯: the automatic choice");
+    await page.click(".sheet button:has-text('Закрыть')");
     await page.click("#mode button[data-only='1']");
     await page.waitForSelector("#apps label");
     want((await page.$$("#apps label")).length > 0, "the running programs are listed");
@@ -36,7 +41,7 @@ const fs = require("fs");
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     want(clip.startsWith("Winger для Windows") && clip.includes("connected via") && !clip.includes("test-pass-123") && !/\d+\.\d+\.\d+\.\d+/.test(clip),
       "the journal: what happened, nothing private");
-    await page.click("#power");
+    await page.click("#conns .conn:has-text('Тест')");  // the button of the one in use: off, as on the phone
     await page.waitForSelector("#state:has-text('Выключено')", { timeout: 10000 });
     const r = await page.evaluate(() => fetch("/api/connect", { method: "POST", body: "x" }).then((r) => r.status));
     want(r === 415, "a plain form post is refused");

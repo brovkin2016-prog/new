@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
+	tun "github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/bufio"
 	sjson "github.com/sagernet/sing/common/json"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 )
 
@@ -119,6 +126,47 @@ type Box struct {
 	mu       sync.Mutex
 	instance *box.Box
 	cancel   context.CancelFunc
+	traffic  traffic
+}
+
+// traffic counts the bytes sing-box carries (all its runs together), for the window's «↓ … ↑ …» line.
+type traffic struct {
+	up, down atomic.Int64
+	mu       sync.Mutex
+	at       time.Time
+	lastUp   int64
+	lastDown int64
+	rateUp   float64
+	rateDown float64
+}
+
+func (t *traffic) RoutedConnection(_ context.Context, conn net.Conn, _ adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
+	return bufio.NewInt64CounterConn(conn, []*atomic.Int64{&t.up}, []*atomic.Int64{&t.down})
+}
+
+func (t *traffic) RoutedPacketConnection(_ context.Context, conn N.PacketConn, _ adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
+	return bufio.NewInt64CounterPacketConn(conn, []*atomic.Int64{&t.up}, nil, []*atomic.Int64{&t.down}, nil)
+}
+
+func (t *traffic) RoutedFlow(context.Context, adapter.InboundContext, adapter.Rule, adapter.Outbound) tun.FlowTracker {
+	return nil
+}
+
+// Rates: bytes a second down and up, over the last second or more (asked more often, the last answer again).
+func (b *Box) Rates() (down, up float64) {
+	t := &b.traffic
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now, u, d := time.Now(), t.up.Load(), t.down.Load()
+	if sec := now.Sub(t.at).Seconds(); t.at.IsZero() || sec > 10 {
+		t.rateUp, t.rateDown = 0, 0
+	} else if sec >= 1 {
+		t.rateUp, t.rateDown = float64(u-t.lastUp)/sec, float64(d-t.lastDown)/sec
+	} else {
+		return t.rateDown, t.rateUp
+	}
+	t.at, t.lastUp, t.lastDown = now, u, d
+	return t.rateDown, t.rateUp
 }
 
 var boxCtx = include.Context(context.Background())
@@ -159,6 +207,7 @@ func (b *Box) Start(cfg map[string]any) error {
 		cancel()
 		return err
 	}
+	instance.Router().AppendTracker(&b.traffic)
 	if err := instance.Start(); err != nil {
 		cancel()
 		_ = instance.Close()
