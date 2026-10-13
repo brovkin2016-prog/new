@@ -689,19 +689,22 @@
       });
       return card;
     }
-    // a command for PowerShell: copied, or sent on to the laptop where the phone can share
+    // a command for PowerShell: copied, or sent on (to oneself, then opened on the laptop) by the app's own share sheet
+    // (the Android WebView has no navigator.share), or the browser's where there is one
+    const SEND_HOW = "Перешлите команду себе (например, в «Избранное») и откройте на ноутбуке.";
     function cmdButtons(cmd, done) {
+      const send = Native && Native.shareFile ? () => shareBlob(new Blob([cmd], { type: "text/plain" }), "komanda.txt", cmd)
+        : navigator.share ? () => navigator.share({ text: cmd }).catch(() => {}) : null;
       return el("div", { style: "margin-top:10px" },
         el("button", { class: "btn wide", text: "📋 Скопировать команду", onclick: () => { copyText(cmd); toast(done, 5000); } }),
-        navigator.share ? el("button", { class: "btn line wide", style: "margin-top:8px", text: "📤 Отправить на ноутбук",
-          onclick: () => navigator.share({ text: cmd }).catch(() => {}) }) : null);
+        send ? el("button", { class: "btn line wide", style: "margin-top:8px", text: "📤 Отправить на ноутбук", onclick: send }) : null);
     }
     function remoteFirst(card, r) {
       card.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-4px 0 6px", text: "Экран вашего ноутбука с Windows — на телефоне и на другом ноутбуке. Только для вас." }),
         el("div", { class: "row", style: "align-items:flex-start;padding-top:4px" }, el("span", { style: "font-size:22px;line-height:1.2", text: "1️⃣" }),
           el("div", { class: "grow" }, el("b", { text: "Этот ноутбук" }), el("small", { text: PS_HOW }))),
-        cmdButtons(r.host_cmd, "✅ Команда скопирована — вставьте её в PowerShell на ноутбуке"),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: "Команда работает сутки. Когда ноутбук настроится, здесь появится «💻 Подключиться»." }));
+        cmdButtons(r.host_cmd, "✅ Команда скопирована — перешлите её себе и вставьте в PowerShell на ноутбуке"),
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Команда работает сутки. Когда ноутбук настроится, здесь появится «💻 Подключиться»." }));
     }
     function remoteReady(card, r, fill) {
       const dots = "•".repeat(12);
@@ -773,8 +776,8 @@
           el("li", { text: "Откройте на нём PowerShell, вставьте команду и нажмите Enter." }),
           el("li", { text: "Откройте значок «Ноутбук (удалённо)» на рабочем столе." }),
           el("li", { text: "В первый раз вставьте пароль (команда уже положила его в буфер) и отметьте «Запомнить пароль»." })),
-        cmdButtons(r.client_cmd, "✅ Команда скопирована — вставьте её в PowerShell на другом ноутбуке"),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: "Команда работает сутки. Права администратора не нужны." })));
+        cmdButtons(r.client_cmd, "✅ Команда скопирована — перешлите её себе и вставьте в PowerShell на другом ноутбуке"),
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: "Перешлите команду себе (например, в «Избранное») и откройте на том ноутбуке. Команда работает сутки. Права администратора не нужны." })));
     }
     function remoteHost(r, fresh) {
       sheet(fresh ? "🔑 Пароль новый" : "🛠 Этот ноутбук", (box) => box.append(
@@ -782,8 +785,8 @@
           ? "Теперь запустите команду на ноутбуке ещё раз — он получит новый пароль. На телефоне и другом ноутбуке при подключении введите новый."
           : "Ещё раз — после «Новый пароль» или если к ноутбуку перестало подключаться." }),
         el("div", { style: "font-size:15px", text: PS_HOW }),
-        cmdButtons(r.host_cmd, "✅ Команда скопирована — вставьте её в PowerShell на ноутбуке"),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: "Команда работает сутки." })));
+        cmdButtons(r.host_cmd, "✅ Команда скопирована — перешлите её себе и вставьте в PowerShell на ноутбуке"),
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Команда работает сутки." })));
     }
     async function remoteNewPw(fill) {
       if (S.busy.vpn || !(await confirmBox("Сменить пароль ноутбука? Потом запустите команду на ноутбуке ещё раз, а при подключении введите новый пароль.", "🔑 Сменить"))) return;

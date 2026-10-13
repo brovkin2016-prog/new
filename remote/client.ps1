@@ -136,7 +136,8 @@ function Test-Port([string]$HostName, [int]$Port) {
 function Main {
     try { $Host.UI.RawUI.WindowTitle = 'Удалённый доступ: этот ноутбук подключается' } catch { }
     $stale = 'Команда повреждена или устарела. Скопируйте её в приложении заново («Управление» → «Сервер» → «Удалённый доступ») и запустите ещё раз.'
-    # the key goes into a file name: no "/" there (the server's own keys never have one)
+    # the key goes into a file name: no "/" there. The server's key never has one: hbbs makes its key pair again until
+    # the public half has none (rustdesk-server 1.1.16, gen_sk), and the server only ever uses the pair hbbs made
     if ($RdHost -notmatch '^[A-Za-z0-9.-]+$' -or $RdKey -notmatch '^[A-Za-z0-9+=]{40,64}$' -or $RdPassword -notmatch '^[A-Za-z0-9]{8,64}$') { Fail $stale }
     if (-not $LaptopId) {
         Fail 'Сначала настройте сам ноутбук: в приложении «Управление» → «Сервер» → «Удалённый доступ» → «Этот ноутбук». Потом скопируйте эту команду заново и запустите её ещё раз.'

@@ -58,14 +58,24 @@ function Test-Admin {
     return $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Start-Elevated {
-    # The same one-line command again, in a 64-bit Windows PowerShell with administrator rights (Windows asks).
+function Start-Elevated([string]$Stale) {
+    # The same one-line command again, in a 64-bit Windows PowerShell with administrator rights (Windows asks). That
+    # window fetches the script once more: on a weak line it tries a few times, and when it still cannot (or the server
+    # says no) it says why and waits for Enter. Without that a failed fetch would close the new window at once.
     $ps = Join-Path $env:windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
         $ps = Join-Path $env:windir 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
     }
     $url = $Api + '/api/remote/host.ps1?t=' + $Token
-    $cmd = "`$FamilyRemoteRelaunched = 1; [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm '$url' | iex"
+    # one line inside "..." on the command line: no double quotes in it (and the values put in have no single ones)
+    $lines = @'
+$FamilyRemoteRelaunched = 1
+[Net.ServicePointManager]::SecurityProtocol = 'Tls12'
+$s = $null; $code = 0
+foreach ($i in 1..4) { try { $s = irm '<url>' -TimeoutSec 60 -ErrorAction Stop; break } catch { $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }; if ($code -ge 400 -and $code -lt 500) { break }; if ($i -lt 4) { Start-Sleep -Seconds (5 * $i) } } }
+if ($s) { $s | iex } else { if ($code -eq 403) { $t = '<stale>' } elseif ($code -eq 429) { $t = 'Слишком много попыток. Подождите 10 минут и запустите команду ещё раз.' } else { $t = 'Не удалось скачать настройку. Проверьте интернет (или включите Winger) и запустите команду ещё раз.' }; Write-Host $t -ForegroundColor Red; [void](Read-Host 'Нажмите Enter, чтобы закрыть окно') }
+'@
+    $cmd = (($lines -split "`r?`n" | Where-Object { $_.Trim() }) -join '; ').Replace('<url>', $url).Replace('<stale>', $Stale)
     Say 'Windows сейчас спросит разрешение — нажмите «Да». Настройка продолжится в новом окне.' 'Yellow'
     try {
         Start-Process -FilePath $ps -Verb RunAs -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -Command "' + $cmd + '"')
@@ -342,7 +352,7 @@ function Main {
     if ([Environment]::OSVersion.Version.Major -lt 10 -or -not [Environment]::Is64BitOperatingSystem) {
         Fail 'Нужна 64-битная Windows 10 или 11 — на этом компьютере настроить не получится.'
     }
-    if (-not (Test-Admin) -or -not [Environment]::Is64BitProcess) { Start-Elevated }
+    if (-not (Test-Admin) -or -not [Environment]::Is64BitProcess) { Start-Elevated $stale }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
     Say 'Настраиваю удалённый доступ к этому ноутбуку…' 'Cyan'

@@ -9,7 +9,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager
 
 | File | Runs on | Does |
 |---|---|---|
-| `host.ps1` | the owner's Windows 11 laptop (the one to be reached) | asks Windows for administrator rights (relaunches the same line with `-Verb RunAs`); installs the official RustDesk 1.5.0 MSI as a service (pinned SHA-256 + Authenticode signer `PURSLANE`; skipped when 1.5.0 or newer is there); points it at our hbbs/hbbr and their key; sets the permanent password and hardening options; keeps the laptop awake on mains power (no sleep, lid does nothing); reads the laptop's RustDesk ID and posts it to `/api/remote/hello` |
+| `host.ps1` | the owner's Windows 11 laptop (the one to be reached) | asks Windows for administrator rights (relaunches the same line with `-Verb RunAs`; that window retries the fetch on a weak line and, when it still fails, says why and waits for Enter instead of closing); installs the official RustDesk 1.5.0 MSI as a service (pinned SHA-256 + Authenticode signer `PURSLANE`; skipped when 1.5.0 or newer is there); points it at our hbbs/hbbr and their key; sets the permanent password and hardening options; keeps the laptop awake on mains power (no sleep, lid does nothing); reads the laptop's RustDesk ID and posts it to `/api/remote/hello` |
 | `client.ps1` | another Windows laptop (connects) | no admin rights; the official portable 1.5.0 EXE (pinned SHA-256 + signer) saved as `%LOCALAPPDATA%\FamilyRemote\rustdesk-host=<HOST>,key=<KEY>,.exe` (RustDesk takes the server and key from its own file name); "Optimize reaction time" defaults in `%APPDATA%\RustDesk\config\RustDesk_default.toml` (merged); a desktop shortcut «Ноутбук (удалённо)» with `--connect <ID>`; the password on the clipboard for the first connection («Запомнить пароль») |
 
 Both are Windows PowerShell 5.1 (no PS 7 syntax), print short Russian lines, never print the password, stop with one
@@ -24,7 +24,7 @@ contain no other `{{…}}` text, not even in comments.
 | Name | Value | In |
 |---|---|---|
 | `HOST` | the server's domain | both |
-| `KEY` | the hbbs public key (`/etc/aibot/rustdesk.pub`; hbbs never makes one with `/`, which the file-name trick needs) | both |
+| `KEY` | the hbbs public key (`/etc/aibot/rustdesk.pub`; hbbs never makes one with `/`, which the file-name trick needs: its `gen_sk` makes a new pair until the public half has none — `rustdesk-utils genkeypair` does not, so the server's key must only ever be hbbs' own) | both |
 | `PASSWORD` | the laptop's permanent password, 24 × `[A-Za-z0-9]` | both (client: clipboard only) |
 | `TOKEN` | 32 hex, 24 h, for the URLs and `/hello` | host |
 | `API` | `https://<domain>:8443` | host |

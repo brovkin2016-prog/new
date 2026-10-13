@@ -209,8 +209,11 @@ jobs:
                       return self.answer(403, "Эта команда устарела или неверна.")
                   if not LAPTOP_ID.fullmatch(str(body.get("id") or "")):
                       return self.answer(400, "bad id")
-                  with open(HELLO, "w", encoding="utf-8") as f:
-                      json.dump({"id": body["id"], "count": said()["count"] + 1}, f)
+                  # read before writing ("w" empties the file at once), and a whole file put in place in one go
+                  count = said()["count"] + 1
+                  with open(HELLO + ".tmp", "w", encoding="utf-8") as f:
+                      json.dump({"id": body["id"], "count": count}, f)
+                  os.replace(HELLO + ".tmp", HELLO)
                   self.answer(200, json.dumps({"ok": True, "id": body["id"]}), "application/json")
 
 
