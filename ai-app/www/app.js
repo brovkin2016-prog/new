@@ -1262,7 +1262,7 @@
       if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
       const t = await load();
       if (!t) return;
-      if (!t.can) { toast(NOT_ON, 5000); return; }
+      if (!t.can) { toast(t.note || NOT_ON, 5000); return; }
       sheet("🎭 Я в ролике", (box, close) => {
         const chips = el("div", { class: "chips", style: "margin:0 0 10px" });
         const grid = el("div", { class: "tpl-grid" });
@@ -1305,8 +1305,13 @@
         const wait = el("div", { class: "status", style: "margin:8px 0 14px" }, el("span", { class: "spin" }),
           el("span", { text: tpl.own ? "Загружаю ролик и ищу в нём лица…" : "Ищу лица в ролике…" }));
         box.append(tpl.thumb ? el("img", { class: "tpl-big", src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null, wait);
+        // a stream: the server says it is still looking (a minute for a clip it has not seen), then who is in it
+        const said = wait.querySelector("span:last-child");
         try {
-          found = await api("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id });
+          found = await stream("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id }, (ev) => {
+            if (ev.t === "status" && ev.text) said.textContent = ev.text;
+          });
+          if (found.t !== "done") throw new HttpError(200, found.text || "Не получилось найти лица в ролике.");
         } catch (e) {
           wait.replaceWith(el("p", { style: "margin:4px 0 10px", text: problem(e) }));
           return;
@@ -1349,7 +1354,7 @@
             : "Это мои фото, или люди на них согласны" })),
           go,
           el("div", { class: "muted", style: "font-size:13px;margin-top:8px", text: (found.note ? found.note + " " : "")
-            + "Обычно 2–6 минут. Ролик придёт сюда — его можно сохранить и отправить." }));
+            + "Ролик сервер делает сам, обычно 5–8 минут. Он придёт сюда — его можно сохранить и отправить." }));
       });
     }
     async function animate() {

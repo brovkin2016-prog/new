@@ -868,10 +868,11 @@
             () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""));
         if (!mine) {  // video from a photo: the owner's Hugging Face minutes, only for whom the owner allows
           box.append(el("div", { class: "row", style: "margin-top:10px" },
-            el("div", { class: "grow" }, "🎬 Видео из фото", el("small", { text: !(video && video.on) ? "Сначала подключите: «🎬 Видео из фото» выше в разделе."
-              : u.video ? "Включено: в «🖼 Фото» есть «🎬 Оживить»." : "Выключено: минуты Hugging Face общие — включайте тем, кому нужно." })),
-            el("button", { class: "toggle" + (u.video ? " on" : ""), disabled: !(video && video.on), onclick: () => {
-              close(); appOp({ op: "app_set", id: u.id, video: !u.video }, u.video ? "🎬 Видео из фото выключено" : "🎬 Видео из фото включено");
+            // «🎭 Я в ролике» is made on this server (no Hugging Face); «🖼 Оживить фото» needs its minutes too
+            el("div", { class: "grow" }, "🎬 Видео", el("small", { text: u.video ? "Включено: во вкладке «🎬 Видео» есть «🎭 Я в ролике»"
+              + (video && video.on ? " и «🖼 Оживить фото»." : ".") : "Выключено: ролик сервер делает несколько минут — включайте тем, кому нужно." })),
+            el("button", { class: "toggle" + (u.video ? " on" : ""), onclick: () => {
+              close(); appOp({ op: "app_set", id: u.id, video: !u.video }, u.video ? "🎬 Видео выключено" : "🎬 Видео включено");
             } })));
         }
         if (mine) {
