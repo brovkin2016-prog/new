@@ -195,14 +195,18 @@ function Main {
     try {
         if (-not (Test-Path -LiteralPath $desk)) { New-Item -ItemType Directory -Path $desk -Force | Out-Null }
         $lnk = Join-Path $desk ($ShortcutName + '.lnk')
+        # saved under a plain name first, then renamed: the shortcut maker may pass the path through the system's
+        # older code page, where a Russian name turns into «???» (the rename keeps it whole)
+        $tmp = Join-Path $desk 'FamilyRemote-shortcut.lnk'
         $shell = New-Object -ComObject WScript.Shell
-        $sc = $shell.CreateShortcut($lnk)
+        $sc = $shell.CreateShortcut($tmp)
         $sc.TargetPath = $exe
         $sc.Arguments = '--connect ' + $LaptopId
         $sc.WorkingDirectory = $dir
         $sc.IconLocation = $exe + ',0'
         $sc.Description = 'Подключиться к ноутбуку'
         $sc.Save()
+        Move-Item -LiteralPath $tmp -Destination $lnk -Force
         if (-not (Test-Path -LiteralPath $lnk)) { throw 'the shortcut file is not there after saving' }
     } catch {
         $why = $_.Exception.Message
