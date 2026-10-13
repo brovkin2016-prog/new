@@ -89,10 +89,11 @@ func newPairDepth(t *testing.T, creatorShare, joinerShare bool, loss float64, de
 	cam := NewVP8DataTunnelWithQueue(nil, cobf, quiet, depth)
 	share := NewVP8DataTunnelWithQueue(nil, cobf, quiet, depth)
 	pub := NewVP8DataTunnelWithQueue(nil, jobf, quiet, depth)
-	rnd := rand.New(rand.NewSource(7))
-	camW := &lossyWire{rnd: rnd, loss: loss, to: pub.HandleFrame}
-	shareW := &lossyWire{rnd: rnd, loss: loss, to: pub.HandleFrame}
-	pubW := &lossyWire{rnd: rnd, loss: loss, to: cam.HandleFrame}
+	// winger: each wire draws its losses from a source of its own (one shared by the three, each under its own lock,
+	// was a data race under -race)
+	camW := &lossyWire{rnd: rand.New(rand.NewSource(7)), loss: loss, to: pub.HandleFrame}
+	shareW := &lossyWire{rnd: rand.New(rand.NewSource(8)), loss: loss, to: pub.HandleFrame}
+	pubW := &lossyWire{rnd: rand.New(rand.NewSource(9)), loss: loss, to: cam.HandleFrame}
 	cam.WriteFrame, share.WriteFrame, pub.WriteFrame = camW.send, shareW.send, pubW.send
 
 	cmt := NewMultiTrackTunnel([]*VP8DataTunnel{cam})
