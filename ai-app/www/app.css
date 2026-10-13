@@ -237,6 +237,15 @@ select, .input { border: 1px solid var(--line); background: var(--card); border-
 .tpl.own { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-style: dashed; }
 .tpl.own .plus { font-size: 26px; }
 .tpl.own .name { position: static; background: none; color: var(--ink); text-align: center; padding: 0 6px; }
+.tpl .ppl { position: absolute; top: 6px; right: 6px; padding: 2px 6px; border-radius: 10px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, .55); }
+.who-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.who-row:first-child { border-top: 0; }
+.who-row .face { width: 56px; height: 56px; flex: none; border-radius: 50%; object-fit: cover; }
+.who-row .face.none { display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11px; line-height: 1.1;
+  color: var(--muted); border: 1px dashed var(--line); }
+.who-row .arrow { color: var(--muted); }
+.who-row .grow { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.pick-row .who { flex-basis: 100%; display: flex; align-items: center; justify-content: space-between; font-size: 13px; min-height: 30px; }
 .tpl-big { display: block; height: 180px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 12px; margin: 0 auto 6px; }
 .pick-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
 .pick-row img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; }

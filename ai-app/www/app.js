@@ -1243,7 +1243,7 @@
     const scroll = el("div", { class: "scroll" });
     let tpls = null;  // the server's list, asked once a visit
     const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "🎬" }), el("h2", { text: "Видео" }),
-      el("div", { text: "«Я в ролике» — вы в популярном ролике: танцы, кино, праздники. Нужно одно ваше фото. "
+      el("div", { text: "«Я в ролике» — вы и родные в ролике, как в Instagram: танцы, кино, праздники, или свой ролик — лица в нём станут вашими. "
         + "«Оживить фото» — фото начинает двигаться. Кнопки — внизу." }));
     const th = thread("video", scroll, empty);
     scroll.append(th.box);
@@ -1269,56 +1269,87 @@
         let theme = store.get("tplTheme", "");
         const fill = () => {
           chips.innerHTML = "";
-          for (const [k, v] of [["", "Все"]].concat(Object.entries(t.themes || {}))) {
-            if (k && !t.items.some((x) => x.theme === k)) continue;
+          const group = (x) => (x.people || 1) > 1;  // «Компанией»: the clips for two or three
+          for (const [k, v] of [["", "Все"], ["group", "👥 Компанией"]].concat(Object.entries(t.themes || {}))) {
+            if (k && !t.items.some((x) => (k === "group" ? group(x) : x.theme === k))) continue;
             chips.append(el("button", { class: "chip" + (k === theme ? " on" : ""), text: v, onclick: () => { theme = k; store.set("tplTheme", k); fill(); } }));
           }
           grid.innerHTML = "";
           grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(); } },
-            el("span", { class: "plus", text: "➕" }), el("span", { class: "name", text: "Свой шаблон" })));
-          for (const x of t.items.filter((x) => !theme || x.theme === theme)) {
+            el("span", { class: "plus", text: "➕" }), el("span", { class: "name", text: "Свой ролик" })));
+          for (const x of t.items.filter((x) => !theme || (theme === "group" ? group(x) : x.theme === theme))) {
+            const n = Math.min(3, Math.max(1, x.people || 1));
             grid.append(el("button", { class: "tpl", onclick: () => { close(); withPhoto({ id: x.id, title: x.title, thumb: x.thumb }); } },
-              x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null, el("span", { class: "name", text: x.title })));
+              x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null,
+              n > 1 ? el("span", { class: "ppl", text: "👥 " + n }) : null, el("span", { class: "name", text: x.title })));
           }
         };
         fill();
         box.append(t.items.length ? null : el("p", { class: "muted", style: "margin:0 0 10px", text: t.note || "Шаблонов пока нет." }),
           chips, grid, el("div", { class: "muted", style: "font-size:13px;margin-top:10px", text: t.note && t.items.length ? t.note
-            : "Ролик — 5 секунд. Бесплатных минут хватает примерно на 2 ролика в день на всю семью." }));
+            : "«Свой ролик» — любой ролик до 20 секунд, например сохранённый из Instagram или TikTok." }));
       });
     }
     async function ownClip() {
       const f = await pickFile("video/*", false);
       if (!f) return;
-      if (f.size > 40 * 1024 * 1024) { toast("Ролик больше 40 МБ — возьмите покороче (хватит 5–10 секунд)", 5000); return; }
-      withPhoto({ own: true, title: "Свой шаблон", clip: f });
+      if (f.size > 40 * 1024 * 1024) { toast("Ролик больше 40 МБ — возьмите покороче (до 20 секунд)", 5000); return; }
+      withPhoto({ own: true, title: "Свой ролик", clip: f });
     }
-    // the person's photo and their word that it is theirs, then the clip
+    // who is who: the server finds the people in the clip (each one's face), a photo is chosen for one or more of them
+    // (the rest stay as they are), with the word that the photos may be used; then the clip
     function withPhoto(tpl) {
-      let photo = null, agreed = false;
-      sheet("🎭 " + tpl.title, (box, close) => {
-        const pic = el("div", { class: "pick-row" });
+      const photos = [];
+      let agreed = false, found = null;
+      sheet("🎭 " + tpl.title, async (box, close) => {
+        const wait = el("div", { class: "status", style: "margin:8px 0 14px" }, el("span", { class: "spin" }),
+          el("span", { text: tpl.own ? "Загружаю ролик и ищу в нём лица…" : "Ищу лица в ролике…" }));
+        box.append(tpl.thumb ? el("img", { class: "tpl-big", src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null, wait);
+        try {
+          found = await api("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id });
+        } catch (e) {
+          wait.replaceWith(el("p", { style: "margin:4px 0 10px", text: problem(e) }));
+          return;
+        }
+        const n = found.faces.length;
+        const pics = el("div");
         const go = el("button", { class: "btn wide", text: "🎬 Сделать ролик", disabled: true, onclick: async () => {
           close();
-          const body = { image: await b64(await shrink(photo, 2048, 0.92)), consent: true };
-          if (tpl.own) body.clip = await b64(tpl.clip); else body.template = tpl.id;
-          await th.run("/api/tvideo", body, { role: "me", image: photo, text: "🎭 " + tpl.title });
+          const imgs = [];
+          for (let i = 0; i < n; i++) imgs.push(photos[i] ? await b64(await shrink(photos[i], 2048, 0.92)) : null);
+          const first = photos.find(Boolean);
+          const many = photos.filter(Boolean).length;
+          await th.run("/api/tvideo", { analysis: found.analysis, images: imgs, consent: true },
+            { role: "me", image: first, text: "🎭 " + tpl.title + (many > 1 ? " · 👥 " + many : "") });
         } });
         const check = el("input", { type: "checkbox", onchange: () => { agreed = check.checked; ready(); } });
-        const ready = () => { go.disabled = !(photo && agreed); };
-        const showPic = () => {
-          pic.innerHTML = "";
-          if (photo) pic.append(el("img", { src: urlOf(photo), alt: "" }), el("span", { class: "muted", text: "Фото выбрано" }));
-          pic.append(el("button", { class: "btn line", text: "📷 Снять", onclick: async () => { const f = await pickFile("image/*", true); if (f) { photo = f; showPic(); ready(); } } }),
-            el("button", { class: "btn line", text: "🖼 Из галереи", onclick: async () => { const f = await pickFile("image/*", false); if (f) { photo = f; showPic(); ready(); } } }));
+        const ready = () => { go.disabled = !(photos.some(Boolean) && agreed); };
+        const take = async (i, camera) => {
+          const f = await pickFile("image/*", camera);
+          if (f) { photos[i] = f; showPics(); ready(); }
         };
-        showPic();
-        box.append(tpl.thumb ? el("img", { class: "tpl-big", src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null,
-          el("p", { style: "margin:4px 0 8px", text: "Ваше фото: одно лицо, лучше по пояс или в полный рост, хороший свет." }),
-          pic,
-          el("label", { class: "agree" }, check, el("span", { text: "Это моё фото (или человек на фото согласен)" })),
+        const showPics = () => {
+          pics.innerHTML = "";
+          found.faces.forEach((p, i) => {
+            const row = el("div", { class: "who-row" },
+              el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }),
+              photos[i] ? el("img", { class: "face mine", src: urlOf(photos[i]), alt: "" }) : el("span", { class: "face none", text: "как есть" }),
+              el("div", { class: "grow" },
+                el("button", { class: "act", text: "📷 Снять", onclick: () => take(i, true) }),
+                el("button", { class: "act", text: "🖼 Фото", onclick: () => take(i, false) }),
+                photos[i] ? el("button", { class: "act", text: "✕", "aria-label": "Оставить как есть", onclick: () => { photos[i] = null; showPics(); ready(); } }) : null));
+            pics.append(row);
+          });
+        };
+        showPics();
+        const hint = n === 1 ? "Выберите своё фото: одно лицо, крупно, хороший свет."
+          : `В ролике ${n} человека. Выберите фото для одного или нескольких — остальные останутся как есть. На каждом фото одно лицо, крупно, хороший свет.`;
+        wait.replaceWith(el("p", { style: "margin:4px 0 8px", text: hint }), pics,
+          el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото (или человек на фото согласен)"
+            : "Это мои фото, или люди на них согласны" })),
           go,
-          el("div", { class: "muted", style: "font-size:13px;margin-top:8px", text: "Обычно 2–5 минут. Ролик придёт сюда — его можно сохранить и отправить." }));
+          el("div", { class: "muted", style: "font-size:13px;margin-top:8px", text: (found.note ? found.note + " " : "")
+            + "Обычно 2–6 минут. Ролик придёт сюда — его можно сохранить и отправить." }));
       });
     }
     async function animate() {
