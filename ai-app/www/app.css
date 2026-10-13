@@ -60,8 +60,9 @@ a { color: var(--accent); }
 .tab .ic { font-size: 22px; line-height: 1; filter: grayscale(1); opacity: .75; }
 .tab.on { color: var(--accent); font-weight: 600; }
 .tab.on .ic { filter: none; opacity: 1; }
+/* the owner's six tabs: «Управление» stays clear of «Видео» on a usual 393–412px phone too */
+@media (max-width: 420px) { .tabs.six .tab span:last-child { font-size: 11px; letter-spacing: -.2px; } }
 @media (max-width: 380px) {
-  .tabs.six .tab span:last-child { font-size: 11px; letter-spacing: -.2px; }
   .top { padding-left: 14px; padding-right: 6px; gap: 6px; }
   .icon-btn.pill { padding: 0 9px; gap: 3px; font-size: 13px; }
 }
@@ -111,6 +112,9 @@ a { color: var(--accent); }
 .act { min-height: 44px; padding: 8px 14px; font-size: 14px; border-radius: 22px; display: inline-flex; align-items: center; gap: 6px;
   background: var(--card); border: 1px solid var(--field); color: var(--ink); }
 .act:active { background: var(--accent-soft); }
+/* under the older answers: the same buttons and 44px, without the outline */
+.acts.quiet .act { border-color: transparent; background: none; color: var(--muted); padding: 8px 10px; }
+.acts.quiet .act:active { background: var(--accent-soft); }
 .typing::after { content: "▍"; animation: blink 1s steps(2) infinite; color: var(--accent); }
 @keyframes blink { 50% { opacity: 0; } }
 .status { color: var(--muted); font-size: 15px; display: flex; align-items: center; gap: 8px; }
@@ -146,8 +150,15 @@ video { width: 100%; border-radius: 12px; }
 .tool .ic { font-size: 22px; flex: none; }
 .tool > span:last-child { min-width: 0; overflow-wrap: break-word; }  /* a long word wraps inside its tile, never past its edge */
 .tool:active { background: var(--accent-soft); }
-@media (max-width: 380px) { .tool { padding: 10px 8px; gap: 6px; } .tool .ic { font-size: 20px; } }
-@media (max-width: 340px) { .tools { grid-template-columns: 1fr; } }  /* «Размер экрана: крупный»: one tile a row */
+/* narrow phones and wide fonts (Samsung's): the tiles take the screen's width less its 12px sides, a smaller icon and
+   gaps, and on the narrowest one tile a row («Размер экрана: крупный») — «Поздравление» stays one word */
+@media (max-width: 400px) {
+  .empty { padding-left: 0; padding-right: 0; }
+  .tool { padding: 10px 8px; gap: 6px; }
+  .tool .ic { font-size: 20px; }
+}
+@media (max-width: 380px) { .tool { font-size: 14px; } }
+@media (max-width: 340px) { .tools { grid-template-columns: 1fr; } }
 
 /* composer */
 .composer { flex: none; padding: 8px; background: var(--bg); border-top: 1px solid var(--line); }
@@ -193,7 +204,7 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
   background: var(--accent); color: var(--accent-ink); font-weight: 600; min-height: 48px; }
 .btn.wide { width: 100%; }
 .btn.soft { background: var(--accent-soft); color: var(--accent); }
-.btn.line { background: var(--card); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+.btn.line { background: var(--card); color: var(--ink); border: 1px solid var(--field); font-weight: 500; }  /* an edge like .act and .chip: --line is for dividers */
 .btn.off { background: var(--card); color: var(--muted); border: 1px dashed var(--field); font-weight: 500; }
 .btn.danger-fill { background: var(--danger); color: #fff; }
 .btn:disabled { opacity: .5; }
@@ -228,11 +239,12 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .preview .x { position: absolute; top: 8px; right: 8px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 0, 0, .55);
   color: #fff; font-size: 18px; }
 .chosen-q { font-weight: 600; margin: 4px 2px 8px; }
-.banner { margin: 0 4px 8px; padding: 10px 14px; border-radius: 14px; background: var(--accent-soft); color: var(--ink); font-size: 14px;
+.banner { margin: 0 4px 8px; padding: 10px 12px; border-radius: 14px; background: var(--accent-soft); color: var(--ink); font-size: 14px;
   display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
 .banner .grow { flex: 1 1 0; min-width: 0; font-size: 15px; }
 .banner-acts { display: flex; gap: 8px; flex: 1 1 100%; }
-.banner-acts .act { flex: 1 1 auto; justify-content: center; padding: 8px 10px; }
+/* the two next steps for the pages, on one line at 360px: each takes what its words need */
+.banner-acts .btn { flex: 1 1 auto; min-width: 0; padding: 10px 8px; font-size: 15px; }
 
 /* sheet, menu, toast, viewer */
 .sheet-bg { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: var(--scrim); z-index: 20; display: flex; align-items: flex-end;
@@ -253,9 +265,9 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .sheet .list button + button { border-top: 1px solid var(--line); }
 .sheet .list .ic { font-size: 22px; width: 30px; text-align: center; flex: none; }
 .menu-sec { font-size: 13px; font-weight: 600; color: var(--muted); padding: 14px 6px 4px; }
-.chat-row { cursor: pointer; }
+.chat-row { cursor: pointer; padding-left: 10px; }  /* every title on the same line as the current one's */
 .chat-row .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.chat-row.cur { box-shadow: inset 3px 0 0 var(--accent); padding-left: 10px; font-weight: 600; }
+.chat-row.cur { box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
 .chat-row small { font-weight: 400; }
 @keyframes up { from { transform: translateY(40px); opacity: .5; } }
 @keyframes fade { from { opacity: 0; } }

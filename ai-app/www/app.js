@@ -761,7 +761,9 @@
     if (m.audio) b.append(el("audio", { controls: true, src: urlOf(m.audio) }));
     wrap.append(b);
     // under an answer: the family sees no model's name and no usual mode — only «🌐 интернет», the grade, the checks
-    const lab = m.label && (S.me.panel ? m.label : m.label.split(" · ").slice(1).filter((x) => x && x !== S.me.modes.chat).join(" · "));
+    // in Учёба the grade is already on top and in the line over the answers: not a third time here
+    const lab = m.label && (S.me.panel ? m.label : m.label.split(" · ").slice(1)
+      .filter((x) => x && x !== S.me.modes.chat && !(thread === "study" && /класс|курс|Взрослый/.test(x))).join(" · "));
     if (lab) wrap.append(el("div", { class: "label", text: lab }));
     const act = (text, onclick) => el("button", { class: "act", text, onclick });
     const file = m.result || m.video || m.pdf;
@@ -773,14 +775,15 @@
         thread === "photo" && m.result ? act("✏️ Изменить ещё", () => S.views.photo.set(m.result)) : null,
         m.tpl && view && view.th ? act("🔁 С другими фото", () => whoIsWho(m.tpl.kind, m.tpl, view.th)) : null));
     } else if (m.role === "ai" && m.text && !m.err) {
-      // «Короче» and «Подробнее» are about the last answer: only under it
+      // «Короче» and «Подробнее» are about the last answer: only under it, and not while the next one is being written.
+      // Under the older answers the buttons stay (and stay 44px tall) but go quiet: no outline over a long talk.
       const all = S.msgs[thread] || [];
       let lastAi = null;
       for (let i = all.length - 1; i >= 0 && !lastAi; i--) if (all[i].role === "ai") lastAi = all[i];
-      wrap.append(el("div", { class: "acts" },
+      wrap.append(el("div", { class: "acts" + (m === lastAi ? "" : " quiet") },
         act("📋 Копировать", () => copyText(plain(m.text))),
         S.me.can.speak ? act("🔊 Прочитать вслух", () => speakMsg(m, b)) : null,
-        !m.note && m === lastAi && list && list.ask ? [act("✂️ Короче", () => list.follow("short")), act("➕ Подробнее", () => list.follow("more"))] : null));
+        !m.note && m === lastAi && !S.busy[thread] && list && list.ask ? [act("✂️ Короче", () => list.follow("short")), act("➕ Подробнее", () => list.follow("more"))] : null));
     } else if (m.err && list && list.canRetry(m)) {
       wrap.append(el("div", { class: "acts" }, act("🔄 Повторить", () => list.retry(m))));
     }
@@ -849,7 +852,9 @@
         const live = el("div", { class: "msg ai" });
         const b = el("div", { class: "bubble" });
         const content = el("div");
-        const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Думаю…" }));
+        // a picture, a clip or a PDF is first sent off; «Думаю…» is for words, until the server says what it is doing
+        const first = /\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf)$/.test(path) ? "Отправляю…" : "Думаю…";
+        const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: first }));
         b.append(content, status);
         if (path === "/api/tvideo" || path === "/api/animate") {
           b.append(el("div", { class: "live-note", text: "Можно свернуть приложение, но не закрывайте его — ролик придёт сюда." }));
@@ -859,7 +864,7 @@
         box.append(live);
         liveEl = live;
         api2.down();
-        let text = "", timer = null, said = "Думаю…", t0 = Date.now();
+        let text = "", timer = null, said = first, t0 = Date.now();
         const clock = setInterval(() => {
           const sec = Math.round((Date.now() - t0) / 1000);
           if (sec >= 5 && !status.classList.contains("hidden")) {
@@ -987,7 +992,7 @@
     let cur = store.get("chatCur", "main"), th = null;
     if (!chatsAll().some((c) => c.id === cur)) cur = chatsAll()[0].id;
     const attach = el("div", { class: "attach-row hidden" });
-    const chips = el("div", { class: "chips hidden", style: "padding:0 4px 8px" });
+    const chips = el("div", { class: "chips hidden", style: "padding:0 4px 8px;flex-wrap:wrap" });  // all three in sight, no sideways row
     const ideaHint = el("div", { class: "idea-hint hidden" });
     const ta = el("textarea", { rows: 1, placeholder: "Сообщение" });
     autoGrow(ta);
@@ -1145,8 +1150,9 @@
     if (cur !== "main") openChat(cur);
     return {
       root, redraw: () => th.redraw(),
-      sub: () => [chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) : "",
-        S.me.mode !== "chat" ? S.me.modes[S.me.mode] : ""].filter(Boolean).join(" · "),
+      // the answer mode first: a long chat title is the one cut short, never the mode
+      sub: () => [S.me.mode !== "chat" ? S.me.modes[S.me.mode] : "",
+        chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) : ""].filter(Boolean).join(" · "),
       buttons: () => [["🗂️ Чаты", "Чаты", chatsSheet], ["➕ Новый", "Новый чат", newChat]],
       attachImage(im) { image = im; sync(); },
       onShow: () => th.down(),
@@ -1174,6 +1180,8 @@
     let open = false;  // the grade and the modes shown in full above the answers
     const head = el("div");
     const gradeName = () => (GRADES.find((g) => g[0] === grade) || ["", ""])[1];
+    // with typed words the bubble keeps only the mode's sign: «✅ Реши: 2x + 5 = 17», not «✅ Решить: Реши: …»
+    const modeSign = () => STUDY_MODES[mode][0].split(" ")[0];
     const tail = () => (S.msgs.study.length ? el("div", { class: "tail big-actions next" },
       el("button", { class: "btn", text: "📷 Новое задание", onclick: () => shoot(true) }),
       el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => shoot(false) })) : null);
@@ -1218,7 +1226,7 @@
             el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи")));
         }
       }
-      ta.placeholder = mode === "essay" ? "Тема сочинения и требования" : S.msgs.study.length ? "Спросите про решение"
+      ta.placeholder = mode === "essay" ? "Тема сочинения" : S.msgs.study.length ? "Спросите про решение"
         : mode === "notes" || mode === "retell" ? "Текст или тема" : "Задание или вопрос";
     }
     async function shoot(camera) {
@@ -1227,7 +1235,7 @@
     }
     async function solve(im, text) {
       open = false;
-      const shown = STUDY_MODES[mode][0] + (text ? ": " + text : "");
+      const shown = text ? modeSign() + " " + text : STUDY_MODES[mode][0];
       const body = { mode, grade, text: text || "", context: [] };
       body.image = await b64(await shrink(im, 1800, 0.9));
       await th.run("/api/study", body, { role: "me", text: shown, image: im });
@@ -1243,7 +1251,7 @@
       open = false;
       const follow = S.msgs.study.length > 0 && !["essay", "notes", "retell"].includes(mode);
       th.run("/api/study", { mode: follow ? "ask" : mode, grade, text, context: follow ? context("study") : [] },
-        { role: "me", text: follow ? text : STUDY_MODES[mode][0] + ": " + text }).then(() => { open = false; drawHead(); });
+        { role: "me", text: follow ? text : modeSign() + " " + text }).then(() => { open = false; drawHead(); });
     }
     th.ask = async (req, mine) => {
       await th.run("/api/study", Object.assign({ mode: "ask", grade, context: context("study"), text: "" }, req), mine);
@@ -1255,7 +1263,7 @@
       // «🧹 Очистить» only when there is something to clear (thread.add() puts it on top with the first message)
       buttons: () => (S.msgs.study.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.study.length) { toast("Здесь пока пусто"); return; }
-        if (!(await confirmBox("Очистить решения?", "Очистить", true))) return;
+        if (!(await confirmBox("Очистить решения? Задания и ответы удалятся с телефона.", "Очистить", true))) return;
         await DB.clear("study");
         S.msgs.study = [];
         open = false;
@@ -1300,7 +1308,10 @@
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
       el("div", { class: "tools" }, QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
         tool("✍️ Своё: скажите или напишите", own), tool("⋯ Другое", more)))
+      // pages for a PDF being collected: their banner over the input is the next step (no second «📷» here)
+      : S.scan.length ? null
       : S.msgs.photo.length ? el("div", { class: "tail big-actions next", style: "grid-template-columns:1fr 1fr" },
+        el("div", { class: "menu-sec", style: "grid-column:1/-1;padding:4px 2px 0", text: "Новое фото" }),
         el("button", { class: "btn", text: "📷 Снять фото", onclick: () => pick(true) }),
         el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => pick(false) }),
         tplOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🎭 Я на фото", onclick: () => templatesSheet("photo", th) }) : null)
@@ -1308,6 +1319,7 @@
     const th = thread("photo", scroll, empty, chosen);
     scroll.append(th.box);
     const scanBar = el("div", { class: "banner hidden" });
+    const ownHint = el("div", { class: "idea-hint hidden" });  // «✍️ Своё»: what to say, above the input
     const ta = el("textarea", { rows: 1 });
     autoGrow(ta);
     const cam = el("button", { class: "round ghost", text: "📷", title: "Выбрать фото", onclick: () => menu("Выбрать фото", [
@@ -1315,34 +1327,41 @@
       tplOk() ? ["🎭", "Я на фото", () => templatesSheet("photo", th)] : null]) });
     const act = el("button", { class: "round main", text: "🎤" });
     const row = el("div", { class: "inrow" }, cam, ta, act);
-    root.append(scroll, el("div", { class: "composer" }, scanBar, row));
+    root.append(scroll, el("div", { class: "composer" }, scanBar, ownHint, row));
 
     function label(op) { return OP_NAMES[op] || emo(S.me.photo_ops[op] || S.me.ai_ops[op] || op); }
     function sync() {
       const typed = !!ta.value.trim();
       act.textContent = typed ? "➤" : "🎤";
       act.setAttribute("aria-label", typed ? "Отправить" : "Сказать голосом");
-      ta.placeholder = photo ? "Что сделать с фото?" : S.me.can.draw ? "Что нарисовать?" : "Сначала пришлите фото 📷";
+      // a placeholder stays one line (under ~22 letters); a longer «how» goes into ownHint above the input
+      ta.placeholder = photo ? "Что сделать с фото?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
+      if (!photo) ownHint.classList.add("hidden");
       scanBar.innerHTML = "";
       scanBar.classList.toggle("hidden", !S.scan.length);
       if (S.scan.length) {
+        // while pages are collected, this is the one place for the next step: the tail under the result steps aside.
+        // «Собрать PDF» is the filled one; its count is on the line just above (with it, it no longer fits one line at 360)
         scanBar.append(el("span", { class: "grow", text: `📑 Страниц для PDF: ${S.scan.length}` }),
           el("button", { class: "act", text: "✕", "aria-label": "Убрать страницы", onclick: async () => {
             if (!(await confirmBox(`Убрать собранные страницы (${S.scan.length})? PDF не соберётся.`, "Убрать", true))) return;
             S.scan = [];
             sync();
+            th.redraw();
           } }),
           el("div", { class: "banner-acts" },
-            el("button", { class: "act", text: "📷 Ещё страница", onclick: () => menu("Ещё страница", [
+            el("button", { class: "btn line", text: "📷 Ещё страница", onclick: () => menu("Ещё страница", [
               ["📷", "Снять", () => page(true)], ["🖼️", "Из галереи", () => page(false)]]) }),
-            el("button", { class: "act", text: "📄 Собрать PDF", onclick: makePdf })));
+            el("button", { class: "btn", text: "📄 Собрать PDF", onclick: makePdf })));
       }
     }
     ta.addEventListener("input", sync);
     act.onclick = () => (ta.value.trim() ? send() : dictate(row, (t) => { ta.value = t; send(); }));
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); send(); } });
     function own() {
-      ta.placeholder = "Например: сделай зиму, добавь шляпу";
+      ta.placeholder = "Например: сделай зиму";
+      ownHint.textContent = "Скажите 🎤 или напишите, что изменить: «сделай зиму», «добавь шляпу»";
+      ownHint.classList.remove("hidden");
       ta.focus();
     }
     function more() {
@@ -1364,17 +1383,24 @@
       if (rest.length) items.push("Ещё", ...rest.map(item));
       menu("Что сделать с фото", items);
     }
+    // while a job is running a new photo would wait unseen under «Думаю…»: say so before the phone's picker opens
+    const BUSY = "Подождите, предыдущее фото ещё делается";
     async function pick(camera) {
+      if (S.busy.photo) { toast(BUSY); return; }
       const f = await pickFile("image/*", camera);
       if (f) set(f);
     }
     async function page(camera) {  // one more page for the PDF: straight to «Скан»
+      if (S.busy.photo) { toast(BUSY); return; }
       const f = await pickFile("image/*", camera);
       if (!f) return;
       photo = f;
       runOp("scan");
     }
-    function set(im) { photo = im; show("photo"); sync(); th.redraw(); }
+    function set(im) {  // «✏️ Изменить ещё» and the viewer come here too
+      if (S.busy.photo) { show("photo"); toast(BUSY); return; }
+      photo = im; show("photo"); sync(); th.redraw();
+    }
     async function go(path, body, shown) {
       if (S.busy.photo) { toast("Подождите, предыдущее ещё делается"); return; }
       const im = photo;  // the job takes the photo: the next step is chosen anew
@@ -1384,7 +1410,7 @@
       refreshTop();
       if (im) body.image = await b64(await shrink(im, 3072, 0.92));
       const out = await th.run(path, body, { role: "me", image: im, text: shown });
-      if (out && out.op === "scan" && out.result) { S.scan.push(out.result); sync(); }
+      if (out && out.op === "scan" && out.result) { S.scan.push(out.result); sync(); th.redraw(); }
     }
     function runOp(op) {
       if (op === "animate") go("/api/animate", {}, label(op));
@@ -1397,6 +1423,7 @@
       if (!photo && !S.me.can.draw) { toast("Сначала пришлите фото: 📷 слева"); return; }
       ta.value = "";
       ta.style.height = "auto";
+      ownHint.classList.add("hidden");
       sync();
       if (photo) go("/api/photo_do", { text }, text);
       else go("/api/draw", { prompt: text }, "🎨 " + text);
@@ -1406,7 +1433,7 @@
       const pages = await Promise.all(S.scan.map((b) => b64(b)));
       const n = pages.length;
       const out = await th.run("/api/pdf", { pages }, { role: "me", text: `📄 Собрать PDF: ${n} стр.` });
-      if (out && out.pdf) { out.name = out.name || "scan.pdf"; S.scan = []; sync(); }
+      if (out && out.pdf) { out.name = out.name || "scan.pdf"; S.scan = []; sync(); th.redraw(); }
     }
     sync();
     th.redraw();
@@ -1418,6 +1445,8 @@
         if (!(await confirmBox("Удалить все готовые фото и картинки из списка?", "Очистить", true))) return;
         await DB.clear("photo");
         S.msgs.photo = [];
+        S.scan = [];  // the pages for a PDF go with the pictures: no banner over an empty screen
+        sync();
         th.redraw();
         refreshTop();
       }]] : []),
@@ -1434,7 +1463,7 @@
       off: "«Я в ролике» пока не включено — его включает владелец помощника.",
       hint: "Выберите ролик — потом покажете, кого в нём заменить на себя или родных. Подойдёт и свой ролик с телефона, до 20 секунд.",
       none: "Готовых роликов пока нет — загляните позже.", busy: "Подождите, ролик ещё делается",
-      foot: "Ролик будет готов примерно через 5–8 минут и появится здесь — его можно сохранить и отправить. Можно свернуть приложение, но не закрывайте его." },
+      foot: "Ролик будет готов обычно через несколько минут, не больше 8, и появится здесь — его можно сохранить и отправить. Можно свернуть приложение, но не закрывайте его." },
     photo: { title: "🎭 Я на фото", path: "/api/tphoto", go: "✨ Создать картинку", find: "🔎 Ищу лица на картинке…",
       off: "«Я на фото» пока не включено — его включает владелец помощника.",
       hint: "Выберите картинку — потом покажете, кого на ней заменить на себя или родных.",
@@ -1606,16 +1635,16 @@
           rows.append(el("div", { class: "who-row" },
             el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }), slot,
             el("div", { class: "who" }, el("b", { text: who }),
-              el("small", { text: photos[i] ? "✓ ваше фото" : n === 1 ? "нажмите «+ фото»" : "останется как есть" }),
+              el("small", { text: photos[i] ? "✓ ваше фото" : n === 1 ? "нажмите «+\u00a0фото»" : "останется как есть" }),
               kind === "video" && p.on ? el("small", { text: "на экране " + secs(Math.max(1, Math.round(p.on))) }) : null)));
         });
       };
       paintRows();
       const where = kind === "video" ? "В ролике" : "На картинке";
-      const hint = n === 1 ? "Нажмите «+ фото» и выберите своё фото: одно лицо, крупно, при хорошем свете."
-        : `${where} ${n} человека. Нажмите «+ фото» у тех, кого заменить, и выберите фото: одно лицо, крупно, при хорошем свете. Остальные останутся как есть.`;
+      const hint = n === 1 ? "Нажмите «+\u00a0фото» и выберите своё фото: одно лицо, крупно, при хорошем свете."
+        : `${where} ${n} человека. Нажмите «+\u00a0фото» у тех, кого заменить. Фото\u00a0— одно лицо, крупно, при хорошем свете.`;
       const goBtn = el("button", { class: "btn wide", text: T.go, onclick: async () => {
-        if (!photos.some(Boolean)) { why.textContent = "Нажмите «+ фото» и выберите хотя бы одно фото."; return; }
+        if (!photos.some(Boolean)) { why.textContent = "Нажмите «+\u00a0фото» и выберите хотя бы одно фото."; return; }
         if (!check.checked) { why.textContent = NO_TICK; return; }
         // the photos are made smaller first (a second or two on an old phone): the sheet stays, the button says so
         goBtn.disabled = true;
@@ -1637,13 +1666,15 @@
         const out = await th.run(T.path, { analysis: found.analysis, images, consent: true },
           { role: "me", image: first, text: "🎭 " + tpl.title + (many > 1 ? " · 👥 " + many : "") });
         if (out && !out.err && !tpl.own) {  // «🔁 С другими фото» under it: the same template once more
-          out.tpl = { kind, id: tpl.id, title: tpl.title };
+          out.tpl = { kind, id: tpl.id, title: tpl.title, thumb: tpl.thumb };  // the picture too: the second run looks like the first
           await DB.put(out);
           th.redraw();
         }
       } });
-      wait.replaceWith(el("p", { style: "margin:4px 0 8px", text: (found.note ? found.note + " " : "") + hint }), rows,
-        el("p", { class: "muted", style: "font-size:14px;margin:12px 0 0", text: T.foot }),
+      // how long it takes is read before the faces; the last thing over the sticky foot is a face row, so its fade hides
+      // nothing that is only said there
+      wait.replaceWith(el("p", { style: "margin:4px 0 6px", text: (found.note ? found.note + " " : "") + hint }),
+        el("p", { class: "muted", style: "font-size:14px;margin:0 0 8px", text: T.foot }), rows,
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото, или человек на фото согласен" : "Это мои фото, или люди на них согласны" })),
           why, goBtn));
@@ -1663,7 +1694,7 @@
       const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
         el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
       box.append(
-        feat(tv(), "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.",
+        feat(tv(), "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов обычно через несколько минут, не больше 8.",
           S.me.panel ? "Пока не работает — нажмите «🎭 Я в ролике» внизу, чтобы узнать почему." : "Пока не включено."),
         feat(an(), "an", "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
       return box;
@@ -1782,7 +1813,7 @@
         el("div", { class: "row" }, el("div", { class: "grow" }, "Вы вошли как", el("small", { text: me.name }))),
         el("div", { class: "row" }, el("div", { class: "grow" }, "Тема"), theme));
       if (Native && Native.version) {
-        appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия приложения", el("small", { text: Native.version() })),
+        appCard.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Версия", el("small", { text: Native.version() })),
           el("button", { class: "act", text: "Проверить обновление", onclick: () => Native.checkUpdate(true) })));
         // how the phone reaches the server: the owner's to know, not the family's
         const p = me.panel && Native.netInfo ? Native.netInfo() : "";
