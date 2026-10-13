@@ -8,6 +8,9 @@ Also asks the Hugging Face Spaces that put a person into a template for their AP
    python3 ai-app/server/templates_check.py ai-app/server/templates.json out/"""
 import json, os, re, subprocess, sys, time, urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from templates_faces import faces  # noqa: E402
+
 CAT, OUT = sys.argv[1], sys.argv[2]
 os.makedirs(OUT, exist_ok=True)
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
@@ -61,53 +64,6 @@ def probe(path):
     return float((js.get("format") or {}).get("duration") or 0), s.get("width"), s.get("height")
 
 
-YUNET = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
-         "https://huggingface.co/opencv/face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx")
-_det = []
-
-
-def detector():
-    """OpenCV's YuNet face finder (fetched once); None when it cannot be had — the count is then left out."""
-    if not _det:
-        try:
-            import cv2
-            path = f"{OUT}/yunet.onnx"
-            for url in YUNET:
-                if os.path.exists(path):
-                    break
-                try:
-                    urllib.request.urlretrieve(url, path)
-                except Exception as e:
-                    print("face finder from", url, str(e)[:120], flush=True)
-            _det.append(cv2.FaceDetectorYN.create(path, "", (480, 854), 0.75, 0.3, 50))
-        except Exception as e:
-            print("no face finder:", str(e)[:200], flush=True)
-            _det.append(None)
-    return _det[0]
-
-
-def faces(cut, seconds):
-    """How many people the clip shows: the most common face count over 5 frames (a tie goes to more), and each frame's."""
-    det = detector()
-    if det is None:
-        return None, []
-    import cv2
-    counts = []
-    for i in range(5):
-        img = f"{OUT}/f{i}.png"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(seconds * (i + 0.5) / 5), "-i", cut, "-frames:v", "1", img],
-                       capture_output=True)
-        im = cv2.imread(img) if os.path.exists(img) else None
-        if im is not None:
-            det.setInputSize((im.shape[1], im.shape[0]))
-            _, found = det.detect(im)
-            counts.append(0 if found is None else len(found))
-            os.remove(img)
-    if not counts:
-        return None, []
-    return max(set(counts), key=lambda n: (counts.count(n), n)), counts
-
-
 def check(t, seconds):
     tried = []
     for url in candidates(t["page"]):
@@ -133,14 +89,14 @@ def check(t, seconds):
                                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "96k", cut],
                                capture_output=True, text=True)
             ok = r.returncode == 0 and os.path.exists(cut) and probe(cut)[0] > seconds - 1.5
-            people, counts = faces(cut, seconds) if ok else (None, [])
+            people, counts, tallest = faces(cut, seconds, OUT) if ok else (None, [], 0)
             for p in (path, cut):
                 if os.path.exists(p):
                     os.remove(p)
             if ok and dur >= seconds - 0.5:
                 return {"id": t["id"], "ok": True, "url": final if "pexels.com/download" not in url else final,
                         "source": url, "bytes": size, "duration": round(dur, 1), "w": w, "h": h,
-                        "faces": people, "face_counts": counts, "tried": tried}
+                        "faces": people, "face_counts": counts, "face_h": tallest, "tried": tried}
             tried.append(f"{url} cut failed or too short ({dur:.1f} s): {r.stderr[-160:]}")
         except Exception as e:
             tried.append(f"{url} {str(e)[:120]}")
