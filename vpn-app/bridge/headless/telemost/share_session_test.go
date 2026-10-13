@@ -203,8 +203,6 @@ func (rig *shareRig) joinerUp(obf *tunnel.TunnelObfuscator, loss float64) {
 	rig.pub = pub
 	rig.pubW = &shareWire{rnd: rand.New(rand.NewSource(13)), loss: loss, to: rig.relay.handleVideoFrame}
 	pub.WriteFrame = rig.pubW.send
-	rig.camW.setTo(pub.HandleFrame)
-	rig.shareW.setTo(pub.HandleFrame)
 	jmt := rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{pub})
 	jmt.SetOnPeerRestart(func() { rig.joinerHeard.Add(1) })
 	jmt.Start(50, 20)
@@ -213,6 +211,10 @@ func (rig *shareRig) joinerUp(obf *tunnel.TunnelObfuscator, loss float64) {
 	rig.joiner.AddSession(pub)
 	rig.joiner.SetSendSessions(1)
 	rig.joiner.SetOnData(rig.end.take)
+	// winger: the creator's tracks reach the new track only once it is wired: the creator's writers would otherwise
+	// hand it frames while its tunnels are still being built (a data race)
+	rig.camW.setTo(pub.HandleFrame)
+	rig.shareW.setTo(pub.HandleFrame)
 	rig.joiner.SendData(tunnel.EncodeVP8ConfigFlags(50, 20, 2, tunnel.ConfigKCPEveryTrack))
 }
 

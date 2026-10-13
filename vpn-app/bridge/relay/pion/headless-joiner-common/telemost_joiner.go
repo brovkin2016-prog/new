@@ -563,9 +563,8 @@ func (j *TelemostHeadlessJoiner) initPC() {
 			if j.reliable {
 				queue = rtc.KCPCarrierQueueDepth
 			}
-			j.vp8tunnel = rtc.NewVP8DataTunnelWithQueue(j.sampleTrack, j.obf, j.logFn, queue)
-			j.vp8tunnel.AnswerKeyframeRequests() // winger: a keyframe when the call's server asks, even while busy
-			vp8tun := j.vp8tunnel
+			vp8tun := rtc.NewVP8DataTunnelWithQueue(j.sampleTrack, j.obf, j.logFn, queue)
+			vp8tun.AnswerKeyframeRequests() // winger: a keyframe when the call's server asks, even while busy
 			vp8tun.Start(j.vp8FPS, j.vp8Batch)
 			var active tunnel.DataTunnel = vp8tun
 			var flags byte
@@ -585,6 +584,9 @@ func (j *TelemostHeadlessJoiner) initPC() {
 				}
 				j.watchCreatorRestart(mt, kcpTun)
 			}
+			// winger: the creator's frames reach the tunnel (the track reader hands them to j.vp8tunnel) only once its
+			// reliable layer is wired; before, a frame could meet it half built
+			j.vp8tunnel = vp8tun
 			if !j.configAck.acknowledged() {
 				trackCount := 1
 				if j.dualTrack {
