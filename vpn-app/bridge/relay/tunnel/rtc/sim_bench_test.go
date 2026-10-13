@@ -47,6 +47,8 @@ import (
 //   CAP_STEPS=8,3,8    the cap changes during the measured time (equal parts; the warm-up at the first value)
 //   DELAY_STEPS=60,300 the delay likewise (order still kept: a frame never overtakes one sent before it)
 //   JITTER_MS=n        a random extra delay up to n ms on every frame (order kept)
+//   FEC=1              the creator sends with parity (as to a joiner that says it reads it): a parity frame at the
+//                      end of each answer, so a lost last frame needs no resend
 //   GATE_MS=n PLI=1    every n ms (about) the server re-binds each track and forwards nothing of it until a keyframe
 //                      passes, asking the sender for one (PLI) on the way and again each second while it waits, as
 //                      mediasoup, LiveKit and Jitsi do (whether Telemost's server does is not known); PLI=0: the
@@ -325,6 +327,7 @@ type simResult struct {
 	probeCtl, probeData       []time.Duration
 	probeSent                 int
 	gated                     int64         // GATE_MS: frames the server held back waiting for a keyframe
+	parity, rebuilt           uint64        // FEC: parity frames the creator sent, frames the joiner rebuilt
 	cpu                       time.Duration // process CPU time during the measured seconds
 	delivered                 int64         // payload bytes delivered (down and up) during them
 }
@@ -382,6 +385,9 @@ func simRun(t testing.TB, c simConfig) simResult {
 			ck.AddProbedSession(share, tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfigAck, nil))
 			jk.AddSession(pub)
 			jk.SetSendSessions(1)
+		}
+		if envInt("FEC", 0) == 1 {
+			ck.SetFEC(true)
 		}
 		creator, joiner = ck, jk
 	}
@@ -534,6 +540,7 @@ func simRun(t testing.TB, c simConfig) simResult {
 	r.dropsLoss = camL.dropped.Load() + shareL.dropped.Load() - loss0 - r.dropsFull
 	if ck != nil {
 		r.thrownCreator, r.thrownJoin = ck.droppedSegments.Load()-thrown0[0], jk.droppedSegments.Load()-thrown0[1]
+		r.parity, r.rebuilt = ck.fecParity.Load(), jk.fecRecovered.Load()
 	}
 
 	close(probeStop)
@@ -632,6 +639,9 @@ func TestSimBench(t *testing.T) {
 		perMB = r.cpu.Seconds() * 1000 / (float64(r.delivered) / 1e6)
 	}
 	t.Logf("CPU cores=%.2f ms/MB=%.1f (GOMAXPROCS=%d)", r.cpu.Seconds()/float64(c.secs), perMB, runtime.GOMAXPROCS(0))
+	if r.parity > 0 {
+		t.Logf("FEC parity frames %d, frames rebuilt %d", r.parity, r.rebuilt)
+	}
 	if r.gated > 0 {
 		t.Logf("GATE frames held back by the server waiting for a keyframe: %d", r.gated)
 	}

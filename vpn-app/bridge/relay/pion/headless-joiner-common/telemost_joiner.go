@@ -572,6 +572,7 @@ func (j *TelemostHeadlessJoiner) initPC() {
 			if j.reliable {
 				mt := rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{vp8tun})
 				kcpTun := rtc.NewMultiTrackKCPTunnel(mt, j.logFn)
+				flags = tunnel.ConfigFEC // winger: this side reads frames with parity; a creator that knows them adds them
 				active = kcpTun
 				j.logFn("telemost-joiner: per-track kcp reliability active over video tunnel")
 				if j.dualTrack {
@@ -579,7 +580,7 @@ func (j *TelemostHeadlessJoiner) initPC() {
 					// tracks then carry the download); this side keeps sending on the first, which every creator has
 					kcpTun.AddSession(vp8tun)
 					kcpTun.SetSendSessions(1)
-					flags = tunnel.ConfigKCPEveryTrack
+					flags |= tunnel.ConfigKCPEveryTrack
 					j.logFn("telemost-joiner: reliable data on both of the creator's tracks")
 				}
 				j.watchCreatorRestart(mt, kcpTun)

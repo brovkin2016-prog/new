@@ -160,6 +160,17 @@ func (r *SFURelay) SetKCPOnShare(on bool) {
 	r.syncShareSession()
 }
 
+// SetFEC (winger): the joiner says it reads frames with parity (tunnel.ConfigFEC), or, an older one, does not. The
+// reliable layer of each new joiner starts without them.
+func (r *SFURelay) SetFEC(on bool) {
+	r.mu.Lock()
+	kcptun, _ := r.delivered.(*rtc.MultiTrackKCPTunnel)
+	r.mu.Unlock()
+	if kcptun != nil {
+		kcptun.SetFEC(on)
+	}
+}
+
 // syncShareSession (winger): the reliable layer carries data on the screenshare track too — doubling what the joiner
 // downloads — only while that track is on and the joiner has a session for it; an older joiner would drop it. The
 // joiner's config (resent until acknowledged) and the data channel's opening come on different goroutines: one at a

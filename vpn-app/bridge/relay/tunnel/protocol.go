@@ -61,6 +61,11 @@ func EncodeVP8Config(fps, batch, trackCount int) []byte {
 // carry reliable data on its second (screenshare) track too; without it a second track would only carry keepalives.
 const ConfigKCPEveryTrack byte = 0x01
 
+// winger: ConfigFEC: the joiner reads the reliable layer's frames with parity (rtc's FEC frames), so the creator may
+// send them; an older creator ignores the bit and sends as before, an older joiner never sets it and never gets them.
+// (0x02 and 0x04 were used by experiments that were not taken; they stay unused.)
+const ConfigFEC byte = 0x10
+
 func EncodeVP8ConfigFlags(fps, batch, trackCount int, flags byte) []byte {
 	frame := EncodeVP8Config(fps, batch, trackCount)
 	if flags == 0 {

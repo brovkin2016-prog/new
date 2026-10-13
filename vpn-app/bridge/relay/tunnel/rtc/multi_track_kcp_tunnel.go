@@ -144,6 +144,8 @@ type trackKCPSession struct {
 
 	// winger: data waiting for room in it, least served connection first (kcp_gate.go)
 	gate sessionGate
+
+	fec *fecEncoder // winger: parity for what this session sends, once the far side reads it (fec.go; kcpMu held)
 }
 
 // ready: new connections may go on it.
@@ -233,9 +235,14 @@ func (s *trackKCPSession) output(buf []byte, size int) {
 		s.parent.heldResends.Add(1) // KCP tries again on its timer
 		return
 	}
-	segment := make([]byte, size+1)
-	segment[0] = kcpChannelReliable
-	copy(segment[1:], buf[:size])
+	var segment []byte
+	if enc := s.fec; enc != nil && size > fecConvLen {
+		segment = enc.frame(buf[:size], time.Now()) // winger: numbered for parity (fec.go)
+	} else {
+		segment = make([]byte, size+1)
+		segment[0] = kcpChannelReliable
+		copy(segment[1:], buf[:size])
+	}
 	s.parent.outputSegments.Add(1)
 	var place framePlace
 	ok := false
@@ -425,8 +432,42 @@ func (s *trackKCPSession) queue(frame []byte) {
 	const mss = kcpSegmentMTU - kcp.IKCP_OVERHEAD
 	if s.kcp.Send(frame) == 0 {
 		s.pending += max((len(frame)+mss-1)/mss, 1)
+		if s.fec != nil {
+			s.fec.queued(len(frame)) // winger: parity waits until all of it has gone out once
+		}
 	}
 	s.kcp.Update()
+}
+
+// setFEC (winger): send with parity (stream: this session's index) or plainly.
+func (s *trackKCPSession) setFEC(on bool, stream int) {
+	s.kcpMu.Lock()
+	defer s.kcpMu.Unlock()
+	switch {
+	case on && s.fec == nil && stream < fecMaxStreams:
+		s.fec = newFECEncoder(byte(stream))
+	case !on && s.fec != nil:
+		s.fec = nil
+	}
+}
+
+// fecReport (winger): the far side's count of this session's frames.
+func (s *trackKCPSession) fecReport(expected, received uint32) {
+	s.kcpMu.Lock()
+	if s.fec != nil {
+		s.fec.report(expected, received)
+	}
+	s.kcpMu.Unlock()
+}
+
+// sendParity (winger, kcpMu held): parity frames go after their group's data on the same track, never waiting for room.
+func (s *trackKCPSession) sendParity(frames [][]byte) {
+	for _, f := range frames {
+		s.parent.fecParity.Add(1)
+		if !s.vp8.TrySendData(f) {
+			s.parent.droppedSegments.Add(1)
+		}
+	}
 }
 
 func (s *trackKCPSession) input(segment []byte) [][]byte {
@@ -453,8 +494,12 @@ func (s *trackKCPSession) input(segment []byte) [][]byte {
 }
 
 func (s *trackKCPSession) update() {
+	busy := s.gate.hasWaiting() // winger: data waits for room: not an answer's end (asked first: the gate locks first)
 	s.kcpMu.Lock()
 	s.kcp.Update()
+	if s.fec != nil && !busy && s.fec.due(time.Now()) {
+		s.sendParity(s.fec.seal())
+	}
 	s.kcpMu.Unlock()
 }
 
@@ -485,6 +530,10 @@ type MultiTrackKCPTunnel struct {
 	currentWindow atomic.Int32
 	sendSessions  atomic.Int32 // winger: how many sessions this side sends on (0: all); the others only receive
 
+	fecOn      atomic.Bool            // winger: this side sends with parity (the far side said it reads it)
+	fecDec     map[uint32]*fecDecoder // winger: per conv, once the far side sends with parity (t.mu)
+	fecReports time.Time              // updateLoop only
+
 	probe          []byte       // winger: a frame the far side's relay takes as nothing new (AddProbedSession; t.mu)
 	lastFirstProbe time.Time    // updateLoop only
 	unanswered     atomic.Int64 // winger: see Unanswered
@@ -498,6 +547,8 @@ type MultiTrackKCPTunnel struct {
 	droppedSegments   atomic.Uint64
 	heldResends       atomic.Uint64
 	resentSegments    atomic.Uint64
+	fecParity         atomic.Uint64
+	fecRecovered      atomic.Uint64
 }
 
 func NewMultiTrackKCPTunnel(mt *MultiTrackTunnel, logFn func(string, ...any)) *MultiTrackKCPTunnel {
@@ -511,6 +562,7 @@ func newMultiTrackKCPTunnel(mt *MultiTrackTunnel, logFn func(string, ...any), tu
 		tuning:  tuning,
 		convMap: make(map[uint32]*trackKCPSession),
 		connPin: make(map[uint32]int),
+		fecDec:  make(map[uint32]*fecDecoder),
 		stopCh:  make(chan struct{}),
 		nudge:   make(chan struct{}, 1),
 	}
@@ -735,21 +787,37 @@ func (t *MultiTrackKCPTunnel) handleDecodedSegment(payload []byte) {
 		return
 	}
 
+	switch channel {
+	case kcpChannelFECData, kcpChannelFECParity:
+		t.handleFECFrame(channel, body)
+		return
+	case kcpChannelFECReport:
+		t.handleFECReport(body)
+		return
+	}
+
 	if len(body) < 4 {
 		return
 	}
 	conv := binary.LittleEndian.Uint32(body[0:4])
 	t.mu.Lock()
 	session := t.convMap[conv]
-	callback := t.onData
 	t.mu.Unlock()
+	t.inputKCP(session, body)
+}
+
+// inputKCP: one KCP output of the far side into its session; what that completes goes on to the relay.
+func (t *MultiTrackKCPTunnel) inputKCP(session *trackKCPSession, body []byte) {
 	if session == nil {
 		return
 	}
+	t.mu.Lock()
+	callback := t.onData
+	t.mu.Unlock()
 	t.inputSegments.Add(1)
 	session.lastIn.Store(time.Now().UnixNano())
 	if session.probed && session.heard.CompareAndSwap(false, true) && t.logFn != nil {
-		t.logFn("kcptunnel: session %d answered by the far side, in use", conv-kcpConvBase)
+		t.logFn("kcptunnel: session %d answered by the far side, in use", session.conv-kcpConvBase)
 	}
 	messages := session.input(body)
 	session.pump() // winger: acks may have made room
@@ -760,6 +828,101 @@ func (t *MultiTrackKCPTunnel) handleDecodedSegment(payload []byte) {
 	for _, message := range messages {
 		t.deliveredMessages.Add(1)
 		callback(message)
+	}
+}
+
+// handleFECFrame (winger): a data or parity frame of a far side that sends with parity. Data goes into its session at
+// once; a parity frame may rebuild lost data of its group, which then goes in the same way.
+func (t *MultiTrackKCPTunnel) handleFECFrame(channel byte, body []byte) {
+	stream, seq, shard, ok := parseFECData(body)
+	parity, isParity := parseFECParity(body)
+	if channel == kcpChannelFECParity {
+		stream, ok = parity.stream, isParity
+	}
+	if !ok {
+		return
+	}
+	conv := uint32(kcpConvBase) + uint32(stream)
+	t.mu.Lock()
+	session := t.convMap[conv]
+	dec := t.fecDec[conv]
+	if dec == nil && session != nil {
+		dec = newFECDecoder(conv, stream)
+		t.fecDec[conv] = dec
+	}
+	t.mu.Unlock()
+	if session == nil {
+		return
+	}
+	if channel == kcpChannelFECData {
+		dec.data(seq, shard)
+		segment := make([]byte, fecConvLen+len(shard))
+		binary.LittleEndian.PutUint32(segment, conv)
+		copy(segment[fecConvLen:], shard)
+		t.inputKCP(session, segment)
+		return
+	}
+	for _, segment := range dec.parity(parity.first, parity.n, parity.m, parity.j, parity.shard) {
+		t.fecRecovered.Add(1)
+		t.inputKCP(session, segment)
+	}
+}
+
+// handleFECReport (winger): the far side's count of what it got of one of our sessions.
+func (t *MultiTrackKCPTunnel) handleFECReport(body []byte) {
+	if len(body) < 5 {
+		return
+	}
+	t.mu.Lock()
+	var session *trackKCPSession
+	if i := int(body[0]); i < len(t.sessions) {
+		session = t.sessions[i]
+	}
+	t.mu.Unlock()
+	if session != nil {
+		session.fecReport(uint32(binary.BigEndian.Uint16(body[1:3])), uint32(binary.BigEndian.Uint16(body[3:5])))
+	}
+}
+
+// SetFEC (winger): send with parity on every session, now and added later. Only once the far side said it reads it
+// (tunnel.ConfigFEC): older programs would drop such frames.
+func (t *MultiTrackKCPTunnel) SetFEC(on bool) {
+	if t.fecOn.Swap(on) == on {
+		return
+	}
+	t.mu.Lock()
+	sessions := make([]*trackKCPSession, len(t.sessions))
+	copy(sessions, t.sessions)
+	t.mu.Unlock()
+	for i, session := range sessions {
+		session.setFEC(on, i)
+	}
+	if t.logFn != nil {
+		t.logFn("kcptunnel: parity (FEC) on=%v", on)
+	}
+}
+
+// sendFECReports (winger, updateLoop): tell a far side that sends with parity what we got of each of its sessions.
+func (t *MultiTrackKCPTunnel) sendFECReports(now time.Time) {
+	if now.Sub(t.fecReports) < fecReportEvery {
+		return
+	}
+	t.fecReports = now
+	t.mu.Lock()
+	if len(t.fecDec) == 0 || len(t.sessions) == 0 {
+		t.mu.Unlock()
+		return
+	}
+	decs := make([]*fecDecoder, 0, len(t.fecDec))
+	for _, dec := range t.fecDec {
+		decs = append(decs, dec)
+	}
+	vp8 := t.sessions[0].vp8
+	t.mu.Unlock()
+	for _, dec := range decs {
+		if expected, received := dec.takeReport(); expected > 0 {
+			vp8.TrySendData(encodeFECReport(dec.stream, expected, received))
+		}
 	}
 }
 
@@ -817,12 +980,16 @@ func (t *MultiTrackKCPTunnel) AddProbedSession(sub *VP8DataTunnel, probe []byte)
 func (t *MultiTrackKCPTunnel) addSession(sub *VP8DataTunnel, probed bool) *trackKCPSession {
 	window := int(t.currentWindow.Load())
 	t.mu.Lock()
-	conv := uint32(kcpConvBase + len(t.sessions))
+	index := len(t.sessions)
+	conv := uint32(kcpConvBase + index)
 	session := newTrackKCPSession(t, sub, conv, window)
 	session.probed = probed
 	t.sessions = append(t.sessions, session)
 	t.convMap[conv] = session
 	t.mu.Unlock()
+	if t.fecOn.Load() {
+		session.setFEC(true, index)
+	}
 	return session
 }
 
@@ -1020,6 +1187,7 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 				}
 			}
 			t.noteUnanswered(sessions, now)
+			t.sendFECReports(now)
 			// winger: segments received since the last tick leave acks for the next flush: the loop keeps its quick
 			// pace while they come in (they no longer nudge it each)
 			if in := t.inputSegments.Load(); in != lastInput {
@@ -1050,10 +1218,11 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 			}
 			ticks++
 			if common.Debug && ticks%kcpStatsEvery == 0 && t.logFn != nil {
-				t.logFn("kcptunnel: sessions=%d window=%d sent=%d delivered=%d out_segs=%d in_segs=%d raw_out=%d raw_in=%d dropped=%d resent=%d held=%d",
+				t.logFn("kcptunnel: sessions=%d window=%d sent=%d delivered=%d out_segs=%d in_segs=%d raw_out=%d raw_in=%d dropped=%d resent=%d held=%d fec_parity=%d fec_rebuilt=%d",
 					len(sessions), t.currentWindow.Load(), t.sentMessages.Load(), t.deliveredMessages.Load(),
 					t.outputSegments.Load(), t.inputSegments.Load(),
-					t.rawSent.Load(), t.rawReceived.Load(), t.droppedSegments.Load(), t.resentSegments.Load(), t.heldResends.Load())
+					t.rawSent.Load(), t.rawReceived.Load(), t.droppedSegments.Load(), t.resentSegments.Load(), t.heldResends.Load(),
+					t.fecParity.Load(), t.fecRecovered.Load())
 				snmp := kcp.DefaultSnmp.Copy()
 				t.logFn("kcptunnel: kcp_out=%d kcp_in=%d retrans=%d fastretrans=%d lost=%d repeat=%d",
 					snmp.OutSegs, snmp.InSegs, snmp.RetransSegs, snmp.FastRetransSegs, snmp.LostSegs, snmp.RepeatSegs)
