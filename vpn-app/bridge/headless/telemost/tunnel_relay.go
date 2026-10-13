@@ -226,6 +226,7 @@ func (r *SFURelay) Init(iceServers []webrtc.ICEServer) error {
 			if r.tun == nil {
 				log.Println("[relay] starting VP8 publish tunnel on pub PC connected")
 				r.tun = rtc.NewVP8DataTunnelWithQueue(r.sampleTrack, r.obf, log.Printf, rtc.KCPCarrierQueueDepth)
+				r.tun.AnswerKeyframeRequests() // winger: as the screenshare track below already does
 				r.tun.Start(0, 0)
 				r.tunFired = false
 				r.mt = rtc.NewMultiTrackTunnel([]*rtc.VP8DataTunnel{r.tun})

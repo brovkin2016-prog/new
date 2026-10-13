@@ -564,6 +564,7 @@ func (j *TelemostHeadlessJoiner) initPC() {
 				queue = rtc.KCPCarrierQueueDepth
 			}
 			j.vp8tunnel = rtc.NewVP8DataTunnelWithQueue(j.sampleTrack, j.obf, j.logFn, queue)
+			j.vp8tunnel.AnswerKeyframeRequests() // winger: a keyframe when the call's server asks, even while busy
 			vp8tun := j.vp8tunnel
 			vp8tun.Start(j.vp8FPS, j.vp8Batch)
 			var active tunnel.DataTunnel = vp8tun
@@ -787,7 +788,7 @@ func (j *TelemostHeadlessJoiner) handleMessage(raw []byte) {
 		soMap, _ := so.(map[string]interface{})
 		sdp, _ := soMap["sdp"].(string)
 		pcSeq, _ := soMap["pcSeq"].(float64)
-		j.logFn("telemost-joiner: <- subscriberSdpOffer pcSeq=%d len=%d", int(pcSeq), len(sdp))
+		j.logFn("telemost-joiner: <- subscriberSdpOffer pcSeq=%d len=%d bitrate: %s", int(pcSeq), len(sdp), tmapi.BitrateHints(sdp)) // winger
 		j.ack(uid)
 		j.handleSubOffer(sdp, int(pcSeq))
 		return
@@ -796,7 +797,7 @@ func (j *TelemostHeadlessJoiner) handleMessage(raw []byte) {
 	if pa, ok := msg["publisherSdpAnswer"]; ok {
 		paMap, _ := pa.(map[string]interface{})
 		sdp, _ := paMap["sdp"].(string)
-		j.logFn("telemost-joiner: <- publisherSdpAnswer %d bytes", len(sdp))
+		j.logFn("telemost-joiner: <- publisherSdpAnswer %d bytes, bitrate: %s", len(sdp), tmapi.BitrateHints(sdp)) // winger
 		j.handlePubAnswer(sdp)
 		return
 	}

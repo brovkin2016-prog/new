@@ -47,6 +47,10 @@ import (
 //   CAP_STEPS=8,3,8    the cap changes during the measured time (equal parts; the warm-up at the first value)
 //   DELAY_STEPS=60,300 the delay likewise (order still kept: a frame never overtakes one sent before it)
 //   JITTER_MS=n        a random extra delay up to n ms on every frame (order kept)
+//   GATE_MS=n PLI=1    every n ms (about) the server re-binds each track and forwards nothing of it until a keyframe
+//                      passes, asking the sender for one (PLI) on the way and again each second while it waits, as
+//                      mediasoup, LiveKit and Jitsi do (whether Telemost's server does is not known); PLI=0: the
+//                      camera tracks ignore the requests (the screenshare's sink always answered them)
 //
 // Besides the goodput it reports frames per second on every track, the link's drops (random loss apart from a full
 // queue), segments the reliable layer could not queue on the carrier, KCP's resends by cause (timer, later acks,
@@ -100,6 +104,43 @@ type simLink struct {
 	dropped     atomic.Int64
 	droppedFull atomic.Int64 // of dropped: the queue was full (the rest: random loss)
 	sentBytes   atomic.Int64
+
+	// winger: GATE_MS (see above)
+	gateEvery time.Duration
+	nextGate  time.Time
+	unsynced  bool
+	lastPLI   time.Time
+	onPLI     func()
+	gated     atomic.Int64
+}
+
+// simKeyframe: a VP8 frame whose first byte's lowest bit (P) is 0: the tunnel's keepalives.
+func simKeyframe(frame []byte) bool { return len(frame) > 0 && frame[0]&0x01 == 0 }
+
+// heldBack (l.mu held): the server waits for a keyframe on this track and holds the frame back (GATE_MS).
+func (l *simLink) heldBack(now time.Time, frame []byte) bool {
+	if l.gateEvery <= 0 {
+		return false
+	}
+	if l.nextGate.IsZero() {
+		l.nextGate = now.Add(time.Duration(l.rnd.Int63n(int64(l.gateEvery))))
+	}
+	if now.After(l.nextGate) {
+		l.unsynced, l.lastPLI = true, time.Time{}
+		l.nextGate = now.Add(l.gateEvery)
+	}
+	if l.unsynced && simKeyframe(frame) {
+		l.unsynced = false
+	}
+	if !l.unsynced {
+		return false
+	}
+	if now.Sub(l.lastPLI) >= time.Second && l.onPLI != nil {
+		l.lastPLI = now
+		time.AfterFunc(l.delay, l.onPLI)
+	}
+	l.gated.Add(1)
+	return true
 }
 
 // simRTPOverhead: what an RTP packet carries on the wire besides its payload: RTP header 12, header extension 8
@@ -180,6 +221,10 @@ func (l *simLink) send(frame []byte) error {
 		l.dropped.Add(1)
 		return nil
 	}
+	if l.heldBack(now, frame) {
+		l.mu.Unlock()
+		return nil
+	}
 	depart, ok := l.queueAt(now, len(frame)+40)
 	if !ok {
 		l.mu.Unlock()
@@ -199,6 +244,10 @@ func (l *simLink) sendRTP(frame []byte) error {
 	l.sent.Add(1)
 	now := time.Now()
 	l.mu.Lock()
+	if l.heldBack(now, frame) {
+		l.mu.Unlock()
+		return nil
+	}
 	pkts := l.rtp.Packetize(frame, 1)
 	whole, full, repair := len(pkts) > 0, false, false
 	last := now
@@ -275,6 +324,7 @@ type simResult struct {
 	packets, repaired         int64  // the creator's RTP packets (PKT=1), its frames the call's server repaired (NACK_MS)
 	probeCtl, probeData       []time.Duration
 	probeSent                 int
+	gated                     int64         // GATE_MS: frames the server held back waiting for a keyframe
 	cpu                       time.Duration // process CPU time during the measured seconds
 	delivered                 int64         // payload bytes delivered (down and up) during them
 }
@@ -296,6 +346,21 @@ func simRun(t testing.TB, c simConfig) simResult {
 	pubL := newSimLink(3, c.loss, cap0, delay0, cam.HandleFrame)
 	links := []*simLink{camL, shareL, pubL}
 	cam.WriteFrame, share.WriteFrame, pub.WriteFrame = camL.send, shareL.send, pubL.send
+	if gate := time.Duration(envInt("GATE_MS", 0)) * time.Millisecond; gate > 0 {
+		answer := envInt("PLI", 1) == 1
+		camL.gateEvery, shareL.gateEvery, pubL.gateEvery = gate, gate, gate
+		shareL.onPLI = func() { share.RequestKeyframe() }
+		camL.onPLI = func() {
+			if answer {
+				cam.RequestKeyframe()
+			}
+		}
+		pubL.onPLI = func() {
+			if answer {
+				pub.RequestKeyframe()
+			}
+		}
+	}
 
 	cmt := NewMultiTrackTunnel([]*VP8DataTunnel{cam})
 	cmt.Start(c.fps, c.batch)
@@ -464,6 +529,7 @@ func simRun(t testing.TB, c simConfig) simResult {
 		early: snmp1.EarlyRetransSegs - snmp0.EarlyRetransSegs, repeat: snmp1.RepeatSegs - snmp0.RepeatSegs,
 		packets:  camL.packets.Load() + shareL.packets.Load() - pkts0,
 		repaired: camL.repaired.Load() + shareL.repaired.Load() - rep0,
+		gated:    camL.gated.Load() + shareL.gated.Load() + pubL.gated.Load(),
 		cpu:      cpu, delivered: total + upTotal}
 	r.dropsLoss = camL.dropped.Load() + shareL.dropped.Load() - loss0 - r.dropsFull
 	if ck != nil {
@@ -566,4 +632,7 @@ func TestSimBench(t *testing.T) {
 		perMB = r.cpu.Seconds() * 1000 / (float64(r.delivered) / 1e6)
 	}
 	t.Logf("CPU cores=%.2f ms/MB=%.1f (GOMAXPROCS=%d)", r.cpu.Seconds()/float64(c.secs), perMB, runtime.GOMAXPROCS(0))
+	if r.gated > 0 {
+		t.Logf("GATE frames held back by the server waiting for a keyframe: %d", r.gated)
+	}
 }

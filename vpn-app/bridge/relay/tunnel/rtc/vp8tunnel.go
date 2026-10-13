@@ -31,6 +31,9 @@ const (
 	paceDriftMax          = 20 * time.Second
 
 	idleSpinTicks = 40
+
+	// winger: a browser's encoder makes at most one keyframe per 300 ms however often it is asked
+	keyframeMinInterval = 300 * time.Millisecond
 )
 
 type VP8DataTunnel struct {
@@ -59,6 +62,13 @@ type VP8DataTunnel struct {
 	queued       departures
 	urgentQueued departures
 
+	// winger: a keyframe the call's server asked for (PLI/FIR), sent ahead of the queued data
+	keyframeWanted atomic.Bool
+	keyframeNudge  chan struct{}
+	lastKeyframe   atomic.Int64
+	keyframeAsked  atomic.Uint64
+	keyframeSent   atomic.Uint64
+
 	OnData        func([]byte)
 	OnClose       func()
 	OnPeerRestart func()
@@ -86,6 +96,7 @@ func NewVP8DataTunnelWithQueue(track *webrtc.TrackLocalStaticSample, obf *tunnel
 		sendQueue:       make(chan []byte, queueDepth),
 		urgent:          make(chan []byte, urgentQueueDepth),
 		cfgChan:         make(chan struct{}, 1),
+		keyframeNudge:   make(chan struct{}, 1),
 		fps:             defaultVP8FPS,
 		batch:           defaultVP8Batch,
 		keepaliveMin:    keepaliveIdleMin,
@@ -242,7 +253,36 @@ func (t *VP8DataTunnel) Start(fps, batch int) {
 	go t.writerLoop()
 }
 
+// RequestKeyframe (winger): the call's server asked this track for a picture (a PLI or FIR). A keepalive is a VP8
+// keyframe, and every version of the far side reads it as a keepalive; but a busy writer sends only interframes, and a
+// server that waits for a keyframe before it forwards a track (a new or re-bound subscriber) would hold everything
+// back until the tunnel fell idle. So one goes out at the next tick, ahead of the queued data. False: too soon after
+// the last keyframe, as a browser would ignore it too.
+func (t *VP8DataTunnel) RequestKeyframe() bool {
+	t.keyframeAsked.Add(1)
+	if last := t.lastKeyframe.Load(); last != 0 && time.Since(time.Unix(0, last)) < keyframeMinInterval {
+		return false
+	}
+	t.keyframeWanted.Store(true)
+	select {
+	case t.keyframeNudge <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+// AnswerKeyframeRequests (winger): the call server's keyframe requests for this tunnel's track (read by
+// DrainSenderRTCP) come to RequestKeyframe while the tunnel runs.
+func (t *VP8DataTunnel) AnswerKeyframeRequests() {
+	if t.track != nil {
+		keyframeTargets.Store(webrtc.TrackLocal(t.track), t)
+	}
+}
+
 func (t *VP8DataTunnel) Stop() {
+	if t.track != nil {
+		keyframeTargets.CompareAndDelete(webrtc.TrackLocal(t.track), t)
+	}
 	if !t.running.CompareAndSwap(true, false) {
 		return
 	}
@@ -323,6 +363,7 @@ func (t *VP8DataTunnel) writerLoop() {
 			n := t.sentFrames.Add(1)
 			if isKeepalive {
 				t.keepaliveFrames.Add(1)
+				t.lastKeyframe.Store(time.Now().UnixNano())
 			}
 			if common.Debug && (n <= 5 || n%500 == 0) {
 				keepalives := t.keepaliveFrames.Load()
@@ -356,6 +397,12 @@ func (t *VP8DataTunnel) writerLoop() {
 				case <-drift.C:
 					repace()
 				case <-ticker.C:
+					if t.keyframeWanted.Swap(false) {
+						emit(t.obf.EncodeKeepalive(keepalivePad), true)
+						t.keyframeSent.Add(1)
+						idleTicks = 0
+						continue
+					}
 					select {
 					case data := <-t.urgent:
 						t.urgentQueued.took()
@@ -424,6 +471,20 @@ func (t *VP8DataTunnel) writerLoop() {
 				emit(t.obf.EncodeKeepalive(keepalivePad), true)
 				keepaliveEvery, keepalivePad = t.nextKeepalive(sampleInterval)
 				idle.Reset(time.Duration(keepaliveEvery) * sampleInterval)
+			case <-t.keyframeNudge:
+				if t.keyframeWanted.Swap(false) {
+					if !idle.Stop() {
+						select {
+						case <-idle.C:
+						default:
+						}
+					}
+					idleTicks = 0
+					emit(t.obf.EncodeKeepalive(keepalivePad), true)
+					t.keyframeSent.Add(1)
+					keepaliveEvery, keepalivePad = t.nextKeepalive(sampleInterval)
+					idle.Reset(time.Duration(keepaliveEvery) * sampleInterval)
+				}
 			}
 		}
 		ticker.Stop()

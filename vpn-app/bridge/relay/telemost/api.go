@@ -132,6 +132,44 @@ func MungeSDPAddVideoContent(sdp string) string {
 	return strings.Join(out, "\r\n")
 }
 
+// BitrateHints (winger): what an SDP of the call's server says about bitrate and frame rate — its b= lines (AS, TIAS)
+// and its x-google-*, max-fr and max-fs codec parameters — on one line for the journal, "none" when it says nothing.
+// Only logged: nothing here encodes video to obey them, but they show what the server means to allow a track.
+func BitrateHints(sdp string) string {
+	var hints []string
+	seen := map[string]bool{}
+	add := func(h string) {
+		if !seen[h] {
+			seen[h] = true
+			hints = append(hints, h)
+		}
+	}
+	media := "session"
+	for _, line := range strings.Split(strings.ReplaceAll(sdp, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "m="):
+			if f := strings.Fields(line[2:]); len(f) > 0 {
+				media = f[0]
+			}
+		case strings.HasPrefix(line, "b="):
+			add(media + " " + line)
+		case strings.HasPrefix(line, "a=fmtp:"):
+			_, params, _ := strings.Cut(line, " ")
+			for _, p := range strings.Split(params, ";") {
+				p = strings.TrimSpace(p)
+				if strings.HasPrefix(p, "x-google-") || strings.HasPrefix(p, "max-fr=") || strings.HasPrefix(p, "max-fs=") {
+					add(media + " " + p)
+				}
+			}
+		}
+	}
+	if len(hints) == 0 {
+		return "none"
+	}
+	return strings.Join(hints, ", ")
+}
+
 func SlotsConfigBindings(v interface{}) []SlotBindEvent {
 	m, ok := v.(map[string]interface{})
 	if !ok {

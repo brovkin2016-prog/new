@@ -345,7 +345,7 @@ func (b *Bridge) handleMessage(raw []byte) {
 	if pa, ok := msg["publisherSdpAnswer"]; ok {
 		paMap, _ := pa.(map[string]interface{})
 		sdp, _ := paMap["sdp"].(string)
-		log.Printf("[tm-ws] <- publisherSdpAnswer %d bytes", len(sdp))
+		log.Printf("[tm-ws] <- publisherSdpAnswer %d bytes, bitrate: %s", len(sdp), tmapi.BitrateHints(sdp)) // winger
 		if err := b.relay.SetPubAnswer(sdp); err != nil {
 			log.Printf("[tm-ws]    error: %v", err)
 			return
@@ -359,7 +359,7 @@ func (b *Bridge) handleMessage(raw []byte) {
 		sdp, _ := soMap["sdp"].(string)
 		pcSeq, _ := soMap["pcSeq"].(float64)
 		b.subSeq = int(pcSeq)
-		log.Printf("[tm-ws] <- subscriberSdpOffer pcSeq=%d", b.subSeq)
+		log.Printf("[tm-ws] <- subscriberSdpOffer pcSeq=%d, bitrate: %s", b.subSeq, tmapi.BitrateHints(sdp)) // winger
 		b.ack(uid)
 		answer, err := b.relay.SetSubOffer(sdp)
 		if err != nil {
