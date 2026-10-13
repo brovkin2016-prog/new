@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,6 +48,8 @@ type Engine struct {
 	relay     *Relay
 	probePort int
 	runDone   chan struct{} // closed when the latest run has ended
+	pinging   atomic.Bool   // PingAll at work
+	pingedAll atomic.Int64  // when it last finished (unix seconds)
 }
 
 func NewEngine(st *Store, dataDir, relayPath string, own []string, tun bool) *Engine {
@@ -284,6 +287,7 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 			e.mu.Lock()
 			e.status.PingMs = ms
 			e.mu.Unlock()
+			e.st.SetPing(p.Link, ms)
 			Logf("ping %d ms", ms)
 			return nil
 		}
@@ -326,7 +330,11 @@ func (e *Engine) watch(g int) error {
 		ms := Ping(e.probePort, 10*time.Second)
 		e.mu.Lock()
 		e.status.PingMs = ms
+		p := e.profile
 		e.mu.Unlock()
+		if p != nil {
+			e.st.SetPing(p.Link, ms)
+		}
 		if ms == 0 {
 			failed++
 			Logf("ping failed")
@@ -546,10 +554,45 @@ func (e *Engine) PingNow() {
 	}
 	ms := Ping(e.probePort, 10*time.Second)
 	e.mu.Lock()
+	p := e.profile
 	if e.gen == g && e.wanted {
 		e.status.PingMs = ms
 	}
 	e.mu.Unlock()
+	if p != nil {
+		e.st.SetPing(p.Link, ms)
+	}
+}
+
+// PingAll: the response time of every server that is not in use now, as the phone does it when its screen opens (at
+// most once a minute): each through a short-lived connection of its own, past the VPN, one after another in the
+// background. A bridge keeps the one it had when it was last on (it would have to get into its call to be asked).
+func (e *Engine) PingAll() {
+	if time.Since(time.Unix(e.pingedAll.Load(), 0)) < time.Minute || !e.pinging.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer func() { e.pingedAll.Store(time.Now().Unix()); e.pinging.Store(false) }()
+		for _, p := range e.st.Profiles() {
+			st := e.Status()
+			if p.Bridge || st.Phase == "on" && st.Active == p.Link {
+				continue
+			}
+			best := 0
+			var b Box
+			port := FreePort()
+			if b.Start(Config(EngineOptions{Profile: p, ProbePort: port})) == nil {
+				for i := 0; i < 2; i++ {
+					if ms := Ping(port, 6*time.Second); ms > 0 && (best == 0 || ms < best) {
+						best = ms
+					}
+				}
+				b.Stop()
+			}
+			e.st.SetPing(p.Link, best)
+			Logf("ping «%s»: %d ms (a separate test connection)", p.Name, best)
+		}
+	}()
 }
 
 // Rates: bytes a second down and up through the VPN now.

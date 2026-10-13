@@ -95,6 +95,7 @@ public class MainActivity extends Activity implements State.Listener {
         avatar.refresh(Profile.chosen(this));
         Updater.check(this, false);
         BridgeSync.run(this, false);  // the owner's bridge, kept ready (nobody else gets one)
+        Speed.pingAll(this, () -> runOnUiThread(this::changed));  // every server's response time
         Diag.upload(this, false);  // the journal to the family server (it keeps the owner's only)
     }
 
@@ -603,6 +604,11 @@ public class MainActivity extends Activity implements State.Listener {
                         : "Нажмите, чтобы включить через этот сервер";
                 if (i == cur) edge = dark ? 0xFF3B4556 : 0xFFD1D5DB;
             }
+            // the response time: live for the one in use, else its last check (a bridge's: when it was last on)
+            String pg = on && i == act && State.phase == State.Phase.ON && State.pingMs > 0 ? "⏱ отклик " + State.pingMs + " мс"
+                    : Speed.lastPing(this, p);
+            if (pg == null && p.bridge) pg = "⏱ отклик — когда мост включён";
+            if (pg != null) note += "\n" + pg;
             String sp = Speed.last(this, p);
             if (sp != null) note += "\n" + sp;
             TextView n = connNotes.get(i);

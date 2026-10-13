@@ -42,6 +42,7 @@ type connView struct {
 	Chosen  bool   `json:"chosen"`
 	Active  bool   `json:"active"`
 	Speed   string `json:"speed,omitempty"` // the last speed check, with its time
+	Ping    string `json:"ping,omitempty"`  // the last response time, with its time
 }
 
 // activeIndex: the row of the connection in use now (the chosen one, or the one Winger moved to by itself).
@@ -83,7 +84,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		conns, name := []connView{}, ""
 		for i, p := range all {
 			c := connView{Name: p.Name, Bridge: p.Bridge, Service: p.Service(), Chosen: i == cur,
-				Active: status.Phase != "off" && status.Active == p.Link, Speed: s.Speeds[p.Link]}
+				Active: status.Phase != "off" && status.Active == p.Link, Speed: s.Speeds[p.Link], Ping: s.Pings[p.Link]}
 			if c.Active {
 				name = p.Name
 			}
@@ -197,6 +198,10 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 			return
 		}
 		reply(w, map[string]any{"line": line})
+	})
+	mux.HandleFunc("/api/pingall", func(w http.ResponseWriter, r *http.Request) {
+		eng.PingAll()
+		reply(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
 		eng.PingNow()

@@ -49,7 +49,7 @@ public final class VpnSvc extends VpnService {
     private static final String TAG = "AIVPN";
     private static final String CHANNEL = "vpn";
     private static final int NOTE_ID = 1;
-    private static final String PING_URL = "http://cp.cloudflare.com/generate_204";
+    static final String PING_URL = "http://cp.cloudflare.com/generate_204";
 
     static volatile int socksPort;  // the client's local port while the VPN is on (the app's own update check uses it)
 
@@ -908,6 +908,8 @@ public final class VpnSvc extends VpnService {
         }
         State.pingMs = best;
         State.pingAt = System.currentTimeMillis();
+        Profile p = profile;
+        if (p != null) Speed.savePing(this, p, best);  // its row keeps it, also once another connection is in use
         Diag.i(this, best > 0 ? "ping " + best + " ms" : "ping failed");
         State.fire();
         update();

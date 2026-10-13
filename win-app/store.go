@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Saved is a connection as it is kept: its link and the name the person sees.
@@ -24,6 +25,8 @@ type Settings struct {
 	KeepOn   bool     `json:"keepOn"`   // on again after a restart of the computer
 	// the last speed check of each connection (by its link), as its row shows it: «⚡ 23,4 Мбит/с · 45 мс · 15:03»
 	Speeds map[string]string `json:"speeds,omitempty"`
+	// the last response time of each connection: «⏱ отклик 85 мс · 15:03» (a bridge's: when it was last on)
+	Pings map[string]string `json:"pings,omitempty"`
 }
 
 // Store keeps the settings in a file in Winger's data folder.
@@ -71,9 +74,12 @@ func (st *Store) Get() Settings {
 	s := st.s
 	s.Profiles = append([]Saved(nil), st.s.Profiles...)
 	s.Apps = append([]string(nil), st.s.Apps...)
-	s.Speeds = map[string]string{}
+	s.Speeds, s.Pings = map[string]string{}, map[string]string{}
 	for k, v := range st.s.Speeds {
 		s.Speeds[k] = v
+	}
+	for k, v := range st.s.Pings {
+		s.Pings[k] = v
 	}
 	return s
 }
@@ -205,6 +211,7 @@ func (st *Store) Remove(i int) {
 		}
 		cur := max(0, min(s.Current, len(s.Profiles)-1))
 		delete(s.Speeds, s.Profiles[i].Link)
+		delete(s.Pings, s.Profiles[i].Link)
 		s.Profiles = append(s.Profiles[:i], s.Profiles[i+1:]...)
 		switch {
 		case i < cur:
@@ -214,6 +221,28 @@ func (st *Store) Remove(i int) {
 		default:
 			s.Current = cur
 		}
+	})
+}
+
+// SetPing keeps a connection's last response time for its row (written only when the line changes: at most once a
+// minute for the one in use).
+func (st *Store) SetPing(link string, ms int) {
+	line := "⏱ не отвечает"
+	if ms > 0 {
+		line = "⏱ отклик " + itoa(ms) + " мс"
+	}
+	line += " · " + time.Now().Format("15:04")
+	st.mu.Lock()
+	same := st.s.Pings[link] == line
+	st.mu.Unlock()
+	if same {
+		return
+	}
+	st.Update(func(s *Settings) {
+		if s.Pings == nil {
+			s.Pings = map[string]string{}
+		}
+		s.Pings[link] = line
 	})
 }
 

@@ -118,6 +118,10 @@ function drawConns(s) {
       note = c.bridge ? "Нажмите — через " + c.service + ", когда обычный не работает" : "Нажмите, чтобы включить через этот сервер";
       if (i === cur) edge = "chosen";
     }
+    // the response time: live for the one in use, else its last check (a bridge's: when it was last on)
+    const pg = on && i === act && st.phase === "on" && st.ping > 0 ? "⏱ отклик " + st.ping + " мс"
+      : c.ping || (c.bridge ? "⏱ отклик — когда мост включён" : "");
+    if (pg) note += "\n" + pg;
     if (c.speed) note += "\n" + c.speed;
     const row = list.children[i];
     if (!row) return;
@@ -247,3 +251,8 @@ $("#journal").onclick = async () => {
 };
 refresh();
 setInterval(refresh, 1500);
+// every server's response time when the window opens or comes back (the service asks at most once a minute)
+const pingAll = () => call("pingall", {}).catch(() => {});
+pingAll();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pingAll(); });
+window.addEventListener("focus", pingAll);
