@@ -744,7 +744,8 @@
         const qr = el("div", { style: "min-height:60px;display:grid;place-items:center;margin:4px 0 8px" }, el("span", { class: "spin" }));
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 0", text: "Один раз — дальше «💻 Подключиться» сразу открывает ноутбук." }),
           step("1️⃣ Установите RustDesk", "Официальное приложение, с GitHub."),
-          el("a", { class: "btn line wide", href: r.android_apk.url, style: "text-decoration:none", text: "⬇️ Скачать RustDesk" }),
+          el("a", { class: "btn line wide", href: (r.android_apk || {}).url || "https://github.com/rustdesk/rustdesk/releases",
+            style: "text-decoration:none", text: "⬇️ Скачать RustDesk" }),
           step("2️⃣ Подключите к нашему серверу", "В RustDesk: «Настройки» → значок сканера вверху. QR на этом же телефоне? Нажмите на него → «⬇️ Сохранить», "
             + "а в сканере выберите картинку."),
           qr,

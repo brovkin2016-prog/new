@@ -128,17 +128,18 @@ function Invoke-Wait([string]$File, [string]$Arguments) {
     return $p.ExitCode
 }
 
-function Invoke-Rd([string]$Exe, [string[]]$Arguments, [int]$Seconds = 60) {
-    # rustdesk.exe with a command line setting; what it printed ($null when it hung). Its values are checked to have
-    # no spaces or quotes before they get here.
+function Invoke-Tool([string]$File, [string]$Arguments, [int]$Seconds = 60) {
+    # A program run out of sight: @{ Code = its exit code; Text = what it printed }, or $null when it could not be
+    # started or hung. (Not "& tool 2>&1": with $ErrorActionPreference Stop, Windows PowerShell 5.1 ends the whole
+    # script on the first line a tool writes to its error output.)
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Exe
-    $psi.Arguments = $Arguments -join ' '
+    $psi.FileName = $File
+    $psi.Arguments = $Arguments
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $p = [Diagnostics.Process]::Start($psi)
+    try { $p = [Diagnostics.Process]::Start($psi) } catch { return $null }
     $out = $p.StandardOutput.ReadToEndAsync()
     $err = $p.StandardError.ReadToEndAsync()
     if (-not $p.WaitForExit($Seconds * 1000)) {
@@ -150,7 +151,15 @@ function Invoke-Rd([string]$Exe, [string[]]$Arguments, [int]$Seconds = 60) {
     $text = ''
     if ($out.IsCompleted) { $text += $out.Result }
     if ($err.IsCompleted) { $text += $err.Result }
-    return $text.Trim()
+    return @{ Code = $p.ExitCode; Text = $text.Trim() }
+}
+
+function Invoke-Rd([string]$Exe, [string[]]$Arguments, [int]$Seconds = 60) {
+    # rustdesk.exe with a command line setting; what it printed ($null when it hung). Its values are checked to have
+    # no spaces or quotes before they get here.
+    $r = Invoke-Tool $Exe ($Arguments -join ' ') $Seconds
+    if ($r) { return $r.Text }
+    return $null
 }
 
 function Get-RdExe {
@@ -313,14 +322,15 @@ function Send-Hello([string]$Id) {
 
 function Set-AwakeOnPower {
     # On mains power: never sleep, and a closed lid does nothing. $false when Windows did not take it.
+    $powercfg = Join-Path $env:windir 'System32\powercfg.exe'
     $ok = $true
-    & powercfg.exe /change standby-timeout-ac 0 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { $ok = $false }
-    & powercfg.exe /change hibernate-timeout-ac 0 2>&1 | Out-Null  # may be off altogether: then nothing to change
-    & powercfg.exe /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { $ok = $false }
-    & powercfg.exe /setactive SCHEME_CURRENT 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { $ok = $false }
+    $r = Invoke-Tool $powercfg '/change standby-timeout-ac 0'
+    if (-not $r -or $r.Code -ne 0) { $ok = $false }
+    [void](Invoke-Tool $powercfg '/change hibernate-timeout-ac 0')  # may be off altogether: then nothing to change
+    $r = Invoke-Tool $powercfg '/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0'
+    if (-not $r -or $r.Code -ne 0) { $ok = $false }
+    $r = Invoke-Tool $powercfg '/setactive SCHEME_CURRENT'
+    if (-not $r -or $r.Code -ne 0) { $ok = $false }
     return $ok
 }
 
@@ -378,7 +388,7 @@ function Main {
         [void](Invoke-Wait $exe '--install-service')
     }
     try { Set-Service -Name $ServiceName -StartupType Automatic -ErrorAction Stop } catch { }
-    & sc.exe failure $ServiceName reset= 86400 actions= restart/10000/restart/10000/restart/60000 2>&1 | Out-Null
+    [void](Invoke-Tool (Join-Path $env:windir 'System32\sc.exe') "failure $ServiceName reset= 86400 actions= restart/10000/restart/10000/restart/60000")
     $restartHint = 'Служба RustDesk не отвечает. Перезагрузите ноутбук и запустите команду ещё раз.'
     if (-not (Wait-RdService 90)) { Fail $restartHint }
     if (-not (Wait-RdPipe 90)) { Fail $restartHint }

@@ -40,10 +40,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $parse = Join-Path $env:RUNNER_TEMP 'parse.ps1'
           Set-Content -Path $parse -Encoding ascii -Value @'
+          # parsed as irm | iex gets them: text decoded as UTF-8 (ParseFile would read a file without a BOM as ANSI)
           $bad = 0
           foreach ($f in $args) {
               $tokens = $null; $errs = $null
-              [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$errs)
+              $text = [IO.File]::ReadAllText($f, (New-Object System.Text.UTF8Encoding $false, $true))
+              [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errs)
               foreach ($e in $errs) { $bad++; Write-Host ("::error file={0},line={1}::{2}" -f $f, $e.Extent.StartLineNumber, $e.Message) }
               Write-Host ("{0}: {1} tokens, {2} errors (Windows PowerShell {3})" -f $f, $tokens.Count, $errs.Count, $PSVersionTable.PSVersion)
           }
@@ -54,7 +56,7 @@ jobs:
           if ($LASTEXITCODE) { throw "the scripts do not parse in Windows PowerShell 5.1" }
           $want = @{ 'host.ps1' = 'API HOST KEY PASSWORD TOKEN'; 'client.ps1' = 'HOST ID KEY PASSWORD' }
           foreach ($name in $want.Keys) {
-              $text = [IO.File]::ReadAllText((Join-Path 'remote' $name), [Text.UTF8Encoding]::new($false, $true))
+              $text = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE "remote/$name"), [Text.UTF8Encoding]::new($false, $true))
               $all = [regex]::Matches($text, '\{\{([A-Z]+)\}\}') | ForEach-Object { $_.Groups[1].Value }
               $found = ($all | Sort-Object -Unique) -join ' '
               if ($found -ne $want[$name]) { throw "$name has placeholders [$found], expected [$($want[$name])]" }

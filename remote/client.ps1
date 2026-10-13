@@ -21,11 +21,10 @@ $Signer = 'PURSLANE'  # the Authenticode signer of RustDesk's official Windows b
 $ShortcutName = 'Ноутбук (удалённо)'
 # "Optimize reaction time" for every new connection (RustDesk_default.toml holds the defaults for new peers)
 $Defaults = [ordered]@{
-    'image_quality'          = 'low'
-    'custom_image_quality'   = '30'
-    'custom-fps'             = '15'
-    'show_quality_monitor'   = 'Y'
-    'lock_after_session_end' = 'Y'  # the owner's laptop locks itself when the session ends
+    'image_quality'        = 'low'
+    'custom_image_quality' = '30'  # these two count only when "custom" is picked in a session
+    'custom-fps'           = '15'
+    'show_quality_monitor' = 'Y'   # speed, delay and frames per second in a corner of the session
 }
 
 function Say([string]$Text, [string]$Color) {
@@ -148,7 +147,7 @@ function Main {
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-    Say 'Настраиваю этот ноутбук, чтобы подключаться к вашему…' 'Cyan'
+    Say 'Настраиваю подключение к вашему ноутбуку…' 'Cyan'
 
     # 1. RustDesk, portable, under a name that carries our server and its key
     $dir = Join-Path $env:LOCALAPPDATA 'FamilyRemote'
