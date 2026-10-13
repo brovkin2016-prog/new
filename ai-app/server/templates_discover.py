@@ -4,27 +4,33 @@ tag and search pages below, takes each clip's 720p file, cuts 5 seconds the way 
 and counts the people in it (templates_faces.py). Writes discover.json (per clip: id, page, size, people, the biggest
 face's height) and contact sheets of the clips with 1–3 visible faces, each tile labelled with its id and people, to
 pick the templates from by eye. Nothing of the videos is kept.
-   python3 ai-app/server/templates_discover.py out/ [max clips]"""
+   python3 ai-app/server/templates_discover.py out/ [max clips] [previous discover.json]"""
 import json, os, re, subprocess, sys, time, urllib.parse, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from templates_faces import faces  # noqa: E402
 
 OUT = sys.argv[1]
-MAX = int(sys.argv[2]) if len(sys.argv) > 2 else 400
+MAX = int(sys.argv[2]) if len(sys.argv) > 2 else 1200
+PREV = sys.argv[3] if len(sys.argv) > 3 else ""  # the previous run's discover.json: the clips there are not looked at again
 SECONDS = 5
 os.makedirs(OUT, exist_ok=True)
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
       "Accept-Language": "en-US,en;q=0.9"}
 # reels as people post them (selfie and vlog shots with big faces, friends, trips) and what they make of themselves:
 # dances, film heroes, holidays, sport, fashion, couples, kids
-QUERIES = ["selfie", "vlog", "talking to camera", "influencer", "friends selfie", "road trip", "sunset", "smiling woman",
-           "man sunglasses", "happy", "group of friends", "people having fun", "dancing in the street", "vertical dance", "dance", "dancing woman", "dancing man", "hip hop", "party", "birthday", "celebration",
-           "christmas", "new year", "santa claus", "halloween", "superhero", "action", "martial arts", "boxing", "sword",
-           "cowboy", "pirate", "astronaut", "wizard", "spy", "detective", "football", "basketball", "skateboard",
-           "fitness", "gym", "beach", "travel", "fashion", "model", "runway", "wedding", "couple", "romantic", "friends",
-           "family", "kids", "child", "funny", "singing", "karaoke", "dj", "concert", "selfie", "vlog", "talking to camera",
-           "laughing", "surprised", "cheering", "winner", "retro", "80s", "neon"]
+QUERIES = list(dict.fromkeys([
+    "selfie", "vlog", "talking to camera", "influencer", "friends selfie", "couple selfie", "family selfie", "road trip",
+    "sunset", "smiling woman", "smiling man", "man sunglasses", "woman portrait", "man portrait", "close up face", "happy",
+    "laughing", "surprised", "cheering", "winner", "thumbs up", "waving", "applause", "group of friends",
+    "people having fun", "teenager", "student", "dancing in the street", "vertical dance", "dance", "dancing woman",
+    "dancing man", "hip hop", "party", "festival", "carnival", "cheers", "birthday", "celebration", "christmas", "new year",
+    "santa claus", "halloween", "valentine", "wedding", "bride", "wedding dance", "graduation", "superhero", "action",
+    "martial arts", "boxing", "sword", "cowboy", "pirate", "astronaut", "wizard", "spy", "detective", "football",
+    "basketball", "soccer fan", "skateboard", "fitness", "gym", "yoga", "beach", "travel", "summer", "winter", "snow",
+    "autumn", "city", "night city", "car", "motorcycle", "fashion", "model", "runway", "makeup", "couple", "romantic",
+    "love", "friends", "family", "mother", "father", "grandmother", "grandfather", "kids", "child", "funny", "singing",
+    "karaoke", "dj", "concert", "gamer", "cooking", "coffee", "restaurant", "shopping", "office", "retro", "80s", "neon"]))
 
 
 def get(url, timeout=40):
@@ -36,13 +42,14 @@ def get(url, timeout=40):
 def pages(q):
     slug = q.replace(" ", "-")
     yield f"https://mixkit.co/free-stock-video/{slug}/"
-    yield f"https://mixkit.co/free-stock-video/discover/{urllib.parse.quote(slug)}/"
-    yield f"https://mixkit.co/free-stock-video/discover/{urllib.parse.quote(slug)}/?page=2"
+    yield f"https://mixkit.co/free-stock-video/{slug}/?page=2"
+    for n in (1, 2, 3, 4):
+        yield f"https://mixkit.co/free-stock-video/discover/{urllib.parse.quote(slug)}/" + (f"?page={n}" if n > 1 else "")
 
 
-def listing():
-    """(id, page, query) of the clips on the tag and search pages, the first query's first."""
-    seen, out = set(), []
+def listing(known=()):
+    """(id, page, query) of the clips on the tag and search pages, the first query's first; known ones left out."""
+    seen, out = set(known), []
     for q in QUERIES:
         got = 0
         for page in pages(q):
@@ -125,17 +132,24 @@ def sheets(res):
 
 
 t0 = time.time()
-clips = listing()[:MAX]
-print(f"{len(clips)} clips to look at", flush=True)
+prev = []
+if PREV and os.path.exists(PREV):
+    try:
+        prev = [r for r in json.load(open(PREV)) if isinstance(r, dict) and str(r.get("id", "")).startswith("m")]
+    except ValueError:
+        prev = []
+clips = listing({r["id"][1:] for r in prev})[:MAX]
+print(f"{len(clips)} new clips to look at ({len(prev)} known from before)", flush=True)
 res = []
 for num, page, q in clips:
     r = one(num, page, q)
     res.append(r)
     print(("ok   " if r["ok"] else "FAIL ") + r["id"], q, f"faces={r.get('faces')} {r.get('face_counts')} h={r.get('face_h')}"
           if r["ok"] else r["why"], page.rsplit("/", 2)[-2], flush=True)
-    if time.time() - t0 > 40 * 60:
-        print("time is up: the rest is not looked at", flush=True)
+    if time.time() - t0 > 45 * 60:
+        print("time is up: the rest waits for the next run", flush=True)
         break
-json.dump(res, open(f"{OUT}/discover.json", "w"), ensure_ascii=False, indent=1)
+json.dump(prev + res, open(f"{OUT}/discover.json", "w"), ensure_ascii=False, indent=1)
 good, n = sheets(res)
-print(f"{len(res)} clips looked at, {good} with 1–3 faces ({n} sheets) in {int(time.time() - t0)} s")
+print(f"{len(res)} new clips looked at, {good} with 1–3 faces ({n} sheets), {len(prev) + len(res)} known in all,"
+      f" in {int(time.time() - t0)} s")

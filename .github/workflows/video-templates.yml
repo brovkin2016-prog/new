@@ -1,17 +1,20 @@
-# Checks the AI app's video templates (ai-app/server/templates.json) where the free stock sites can be reached: finds each
-# template's direct file, fetches it and cuts it the way the family server will; asks the Hugging Face Spaces that put
-# a person into a template for their API. Publishes only manifest.json (addresses, sizes, the Spaces' API) as a
-# prerelease — no video is kept or published. Also looks for more templates on Mixkit (discover.json and contact sheets
-# of the clips with 1–3 visible faces, to pick from). The family server takes the addresses from the pinned manifest.
+# The AI app's templates (videos and photos a person's face goes into), where the free stock sites can be reached:
+# checks the hand-picked ones (ai-app/server/templates.json: each file found, fetched and cut the way the family
+# server will), and — started by hand — looks for more: Mixkit clips and Unsplash/Wikimedia photos with 1–3 faces
+# seen big (clips and photos looked at before, kept in the last release, are not fetched again). Publishes the
+# templates' catalog as a prerelease «templates-N» (catalog.json, manifest.json: addresses, sizes, faces — no video
+# or photo is kept or published) with contact sheets of what is new. The family servers take a newer «templates-N»
+# by themselves (every 3 days they also search on their own: a scheduled run here would need the default branch).
 name: video-templates
 
 on:
   push:
-    paths: ["ai-app/server/templates.json", "ai-app/server/templates_*.py", ".github/workflows/video-templates.yml"]
+    paths: ["ai-app/server/templates.json", "ai-app/server/templates*.py", "ai-app/server/templates-deny.json",
+            ".github/workflows/video-templates.yml"]
   workflow_dispatch:
     inputs:
       discover:
-        description: "Also look for more templates on Mixkit (contact sheets)"
+        description: "Also look for more templates (Mixkit clips, photos)"
         type: boolean
         default: true
 
@@ -25,31 +28,58 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
       - name: Tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
           pip install -q gradio_client opencv-python-headless pillow
-      - name: Check the templates and the Spaces
+      - name: What the last release knew (clips and photos looked at before)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p prev
+          T=$(gh release list --limit 40 --json tagName --jq '.[].tagName' | grep -E '^templates-[0-9]+$' | sort -t- -k2 -n | tail -1 || true)
+          echo "last release: ${T:-none}"
+          [ -z "$T" ] || gh release download "$T" --pattern discover.json --pattern photos.json --dir prev || true
+          [ -s prev/discover.json ] || echo '[]' > prev/discover.json
+          [ -s prev/photos.json ] || echo '[]' > prev/photos.json
+          ls -la prev
+      - name: Check the hand-picked templates and the Spaces
         run: |
           mkdir -p out
           python3 ai-app/server/templates_check.py ai-app/server/templates.json out 2>&1 | tee out/check.log
-          ls -la out
-      - name: More templates (Mixkit clips with 1–3 faces, contact sheets to pick from)
+      - name: More clips (Mixkit, 1–3 faces)
         if: github.event_name == 'workflow_dispatch' && inputs.discover
         continue-on-error: true
         run: |
           mkdir -p disc
-          python3 ai-app/server/templates_discover.py disc 400 2>&1 | tee disc/discover.log
-          ls -la disc
-      - name: Manifest as a release
-        if: always()
+          python3 ai-app/server/templates_discover.py disc 1200 prev/discover.json 2>&1 | tee disc/discover.log
+      - name: More photos (Unsplash, Wikimedia Commons, 1–3 faces)
+        if: github.event_name == 'workflow_dispatch' && inputs.discover
+        continue-on-error: true
+        run: |
+          mkdir -p phot
+          python3 ai-app/server/templates_photos.py phot 900 prev/photos.json 2>&1 | tee phot/photos.log
+      - name: The catalog
+        run: |
+          [ -s disc/discover.json ] || { mkdir -p disc; cp prev/discover.json disc/; }
+          [ -s phot/photos.json ] || { mkdir -p phot; cp prev/photos.json phot/; }
+          mkdir -p rel && set -o pipefail
+          python3 ai-app/server/templates_catalog.py ai-app/server/templates.json out/manifest.json disc/discover.json \
+            phot/photos.json "${{ github.run_number }}" rel 2>&1 | tee rel/catalog.log
+      - name: Release «templates-N» (older ones removed, the last four kept)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          [ -s out/manifest.json ] || { echo "no manifest"; exit 1; }
-          gh release create "video-templates-${{ github.run_number }}" out/manifest.json out/check.log \
-            $(ls disc/discover.json disc/discover.log disc/sheet-*.jpg 2>/dev/null) --prerelease --target "$GITHUB_SHA" \
-            --title "Шаблоны видео: проверка ${{ github.run_number }}" --notes "Проверенные адреса шаблонов и API Spaces (видео не публикуются)."
+          [ -s rel/catalog.json ] && [ -s rel/manifest.json ] || { echo "no catalog"; exit 1; }
+          N=${{ github.run_number }}
+          gh release create "templates-$N" rel/catalog.json rel/manifest.json disc/discover.json phot/photos.json out/check.log \
+            $(ls disc/discover.log disc/sheet-*.jpg phot/photos.log phot/photos-*.jpg rel/catalog.log 2>/dev/null) \
+            --prerelease --target "$GITHUB_SHA" --title "Шаблоны: каталог $N" \
+            --notes "Каталог шаблонов для семейных серверов (адреса, лица; видео и фото не публикуются)."
+          for t in $(gh release list --limit 60 --json tagName --jq '.[].tagName' | grep -E '^(templates|video-templates)-[0-9]+$' \
+                     | sort -t- -k2 -n | head -n -4); do
+            gh release delete "$t" --yes --cleanup-tag || true
+          done

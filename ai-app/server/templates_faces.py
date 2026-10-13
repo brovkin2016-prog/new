@@ -56,3 +56,21 @@ def faces(cut, seconds, folder, keep=None):
     if not counts:
         return None, [], 0
     return max(set(counts), key=lambda n: (counts.count(n), n)), counts, round(tallest, 3)
+
+
+def faces_image(path, folder):
+    """(people, the biggest face's height as a share of the picture's) in a photo; (None, 0) without the finder or the
+    picture. The picture is doubled when it is small, as the clips' frames are."""
+    det = detector(folder)
+    if det is None:
+        return None, 0
+    import cv2
+    im = cv2.imread(path)
+    if im is None:
+        return None, 0
+    if max(im.shape[:2]) < 1400:
+        im = cv2.resize(im, (im.shape[1] * 2, im.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
+    det.setInputSize((im.shape[1], im.shape[0]))
+    _, found = det.detect(im)
+    found = [] if found is None else found
+    return len(found), round(max([float(f[3]) / im.shape[0] for f in found] or [0]), 3)
