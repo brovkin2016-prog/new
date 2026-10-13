@@ -47,6 +47,9 @@ import (
 //   CAP_STEPS=8,3,8    the cap changes during the measured time (equal parts; the warm-up at the first value)
 //   DELAY_STEPS=60,300 the delay likewise (order still kept: a frame never overtakes one sent before it)
 //   JITTER_MS=n        a random extra delay up to n ms on every frame (order kept)
+//   OLDER=creator      that side's reliable layer as programs before its tuning ran (an ack frame per segment, no
+//   OLDER=joiner       resend guard, no lane ahead, the window as KCP's span): a newer server with an older Winger, or
+//                      the other way round
 //   FEC=1              the creator sends with parity (as to a joiner that says it reads it): a parity frame at the
 //                      end of each answer, so a lost last frame needs no resend
 //   GATE_MS=n PLI=1    every n ms (about) the server re-binds each track and forwards nothing of it until a keyframe
@@ -375,11 +378,18 @@ func simRun(t testing.TB, c simConfig) simResult {
 		cmt.AddSubTunnel(share)
 	}
 	if c.reliable {
-		ck = NewMultiTrackKCPTunnel(cmt, nil)
+		older := os.Getenv("OLDER")
+		tuning := func(side string) kcpTuning {
+			if older == side {
+				return kcpTuningOlder
+			}
+			return kcpTuningDefault
+		}
+		ck = newMultiTrackKCPTunnel(cmt, nil, tuning("creator"))
 		for ck.SessionCount() > 1 {
 			ck.RemoveLastSession()
 		}
-		jk = NewMultiTrackKCPTunnel(jmt, nil)
+		jk = newMultiTrackKCPTunnel(jmt, nil, tuning("joiner"))
 		if c.dual {
 			// as the creator does: the screenshare session takes connections once the joiner answers on it
 			ck.AddProbedSession(share, tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfigAck, nil))
