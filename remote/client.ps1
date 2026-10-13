@@ -1,17 +1,19 @@
 # Remote desktop, another Windows laptop that connects to the owner's one: the official portable RustDesk, named so
 # that it uses the family server and its key (RustDesk reads "host=…,key=…," from its own file name), defaults for a
 # quick response on a weak line, a desktop shortcut straight to the owner's laptop and the password on the clipboard
-# for the first connection. Windows PowerShell 5.1, no administrator rights. The family server fills in its values and
-# hands the script out for the owner's one-line command (see README.md). Safe to run again.
+# for the first connection (kept out of the clipboard history). Windows PowerShell 5.1, no administrator rights. The
+# family server fills in its values and hands the script out for the owner's one-line command (see README.md). Safe to
+# run again. The password is not in this text: it is asked of the server at run time (see host.ps1 and README.md).
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 if ([Console]::IsOutputRedirected) { try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { } }
 
 # filled in by the server (each inside '...': it refuses values with a quote or a line break)
+$Api = '{{API}}'
+$Token = '{{TOKEN}}'
 $RdHost = '{{HOST}}'
 $RdKey = '{{KEY}}'
-$RdPassword = '{{PASSWORD}}'
 $LaptopId = '{{ID}}'
 
 $Version = '1.5.0'
@@ -44,7 +46,7 @@ function Test-Signer([string]$Path) {
     try {
         $sig = Get-AuthenticodeSignature -FilePath $Path
         if ($sig.Status -ne 'Valid' -or -not $sig.SignerCertificate) { return $false }
-        $name = $sig.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+        $name = $sig.SignerCertificate.GetNameInfo('SimpleName', $false)
         return $name -eq $Signer
     } catch { return $false }
 }
@@ -119,6 +121,39 @@ function Set-TomlOptions([string]$Path, $Values) {
     [IO.File]::WriteAllText($Path, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
 }
 
+function Get-Password {
+    # The laptop's permanent password, asked of the server with this command's token; '' when it could not be had.
+    for ($try = 1; $try -le 3; $try++) {
+        try {
+            $r = Invoke-WebRequest -Uri ($Api + '/api/remote/pw?t=' + $Token) -UseBasicParsing -TimeoutSec 30
+            $pw = ([string]$r.Content).Trim()
+            if ($pw -match '^[A-Za-z0-9]{8,64}$') { return $pw }
+            return ''
+        } catch {
+            $code = 0
+            try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+            if ($code -ge 400 -and $code -lt 500) { return '' }
+        }
+        Start-Sleep -Seconds (3 * $try)
+    }
+    return ''
+}
+
+function Set-PasswordClip([string]$Text) {
+    # The password on the clipboard with the mark that keeps it out of Windows' clipboard history (Win+V) and its
+    # sync to other devices; $false when it could not be put there (then it is not put there at all).
+    try {
+        [void][Reflection.Assembly]::Load('System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089')
+        $data = New-Object System.Windows.Forms.DataObject
+        $data.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $Text)
+        $data.SetData('ExcludeClipboardContentFromMonitorProcessing', '')  # any value: the mark is that it is there
+        [System.Windows.Forms.Clipboard]::SetDataObject($data, $true, 5, 200)
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Test-Port([string]$HostName, [int]$Port) {
     $c = New-Object System.Net.Sockets.TcpClient
     try {
@@ -138,7 +173,8 @@ function Main {
     $stale = 'Команда повреждена или устарела. Скопируйте её в приложении заново («Управление» → «Сервер» → «Удалённый доступ») и запустите ещё раз.'
     # the key goes into a file name: no "/" there. The server's key never has one: hbbs makes its key pair again until
     # the public half has none (rustdesk-server 1.1.16, gen_sk), and the server only ever uses the pair hbbs made
-    if ($RdHost -notmatch '^[A-Za-z0-9.-]+$' -or $RdKey -notmatch '^[A-Za-z0-9+=]{40,64}$' -or $RdPassword -notmatch '^[A-Za-z0-9]{8,64}$') { Fail $stale }
+    if ($Api -notmatch '^https?://[A-Za-z0-9.:-]+$' -or $Token -notmatch '^[0-9a-f]{32}$') { Fail $stale }
+    if ($RdHost -notmatch '^[A-Za-z0-9.-]+$' -or $RdKey -notmatch '^[A-Za-z0-9+=]{40,64}$') { Fail $stale }
     if (-not $LaptopId) {
         Fail 'Сначала настройте сам ноутбук: в приложении «Управление» → «Сервер» → «Удалённый доступ» → «Этот ноутбук». Потом скопируйте эту команду заново и запустите её ещё раз.'
     }
@@ -147,6 +183,9 @@ function Main {
         Fail 'Нужна 64-битная Windows 10 или 11 — на этом компьютере настроить не получится.'
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    # the password for the clipboard, asked now while the command surely works (only in a variable: never in a
+    # script's text); without it all the rest is done, and the owner takes it in the app
+    $RdPassword = Get-Password
 
     Say 'Настраиваю подключение к вашему ноутбуку…' 'Cyan'
 
@@ -192,12 +231,13 @@ function Main {
     $desk = [Environment]::GetFolderPath('Desktop')
     if (-not $desk) { $desk = Join-Path $env:USERPROFILE 'Desktop' }
     $why = ''
+    $lnk = Join-Path $desk ($ShortcutName + '.lnk')
+    $cmd = Join-Path $desk ($ShortcutName + '.cmd')
+    # saved under a plain name first, then renamed: the shortcut maker may pass the path through the system's older
+    # code page, where a Russian name turns into «???» (the rename keeps it whole)
+    $tmp = Join-Path $desk 'FamilyRemote-shortcut.lnk'
     try {
         if (-not (Test-Path -LiteralPath $desk)) { New-Item -ItemType Directory -Path $desk -Force | Out-Null }
-        $lnk = Join-Path $desk ($ShortcutName + '.lnk')
-        # saved under a plain name first, then renamed: the shortcut maker may pass the path through the system's
-        # older code page, where a Russian name turns into «???» (the rename keeps it whole)
-        $tmp = Join-Path $desk 'FamilyRemote-shortcut.lnk'
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($tmp)
         $sc.TargetPath = $exe
@@ -206,14 +246,21 @@ function Main {
         $sc.IconLocation = $exe + ',0'
         $sc.Description = 'Подключиться к ноутбуку'
         $sc.Save()
+        # the same code page may have turned a Russian folder name in the target into «???»: read back, and when it
+        # is not the very file, the starter file below does the job
+        if ($shell.CreateShortcut($tmp).TargetPath -ne $exe) { throw 'ярлык не удержал русские буквы в имени папки' }
         Move-Item -LiteralPath $tmp -Destination $lnk -Force
         if (-not (Test-Path -LiteralPath $lnk)) { throw 'the shortcut file is not there after saving' }
+        Remove-Item -LiteralPath $cmd -Force -ErrorAction SilentlyContinue  # (an older run's starter file)
     } catch {
         $why = $_.Exception.Message
-        # no shortcut maker here: a small starter file on the desktop does the same
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        # no shortcut maker here (or it garbles the path): a small starter file on the desktop does the same. Its line
+        # is plain Latin: the folder comes from %LOCALAPPDATA% when it runs, so no code page can garble it
         try {
-            $cmd = Join-Path $desk ($ShortcutName + '.cmd')
-            [IO.File]::WriteAllText($cmd, "@start `"`" `"$exe`" --connect $LaptopId`r`n", [Text.Encoding]::GetEncoding(866))
+            $line = '@start "" "%LOCALAPPDATA%\FamilyRemote\' + $name + '" --connect ' + $LaptopId + "`r`n"
+            [IO.File]::WriteAllText($cmd, $line, [Text.Encoding]::ASCII)
+            Remove-Item -LiteralPath $lnk -Force -ErrorAction SilentlyContinue  # (an older run's shortcut)
             Say ("    Ярлык не создался ($why) — вместо него на рабочем столе файл с тем же именем, он делает то же.") 'Yellow'
             $why = ''
         } catch {
@@ -222,10 +269,9 @@ function Main {
     }
 
     # 4. the password for the first connection (RustDesk then remembers it)
-    try {
-        Set-Clipboard -Value $RdPassword
+    if ($RdPassword -and (Set-PasswordClip $RdPassword)) {
         Say '4/4 Пароль в буфере: при первом подключении вставьте его и отметьте «Запомнить пароль».'
-    } catch {
+    } else {
         Say '4/4 Пароль в буфер положить не вышло: возьмите его в приложении («Удалённый доступ» → «Показать») и при первом подключении отметьте «Запомнить пароль».' 'Yellow'
     }
 

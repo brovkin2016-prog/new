@@ -3,6 +3,8 @@
 # a long permanent password and safe options, keeps the laptop awake on mains power and tells the server this laptop's
 # RustDesk ID. Windows PowerShell 5.1. The family server fills in its values and hands the script out for the owner's
 # one-line command (see README.md); it asks Windows for administrator rights by itself. Safe to run again.
+# The password is not in this text: it is asked of the server at run time (Windows may keep a script's whole text in
+# its event log, so the text carries nothing that opens the laptop, and no word that makes Windows keep it: see README).
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -13,7 +15,6 @@ $Api = '{{API}}'
 $Token = '{{TOKEN}}'
 $RdHost = '{{HOST}}'
 $RdKey = '{{KEY}}'
-$RdPassword = '{{PASSWORD}}'
 
 $Version = '1.5.0'
 $MsiUrl = "https://github.com/rustdesk/rustdesk/releases/download/$Version/rustdesk-$Version-x86_64.msi"
@@ -27,7 +28,7 @@ $Options = [ordered]@{
     'approve-mode'                     = 'password'                # in by the password only, no "accept?" on screen
     'verification-method'              = 'use-permanent-password'  # no one-time password
     'enable-lan-discovery'             = 'N'
-    'direct-server'                    = 'N'                       # no direct connections bypassing our server
+    'direct-server'                    = 'N'                       # no direct connections, only through our server
     'allow-remote-config-modification' = 'N'
     'enable-tunnel'                    = 'N'
     'enable-terminal'                  = 'N'
@@ -73,7 +74,9 @@ foreach ($i in 1..4) { try { $s = irm '<url>' -TimeoutSec 60 -ErrorAction Stop; 
 if ($s) { $s | iex } else { if ($code -eq 403) { $t = '<stale>' } elseif ($code -eq 429) { $t = 'Слишком много попыток. Подождите 10 минут и запустите команду ещё раз.' } else { $t = 'Не удалось скачать настройку. Проверьте интернет (или включите Winger) и запустите команду ещё раз.' }; Write-Host $t -ForegroundColor Red; [void](Read-Host 'Нажмите Enter, чтобы закрыть окно') }
 '@
     $cmd = (($lines -split "`r?`n" | Where-Object { $_.Trim() }) -join '; ').Replace('<url>', $url).Replace('<stale>', $Stale)
-    return '-NoProfile -ExecutionPolicy Bypass -Command "' + $cmd + '"'
+    # RemoteSigned: Windows' own script modules load (Get-FileHash is one) where the policy is Restricted, as it is on
+    # a new Windows; that is all this window needs of it
+    return '-NoProfile -ExecutionPolicy RemoteSigned -Command "' + $cmd + '"'
 }
 
 function Start-Elevated([string]$Stale) {
@@ -100,7 +103,7 @@ function Test-Signer([string]$Path) {
     try {
         $sig = Get-AuthenticodeSignature -FilePath $Path
         if ($sig.Status -ne 'Valid' -or -not $sig.SignerCertificate) { return $false }
-        $name = $sig.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+        $name = $sig.SignerCertificate.GetNameInfo('SimpleName', $false)
         return $name -eq $Signer
     } catch { return $false }
 }
@@ -320,6 +323,23 @@ function Test-Port([string]$HostName, [int]$Port) {
     }
 }
 
+function Get-Password {
+    # The laptop's permanent password, asked of the server with this command's token: @{ Code = 200; Text = it }, or
+    # the server's answer (403 an old command, 429 too many tries), or 0 when it could not be reached.
+    for ($try = 1; $try -le 4; $try++) {
+        try {
+            $r = Invoke-WebRequest -Uri ($Api + '/api/remote/pw?t=' + $Token) -UseBasicParsing -TimeoutSec 30
+            return @{ Code = 200; Text = ([string]$r.Content).Trim() }
+        } catch {
+            $code = 0
+            try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+            if ($code -ge 400 -and $code -lt 500) { return @{ Code = $code; Text = '' } }
+        }
+        Start-Sleep -Seconds (3 * $try)
+    }
+    return @{ Code = 0; Text = '' }
+}
+
 function Send-Hello([string]$Id) {
     # 200, or the server's answer (403 an old command, 429 too many tries), or 0 when it could not be reached.
     $body = @{ t = $Token; id = $Id } | ConvertTo-Json -Compress
@@ -355,12 +375,20 @@ function Main {
     try { $Host.UI.RawUI.WindowTitle = 'Удалённый доступ к ноутбуку' } catch { }
     $stale = 'Команда повреждена или устарела. Скопируйте её в приложении заново («Управление» → «Сервер» → «Удалённый доступ») и запустите ещё раз.'
     if ($Api -notmatch '^https?://[A-Za-z0-9.:-]+$' -or $Token -notmatch '^[0-9a-f]{32}$') { Fail $stale }
-    if ($RdHost -notmatch '^[A-Za-z0-9.-]+$' -or $RdKey -notmatch '^[A-Za-z0-9+/=]{40,64}$' -or $RdPassword -notmatch '^[A-Za-z0-9]{8,64}$') { Fail $stale }
+    if ($RdHost -notmatch '^[A-Za-z0-9.-]+$' -or $RdKey -notmatch '^[A-Za-z0-9+/=]{40,64}$') { Fail $stale }
     if ([Environment]::OSVersion.Version.Major -lt 10 -or -not [Environment]::Is64BitOperatingSystem) {
         Fail 'Нужна 64-битная Windows 10 или 11 — на этом компьютере настроить не получится.'
     }
     if (-not (Test-Admin) -or -not [Environment]::Is64BitProcess) { Start-Elevated $stale }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    # the password, from the server (only in a variable: never in a script's text)
+    $got = Get-Password
+    if ($got.Code -eq 403) { Fail $stale }
+    if ($got.Code -eq 429) { Fail 'Слишком много попыток. Подождите 10 минут и запустите команду ещё раз.' }
+    if ($got.Code -ne 200 -or $got.Text -notmatch '^[A-Za-z0-9]{8,64}$') {
+        Fail 'Не удалось связаться с сервером. Проверьте интернет (или включите Winger) и запустите команду ещё раз.'
+    }
+    $RdPassword = $got.Text
 
     Say 'Настраиваю удалённый доступ к этому ноутбуку…' 'Cyan'
 
