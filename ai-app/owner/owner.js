@@ -485,7 +485,42 @@
       const u = d.update;
       if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
       if (u) scroll.append(updateCard(u, "all"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить», the night switch
-      scroll.append(bridgesCard(d), remoteCard());
+      scroll.append(storageCard(), bridgesCard(d), remoteCard());
+    }
+    // ---- the disk: how full it is, what the templates take, how fast it is (the last test), what the last cleanup freed ----
+    function storageCard() {
+      const card = el("div", { class: "card" }, el("h3", { text: "💾 Диск" }), el("small", { text: "Проверяю…" }));
+      const gb = (v) => String(Math.round((+v || 0) * 10) / 10).replace(".", ",") + " ГБ";
+      const note = (text) => el("div", { style: "font-size:13px;color:var(--muted);margin:2px 0 6px", text });
+      const fill = (s) => {
+        const t = s.test, c = s.clean, tp = s.templates || {};
+        card.innerHTML = "";
+        card.append(el("h3", { text: "💾 Диск" }),
+          el("div", { class: "row" }, el("div", { class: "grow" }, el("b", { text: `Свободно ${gb(s.disk.free)} из ${gb(s.disk.total)}` }),
+            el("small", { text: `Занято ${gb(s.disk.used)} · шаблоны: ${tp.videos || 0} роликов и ${tp.photos || 0} фото — ${gb(tp.gb)}` }))));
+        if (t && !t.err) {
+          card.append(el("div", { class: "row" }, el("span", { style: "font-size:20px", text: t.fast ? "🟢" : "🟡" }),
+            el("div", { class: "grow" }, el("b", { text: "Диск " + t.verdict }),
+              el("small", { text: `запись ${t.write} МБ/с · чтение ${t.read === null ? "—" : t.read} МБ/с`
+                + (t.iops !== null && t.iops !== undefined ? ` · ${t.iops} IOPS` : "") + " · проверен " + when(t.ts) }))));
+        } else card.append(note(t ? "Проверка не получилась: " + t.err : "Скорость диска ещё не проверялась."));
+        if (c) card.append(note(`Последняя чистка ${when(c.ts)}: освобождено ` + (c.freed_mb >= 100 ? gb(c.freed_mb / 1024) : (c.freed_mb || 0) + " МБ")));
+        const btn = el("button", { class: "btn soft wide", style: "margin-top:6px", text: "🔎 Проверить диск", onclick: async () => {
+          if (S.busy.vpn) { toast("Подождите, предыдущее действие ещё идёт"); return; }
+          S.busy.vpn = true; btn.disabled = true; btn.textContent = "⏳ Проверяю диск, до 30 секунд…";
+          try {
+            const end = await panel({ op: "storage_test" });
+            if (end.t !== "done") toast("⚠️ " + end.text, 6000);
+            else { fill(end); toast(end.test && !end.test.err ? "✅ Диск " + end.test.verdict : "⚠️ Проверка не получилась", 5000); }
+          } catch (e) { toast(problem(e)); } finally {
+            S.busy.vpn = false;
+            if (btn.isConnected) { btn.disabled = false; btn.textContent = "🔎 Проверить диск"; }
+          }
+        } });
+        card.append(btn);
+      };
+      panel({ op: "storage" }).then((s) => (s.t === "done" ? fill(s) : card.remove())).catch(() => card.remove());
+      return card;
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
     const BRIDGES = [
