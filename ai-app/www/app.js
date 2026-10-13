@@ -478,7 +478,17 @@
   }
   // «Удалить чат «…»? Переписка удалится с телефона.»: the question on top, the rest under it; danger — a red «yes»
   function confirmBox(text, yes, danger) {
-    const m = String(text).match(/^(.+?[.?!])\s+(.+)$/s);
+    // cut after the first sentence, but never inside «…»: a chat named «Привет! Подскажи рецепт» stays whole
+    text = String(text);
+    let cut = -1, depth = 0;
+    for (let i = 0; i < text.length - 1; i++) {
+      const c = text[i];
+      if (c === "«") depth++;
+      else if (c === "»") depth = Math.max(0, depth - 1);
+      else if (!depth && /[.?!]/.test(c) && /\s/.test(text[i + 1])) { cut = i + 1; break; }
+    }
+    const rest = cut > 0 ? text.slice(cut).trim() : "";
+    const m = rest ? [text, text.slice(0, cut), rest] : null;
     return new Promise((resolve) => {
       sheet(m ? m[1] : text, (box, close) => {
         if (m) box.append(el("p", { class: "muted", style: "font-size:15px;margin:0 0 16px", text: m[2] }));
@@ -711,9 +721,12 @@
     for (const r of list) {
       const at = new Date(r.at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
       const row = el("div", { class: "row" }, el("div", { class: "grow" }, r.text, el("small", { text: at + (again[r.repeat] || "") })));
+      // only this row goes: another row deleted just now keeps its «↩️ Вернуть»; the whole card is drawn again when it
+      // is empty (its «Пока нет» words) or was drawn anew meanwhile
       row.append(el("button", { class: "icon-btn", text: "🗑️", title: "Удалить", onclick: () => softDelete(row, "Напоминание удалено", () => {
         Native.remindDel(r.id);
-        redraw();
+        row.remove();
+        if (!card.isConnected || !card.querySelector(".row")) redraw();
       }) }));
       card.append(row);
     }
@@ -802,14 +815,29 @@
         if (api2.onRedraw) api2.onRedraw();
         api2.down();
       },
-      // to the newest message; an empty screen opens at its top
-      down() { requestAnimationFrame(() => { scroll.scrollTop = box.querySelector(".msg") ? scroll.scrollHeight : 0; }); },
+      // to the newest message; an empty screen opens at its top. Pictures and clips from the phone's store get their
+      // height only when loaded: for a few seconds the screen follows them down, unless the person scrolls by themselves.
+      down() {
+        const go = () => { scroll.scrollTop = box.querySelector(".msg") ? scroll.scrollHeight : 0; };
+        requestAnimationFrame(go);
+        const wait = [...box.querySelectorAll("img, video")].filter((x) => (x.tagName === "IMG" ? !x.complete : x.readyState < 1));
+        if (!wait.length) return;
+        const until = Date.now() + 4000;
+        let moved = false;
+        const mark = () => { moved = true; };
+        scroll.addEventListener("touchstart", mark, { once: true, passive: true });
+        scroll.addEventListener("wheel", mark, { once: true, passive: true });
+        for (const x of wait) {
+          x.addEventListener(x.tagName === "IMG" ? "load" : "loadedmetadata", () => { if (!moved && Date.now() < until) go(); }, { once: true });
+        }
+      },
       async add(m) {
         m.thread = name;
         m.ts = Date.now();
         await DB.add(m);
         S.msgs[name].push(m);
         if (S.msgs[name].length > 400) { S.msgs[name] = S.msgs[name].slice(-300); DB.trim(name, 300); }
+        if (S.msgs[name].length === 1 && S.tab === name) refreshTop();  // «🧹 Очистить» on top once there is something to clear
         return m;
       },
       // asks the server and shows the answer as it is written
@@ -1073,7 +1101,7 @@
       if (c.id === cur) await openChat(chats[0].id); else refreshTop();
     }
     function chatsSheet() {
-      sheet("💬 Чаты", (box, close) => {
+      sheet("🗂️ Чаты", (box, close) => {  // the same sign as the button that opens it
         box.append(el("button", { class: "btn wide", style: "margin-bottom:10px", text: "➕ Новый чат", onclick: () => { close(); newChat(); } }));
         for (const c of chatsAll()) {
           const day = c.upd ? new Date(c.upd).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "";
@@ -1224,14 +1252,16 @@
     return {
       root, th, redraw: th.redraw, solve,
       sub: gradeName,
-      buttons: () => [["🧹 Очистить", "Очистить", async () => {
+      // «🧹 Очистить» only when there is something to clear (thread.add() puts it on top with the first message)
+      buttons: () => (S.msgs.study.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.study.length) { toast("Здесь пока пусто"); return; }
         if (!(await confirmBox("Очистить решения?", "Очистить", true))) return;
         await DB.clear("study");
         S.msgs.study = [];
         open = false;
         th.redraw();
-      }]],
+        refreshTop();
+      }]] : []),
       onShow: () => th.down(),
     };
   }
@@ -1259,16 +1289,22 @@
         el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи"),
         tplOk() ? el("button", { class: "big wide", onclick: () => templatesSheet("photo", th) }, el("span", { class: "ic", text: "🎭" }),
           el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null),
-      S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите картинку — я нарисую:" }),
+      S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите — я нарисую:" }),
         el("div", { class: "hints" }, DRAW_HINTS.map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.dispatchEvent(new Event("input")); ta.focus(); } })))] : null));
     const has = (op) => !!(S.me.photo_ops[op] || S.me.ai_ops[op]);
-    // the chosen photo, big, with what can be done to it
-    const chosen = () => (!photo ? null : el("div", { class: "tail chosen" },
+    // the chosen photo, big, with what can be done to it; with no photo under the results, the big ways to the next one
+    // (the empty screen with them is gone once there is a result)
+    const chosen = () => (photo ? el("div", { class: "tail chosen" },
       el("div", { class: "preview" }, el("img", { src: urlOf(photo), alt: "", onclick: () => viewer(photo, "photo.jpg") }),
         el("button", { class: "x", text: "✕", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
       el("div", { class: "tools" }, QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
-        tool("🪄 Своё — скажите или напишите", own), tool("⋯ Другое", more))));
+        tool("✍️ Своё: скажите или напишите", own), tool("⋯ Другое", more)))
+      : S.msgs.photo.length ? el("div", { class: "tail big-actions next", style: "grid-template-columns:1fr 1fr" },
+        el("button", { class: "btn", text: "📷 Снять фото", onclick: () => pick(true) }),
+        el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => pick(false) }),
+        tplOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🎭 Я на фото", onclick: () => templatesSheet("photo", th) }) : null)
+      : null);
     const th = thread("photo", scroll, empty, chosen);
     scroll.append(th.box);
     const scanBar = el("div", { class: "banner hidden" });
@@ -1317,7 +1353,7 @@
         const s = label(k), i = s.indexOf(" ");
         return i > 0 ? [s.slice(0, i), s.slice(i + 1), () => runOp(k)] : ["•", s, () => runOp(k)];
       };
-      const items = [["🪄", "Своё изменение — скажите или напишите", own]];
+      const items = [["✍️", "Своё изменение — скажите или напишите", own]];
       const seen = new Set();
       for (const [sec, keys] of PHOTO_SECS) {
         const here = keys.filter(ok);
@@ -1377,13 +1413,14 @@
     return {
       root, th, set, redraw: th.redraw,
       sub: () => (photo ? "фото выбрано" : S.me.can.draw ? "улучшить, изменить, нарисовать" : "улучшить и изменить фото"),
-      buttons: () => [["🧹 Очистить", "Очистить", async () => {
+      buttons: () => (S.msgs.photo.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.photo.length) { toast("Здесь пока пусто"); return; }
         if (!(await confirmBox("Удалить все готовые фото и картинки из списка?", "Очистить", true))) return;
         await DB.clear("photo");
         S.msgs.photo = [];
         th.redraw();
-      }]],
+        refreshTop();
+      }]] : []),
       onShow: () => { gal.photo = null; th.down(); },
     };
   }
@@ -1398,15 +1435,20 @@
       hint: "Выберите ролик — потом покажете, кого в нём заменить на себя или родных. Подойдёт и свой ролик с телефона, до 20 секунд.",
       none: "Готовых роликов пока нет — загляните позже.", busy: "Подождите, ролик ещё делается",
       foot: "Ролик будет готов примерно через 5–8 минут и появится здесь — его можно сохранить и отправить. Можно свернуть приложение, но не закрывайте его." },
-    photo: { title: "🎭 Я на фото", path: "/api/tphoto", go: "🖼️ Сделать фото", find: "🔎 Ищу лица на картинке…",
+    photo: { title: "🎭 Я на фото", path: "/api/tphoto", go: "✨ Создать картинку", find: "🔎 Ищу лица на картинке…",
       off: "«Я на фото» пока не включено — его включает владелец помощника.",
       hint: "Выберите картинку — потом покажете, кого на ней заменить на себя или родных.",
       none: "Готовых картинок пока нет — загляните позже.", busy: "Подождите, предыдущее фото ещё делается",
-      foot: "Обычно до полуминуты. Готовое фото появится здесь, во вкладке «Фото»." } };
+      foot: "Обычно до полуминуты. Готовая картинка появится здесь, во вкладке «Фото»." } };
+  // «1 секунду», «3 секунды», «6 секунд»
+  const secs = (k) => k + " " + (k % 10 === 1 && k % 100 !== 11 ? "секунду"
+    : k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14) ? "секунды" : "секунд");
   // what the gallery loaded this visit of the tab: {theme, page, items, more, total, themes, can, note}; the tab's onShow forgets it
   const gal = { video: null, photo: null };
-  // the owner reads the server's own words; the family only «not on yet» or «none yet»
-  const noteFor = (kind, st) => (S.me.panel ? st.note || TPL[kind].none : !st.can ? TPL[kind].off : TPL[kind].none);
+  // The owner reads the server's own words. The family reads them too while the feature is on («Шаблоны ещё
+  // загружаются…»), but when it is off they read this app's «not on yet» for that kind: the server's reasons then name
+  // programs (ffmpeg) or say «Видео» in the photo gallery — on purpose, unlike «when can is false, show note».
+  const noteFor = (kind, st) => (S.me.panel ? st.note || TPL[kind].none : !st.can ? TPL[kind].off : st.note || TPL[kind].none);
   function templatesSheet(kind, th) {
     const T = TPL[kind];
     if (S.busy[th.name]) { toast(T.busy); return; }
@@ -1418,7 +1460,8 @@
       const stick = el("div", { class: "sheet-stick" }, chips);
       const note = el("div", { class: "note-card hidden" });
       const grid = el("div", { class: "tpl-grid" + (kind === "photo" ? " photo" : "") });
-      box.append(el("p", { class: "muted", style: "margin:0 0 4px;font-size:15px", text: T.hint }), stick, note, grid);
+      const hint = el("p", { class: "muted", style: "margin:0 0 4px;font-size:15px", text: T.hint });
+      box.append(hint, stick, note, grid);
       let loading = 0, err = null, errPage = 1;
       const group = (x) => (x.people || 1) > 1;  // «👥 Компанией»: for two or three
       const fits = (x) => st.theme !== "group" || group(x);
@@ -1435,6 +1478,7 @@
             text: k && k !== "group" ? emo(v) : v, onclick: () => pick(k) }));
         }
         const off = st.loaded && !st.can;
+        hint.classList.toggle("hidden", off);  // «Выберите картинку…» over «not on yet» would ask for what cannot be done
         stick.classList.toggle("hidden", off || !st.loaded);
         grid.classList.toggle("hidden", off);
         note.classList.toggle("hidden", !off);
@@ -1443,7 +1487,7 @@
         if (off) return;
         if (kind === "video") {
           grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(th); } },
-            el("span", { class: "plus", text: "➕" }), el("span", { class: "name", text: "Свой ролик" })));
+            el("span", { class: "plus", text: "+" }), el("span", { class: "name", text: "Свой ролик" })));
         }
         if (loading === 1 || (!st.loaded && !err)) {
           grid.append(el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
@@ -1538,10 +1582,11 @@
         return;
       }
       const n = Math.min(3, found.faces.length);
+      const NO_TICK = n === 1 ? "Поставьте галочку: фото ваше или человек согласен." : "Поставьте галочку: фото ваши или люди согласны.";
       const names = kind === "video" ? (n === 1 ? ["Человек в ролике"] : ["Человек 1", "Человек 2", "Человек 3"])
         : n === 1 ? ["Человек на картинке"] : n === 2 ? ["Слева", "Справа"] : ["Слева", "В центре", "Справа"];
       const why = el("div", { class: "why" });
-      const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
+      const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent === NO_TICK) why.textContent = ""; } });
       const rows = el("div");
       const take = async (i, camera) => {
         const f = await pickFile("image/*", camera);
@@ -1557,23 +1602,36 @@
           const slot = el("button", { class: "slot" + (photos[i] ? " set" : ""), "aria-label": "Фото для: " + who, onclick: () => menu(who, [
             ["📷", "Снять фото", () => take(i, true)], ["🖼️", "Из галереи", () => take(i, false)],
             photos[i] ? ["↩️", "Оставить как есть", () => { photos[i] = null; paintRows(); }] : null]) },
-            photos[i] ? el("img", { src: urlOf(photos[i]), alt: "" }) : el("span", {}, "➕", el("br"), "фото"));
+            photos[i] ? el("img", { src: urlOf(photos[i]), alt: "" }) : el("span", {}, el("b", { class: "plus", text: "+" }), "фото"));
           rows.append(el("div", { class: "who-row" },
             el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }), slot,
-            el("div", { class: "who" }, el("b", { text: who }), el("small", { text: photos[i] ? "✓ ваше фото" : "останется как есть" }),
-              kind === "video" && p.on ? el("small", { text: "в кадре " + Math.max(1, Math.round(p.on)) + " с" }) : null)));
+            el("div", { class: "who" }, el("b", { text: who }),
+              el("small", { text: photos[i] ? "✓ ваше фото" : n === 1 ? "нажмите «+ фото»" : "останется как есть" }),
+              kind === "video" && p.on ? el("small", { text: "на экране " + secs(Math.max(1, Math.round(p.on))) }) : null)));
         });
       };
       paintRows();
       const where = kind === "video" ? "В ролике" : "На картинке";
-      const hint = n === 1 ? "Нажмите ➕ и выберите своё фото: одно лицо, крупно, при хорошем свете."
-        : `${where} ${n} человека. Нажмите ➕ у тех, кого заменить, и выберите фото: одно лицо, крупно, при хорошем свете. Остальные останутся как есть.`;
+      const hint = n === 1 ? "Нажмите «+ фото» и выберите своё фото: одно лицо, крупно, при хорошем свете."
+        : `${where} ${n} человека. Нажмите «+ фото» у тех, кого заменить, и выберите фото: одно лицо, крупно, при хорошем свете. Остальные останутся как есть.`;
       const goBtn = el("button", { class: "btn wide", text: T.go, onclick: async () => {
-        if (!photos.some(Boolean)) { why.textContent = "Нажмите ➕ и выберите хотя бы одно фото."; return; }
-        if (!check.checked) { why.textContent = "Поставьте галочку: фото ваше или человек согласен."; return; }
-        close();
+        if (!photos.some(Boolean)) { why.textContent = "Нажмите «+ фото» и выберите хотя бы одно фото."; return; }
+        if (!check.checked) { why.textContent = NO_TICK; return; }
+        // the photos are made smaller first (a second or two on an old phone): the sheet stays, the button says so
+        goBtn.disabled = true;
+        goBtn.textContent = "Готовлю фото…";
+        why.textContent = "";
         const images = [];
-        for (let i = 0; i < n; i++) images.push(photos[i] ? await b64(await shrink(photos[i], 2048, 0.92)) : null);
+        try {
+          for (let i = 0; i < n; i++) images.push(photos[i] ? await b64(await shrink(photos[i], 2048, 0.92)) : null);
+        } catch (e) {
+          goBtn.disabled = false;
+          goBtn.textContent = T.go;
+          why.textContent = "Не получилось прочитать фото — выберите другое.";
+          return;
+        }
+        if (!goBtn.isConnected) return;  // closed with ✕ meanwhile: nothing is sent
+        close();
         const first = photos.find(Boolean);
         const many = photos.filter(Boolean).length;
         const out = await th.run(T.path, { analysis: found.analysis, images, consent: true },
@@ -1601,26 +1659,39 @@
     const an = () => !!((S.me.ai_ops || {}).animate || (S.me.photo_ops || {}).animate);
     const empty = () => {
       const box = el("div", { class: "empty" }, el("h2", { text: "Ролики с вами" }));
-      if (!tv() && !an() && !S.me.panel) { box.append(el("div", { class: "note-card", text: NOT_ON })); return box; }
-      const feat = (on, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off") }, el("b", { text: title }), " — " + words,
-        on ? null : el("small", { text: offWords }));
+      if (!tv() && !an() && !S.me.panel) { box.append(el("div", { class: "note-card", "data-off": "tv an", text: NOT_ON })); return box; }
+      const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
+        el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
       box.append(
-        feat(tv(), "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.",
+        feat(tv(), "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.",
           S.me.panel ? "Пока не работает — нажмите «🎭 Я в ролике» внизу, чтобы узнать почему." : "Пока не включено."),
-        feat(an(), "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
+        feat(an(), "an", "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
       return box;
     };
     const th = thread("video", scroll, empty);
     scroll.append(th.box);
+    // a tap on a switched-off button: the words on the screen that already say so light up; with no such words (the
+    // clips cover them) a short notice says whom to ask
+    function offTap(k, name) {
+      const said = th.box.querySelector(`.empty [data-off~="${k}"]`);
+      if (said) {
+        said.classList.remove("nudge");
+        void said.offsetWidth;  // the light runs again on every tap
+        said.classList.add("nudge");
+        said.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        return;
+      }
+      toast(S.me.panel ? `«${name}» пока не работает — его подключают в «Управлении».` : `Попросите владельца помощника включить «${name}».`, 4000);
+    }
     const tvBtn = el("button", { class: "btn", text: "🎭 Я в ролике", onclick: () => {
-      if (!tv() && !S.me.panel) { toast(TPL.video.off, 5000); return; }
+      if (!tv() && !S.me.panel) { offTap("tv", "Я в ролике"); return; }
       templatesSheet("video", th);
     } });
     const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить фото", onclick: animate });
     const paintBar = () => { tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an()); };
     root.append(scroll, el("div", { class: "composer" }, el("div", { class: "vbar" }, tvBtn, anBtn)));
     async function animate() {
-      if (!an()) { toast(NOT_ON, 5000); return; }
+      if (!an()) { offTap("an", "Оживить фото"); return; }
       if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
       const f = await pickFile("image/*", false);
       if (!f) return;
@@ -1631,13 +1702,14 @@
     return {
       root, th, redraw: th.redraw,
       sub: () => "ролики с вами и ожившие фото",
-      buttons: () => [["🧹 Очистить", "Очистить", async () => {
+      buttons: () => (S.msgs.video.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.video.length) { toast("Здесь пока пусто"); return; }
         if (!(await confirmBox("Удалить все ролики из списка?", "Очистить", true))) return;
         await DB.clear("video");
         S.msgs.video = [];
         th.redraw();
-      }]],
+        refreshTop();
+      }]] : []),
       onShow: () => {
         gal.video = null;
         paintBar();
@@ -1692,7 +1764,10 @@
         const row = el("div", { class: "row" }, el("div", { class: "grow", text: f }));
         row.append(el("button", { class: "icon-btn", text: "✕", title: "Забыть", "aria-label": "Забыть", onclick: () => softDelete(row, "Удалено из памяти", async () => {
           const r = await api("/api/memory", { forget: f }).catch(() => null);
-          if (r) { S.me.memory = r.memory; draw(); }
+          if (!r) { toast("Не получилось забыть — проверьте интернет"); draw(); return; }
+          S.me.memory = r.memory;
+          row.remove();  // only this row: another one deleted just now keeps its «↩️ Вернуть»
+          if (!mem.isConnected || !S.me.memory.length) draw();
         }) }));
         mem.append(row);
       }
@@ -1734,8 +1809,11 @@
     const hintText = () => "Нажмите и говорите — по-русски или на " + me.langs[target][1].toLowerCase().replace(/ий$/, "ом");
     const scr = el("div", { class: "viewer", style: "background:var(--bg)" });
     const top = el("div", { class: "top" }, el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => scr.remove() }), el("h1", { text: "Переводчик" }));
-    const langs = el("div", { class: "chips", style: "padding:10px 12px 0" });
-    const list = el("div", { class: "scroll" });
+    const langs = el("div", { class: "chips fade", style: "padding:10px 12px 0" });  // the fade shows there are more to the right
+    // what to do, until the first phrase
+    const list = el("div", { class: "scroll" }, el("div", { class: "empty tr-empty" },
+      el("p", { text: "Выберите язык сверху, нажмите 🎤 и скажите фразу — перевод появится здесь и прозвучит вслух." })));
+    const firstCard = () => list.querySelectorAll(".tr-empty").forEach((x) => x.remove());
     const ta = el("textarea", { rows: 1, placeholder: "Или напишите текст" });
     autoGrow(ta);
     const mic = el("button", { class: "mic-big", text: "🎤", "aria-label": "Говорить" });
@@ -1749,16 +1827,20 @@
         translate(t, null);
       } })));
     function paintLangs() {
+      const x = langs.scrollLeft;  // the row stays where it was scrolled to
       langs.innerHTML = "";
       for (const [k, v] of Object.entries(me.langs)) {
         langs.append(el("button", { class: "chip" + (k === target ? " on" : ""), text: v[0] + " " + v[1], onclick: () => { target = k; store.set("trLang", k); paintLangs(); } }));
       }
+      langs.scrollLeft = x;
       if (!recording) hint.textContent = hintText();
     }
     let recording = false;
     paintLangs();
     scr.append(top, langs, list, bottom);
     document.body.append(scr);
+    const on = langs.querySelector(".chip.on");  // the language chosen last time is in sight, not behind the fade
+    if (on && on.offsetLeft + on.offsetWidth > langs.clientWidth * 0.85) langs.scrollLeft = on.offsetLeft - 12;
     mic.onclick = async () => {
       if (!recording) {
         try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
@@ -1775,6 +1857,7 @@
       const r = Rec.stop(true);
       if (!r || r.duration < 0.6) return;
       const card = el("div", { class: "tr-card" }, el("div", { class: "status" }, el("span", { class: "spin" }), "Слушаю…"));
+      firstCard();
       list.append(card);
       list.scrollTop = list.scrollHeight;
       try {
@@ -1786,6 +1869,7 @@
     };
     async function translate(text, lang) {
       const card = el("div", { class: "tr-card" }, el("div", { class: "src", text }), el("div", { class: "status" }, el("span", { class: "spin" }), "Перевожу…"));
+      firstCard();
       list.append(card);
       list.scrollTop = list.scrollHeight;
       try {
