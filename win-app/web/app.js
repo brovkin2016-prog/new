@@ -82,7 +82,9 @@ function draw(s) {
   $("#prep").hidden = !s.preparing;  // the laptop's own bridges being made on the server
   $("#appsCard").hidden = !has;
   document.querySelectorAll("#mode button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === (!!s.onlyApps || appsOpen)));
-  $("#ver").textContent = "Winger " + s.version + " · Проверить обновление" + (s.update && s.update.state === "downloading" ? " · загружаю новую версию…" : "");
+  const u = s.update || {};
+  $("#verName").textContent = "Winger " + s.version + (u.state === "downloading" ? " · загружаю " + (u.name || "новую версию") + "…"
+    : u.state === "ready" ? " · ставлю " + (u.name || "новую версию") + ", окно закроется на минуту" : "");
   if (!appsOpen) drawApps();
 }
 // the connections as buttons, as on the phone: made again only when the list changes (a click is never lost to a
@@ -224,7 +226,31 @@ $("#mode").onclick = async (e) => {
   appsOpen = false;
   try { await call("apps", { only: false, apps: S.apps || [] }); refresh(); } catch (err) { toast(err.message); }
 };
-$("#ver").onclick = async () => { await call("update", {}).catch(() => {}); toast("Проверяю обновление…"); setTimeout(refresh, 4000); };
+// «Проверить обновление»: the family server is asked; what came of it is said (newest already, a new one coming, or why not)
+$("#ver").onclick = async () => {
+  const b = $("#ver");
+  if (b.disabled) return;
+  b.disabled = true;
+  const t0 = Math.floor(Date.now() / 1000) - 1;
+  toast("Проверяю обновление…", 30000);
+  try {
+    await call("update", {});
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const st = await call("state");
+      const u = st.update || {};
+      if ((u.checked || 0) < t0 && u.state !== "downloading") continue;
+      draw(st);
+      if (u.state === "latest") toast("У вас последняя версия — Winger " + st.version, 4000);
+      else if (u.state === "downloading") toast("Есть новая версия " + (u.name || "") + " — загружаю и ставлю, окно закроется на минуту", 7000);
+      else if (u.state === "ready") toast("Ставлю новую версию " + (u.name || "") + " — окно закроется на минуту", 7000);
+      else if ((u.state || "").startsWith("failed: ")) toast("Не получилось: " + u.state.slice(8), 7000);
+      else continue;
+      return;
+    }
+    toast("Сервер не ответил — попробуйте ещё раз через минуту", 5000);
+  } catch (e) { toast(e.message); } finally { b.disabled = false; }
+};
 $("#journal").onclick = async () => {
   toast("Проверяю связь с сервером…", 10000);
   try {

@@ -1,5 +1,5 @@
 // Winger for Windows' window (the phone's screen): opened by its key, a link added, on through a real server, the
-// connection's button that switches it off, its ⚡, the programs list, the journal
+// connection's button that switches it off, its ⚡, the programs list, the journal, the update check
 const { chromium } = require("playwright");
 const fs = require("fs");
 (async () => {
@@ -39,6 +39,10 @@ const fs = require("fs");
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     want(clip.startsWith("Winger для Windows") && clip.includes("connected via") && !clip.includes("test-pass-123") && !/\d+\.\d+\.\d+\.\d+/.test(clip),
       "the journal: what happened, nothing private");
+    // «Проверить обновление» says what came of it (here no family server answers: why not, in plain words)
+    await page.click("#ver");
+    await page.waitForSelector(".toast:has-text('Не получилось'), .toast:has-text('последняя версия')", { timeout: 40000 });
+    want(/Не получилось: .{10,}|последняя версия/.test(await page.innerText("#toast")), "the update check says what came of it");
     await page.click("#conns .conn:has-text('Тест')");  // the button of the one in use: off, as on the phone
     await page.waitForSelector("#state:has-text('Выключено')", { timeout: 10000 });
     const r = await page.evaluate(() => fetch("/api/connect", { method: "POST", body: "x" }).then((r) => r.status));

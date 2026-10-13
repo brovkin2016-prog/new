@@ -31,7 +31,7 @@ type UpdateInfo struct {
 	SHA256  string `json:"sha256"`
 	Notes   string `json:"notes"`
 	Checked int64  `json:"checked"`
-	State   string `json:"state"` // "", "downloading", "ready", "failed: …"
+	State   string `json:"state"` // "", "latest", "downloading", "ready", "failed: …"
 }
 
 func (f *Family) post(path string, body any, out any) bool {
@@ -133,28 +133,45 @@ func (f *Family) RenewNow(p *Profile) *Profile {
 	return nil
 }
 
-// CheckUpdate asks the family server for a newer Winger for Windows and, when there is one, gets it ready.
+// CheckUpdate asks the family server for a newer Winger for Windows and, when there is one, gets it ready. What came of
+// it is in Update.State (the window says it after «Проверить обновление»).
 func (f *Family) CheckUpdate() {
+	said := func(state string) {
+		f.mu.Lock()
+		if f.Update.State != "downloading" && f.Update.State != "ready" {
+			f.Update.State = state
+		}
+		f.Update.Checked = time.Now().Unix()
+		f.mu.Unlock()
+	}
 	host, _ := f.st.HomeHost()
 	if host == "" {
+		said("failed: новые версии приходят с семейного сервера, а его ссылки в Winger нет")
 		return
 	}
 	c := client(f.eng.ProbePort(), 30*time.Second)
 	r, err := c.Get("https://" + host + ":8443/app/winger-win.json")
 	if err != nil {
 		Logf("update check: %v", err)
+		said("failed: семейный сервер не ответил — проверьте интернет и попробуйте ещё раз")
 		return
 	}
 	var info UpdateInfo
 	ok := r.StatusCode == 200 && json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&info) == nil
 	r.Body.Close()
-	f.mu.Lock()
-	f.Update.Checked = time.Now().Unix()
-	f.mu.Unlock()
-	if !ok || info.Code <= versionCode || len(info.SHA256) != 64 {
+	switch {
+	case !ok || len(info.SHA256) != 64 && info.Code > versionCode:
+		said("failed: семейный сервер не дал сведений о версии")
+		return
+	case info.Code <= versionCode:
+		said("latest")
 		return
 	}
 	f.mu.Lock()
+	if f.Update.State == "downloading" || f.Update.State == "ready" { // a check already on it
+		f.mu.Unlock()
+		return
+	}
 	info.Checked, info.State = time.Now().Unix(), "downloading"
 	f.Update = info
 	f.mu.Unlock()

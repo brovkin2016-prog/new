@@ -41,6 +41,8 @@ header h1{margin:0;font-size:22px}header small{color:var(--muted)}
 .seg button.on{background:var(--card);color:var(--text);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .apps{margin-top:8px}.apps label{display:flex;gap:8px;align-items:center;padding:6px 0}
 footer{display:flex;flex-direction:column;gap:6px;align-items:flex-start;padding:6px 4px 20px}
+.verrow{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;color:var(--muted);font-size:13px}
+.btn.small{padding:8px 12px;font-size:13px;flex:none}.btn:disabled{opacity:.6;cursor:default}
 .link{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;cursor:pointer;padding:2px 0}
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center}
 .sheet-bg[hidden]{display:none}
