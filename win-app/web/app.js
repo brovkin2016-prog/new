@@ -79,6 +79,7 @@ function draw(s) {
   } else if (!cap && capBox) capBox.remove();
   if (cap) capBox.dataset.url = cap;  // a new check (the bridge started again) has its own page
   drawConns(s);
+  $("#prep").hidden = !s.preparing;  // the laptop's own bridges being made on the server
   $("#appsCard").hidden = !has;
   document.querySelectorAll("#mode button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === (!!s.onlyApps || appsOpen)));
   $("#ver").textContent = "Winger " + s.version + " · Проверить обновление" + (s.update && s.update.state === "downloading" ? " · загружаю новую версию…" : "");

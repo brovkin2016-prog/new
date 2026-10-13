@@ -208,3 +208,29 @@ func TestDualNameRepairedOnStart(t *testing.T) {
 		t.Fatal("an out-of-range choice is not the last one")
 	}
 }
+
+// The laptop's own bridges (one call carries one device): each takes over, in place, the phone's bridge of the same
+// service it had from before — chosen, if that one was chosen, so the VPN goes on on the laptop's own.
+func TestLaptopBridgeTakesThePhonesPlace(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	phone := "winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F11111111111111&fps=24&batch=45&reliable=1&dual=0#phone"
+	phoneWB := "winger-bridge://wbstream?room=wbstream%3A%2F%2Fabcdef123&mode=dc&dual=0#phonewb"
+	laptop := "winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F22222222222222&fps=24&batch=45&reliable=1&dual=0#%D0%9C%D0%BE%D1%81%D1%82%20%C2%B7%20%D0%A2%D0%B5%D0%BB%D0%B5%D0%BC%D0%BE%D1%81%D1%82"
+	st.Add(mustParse(t, "hysteria2://u:k@vpn.example.ru:443/?sni=vpn.example.ru#Дом"))
+	st.Keep(mustParse(t, phoneWB))
+	st.Keep(mustParse(t, phone))
+	st.Update(func(s *Settings) { s.Current = 2 }) // the phone's Telemost bridge chosen
+	if !st.Keep(mustParse(t, laptop)) {
+		t.Fatal("the laptop's own bridge was not taken")
+	}
+	all := st.Profiles()
+	if len(all) != 3 || all[2].JoinLink != "https://telemost.yandex.ru/j/22222222222222" || all[2].Name != "Мост · Телемост" {
+		t.Fatalf("not in the phone's place: %+v", all)
+	}
+	if c := st.Chosen(); c == nil || c.Link != laptop {
+		t.Fatalf("the chosen one is not the laptop's own: %+v", c)
+	}
+	if st.Has(phone) || !st.Has(laptop) || !st.Has(phoneWB) {
+		t.Fatal("Has does not tell which links are saved")
+	}
+}

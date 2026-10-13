@@ -16,11 +16,12 @@ import (
 // Family: what the family server gives this computer by the VPN login it has — the bridges meant for it, its own current
 // link when the server moved to a new address, and new versions of Winger for Windows.
 type Family struct {
-	st      *Store
-	eng     *Engine
-	dataDir string
-	mu      sync.Mutex
-	Update  UpdateInfo
+	st        *Store
+	eng       *Engine
+	dataDir   string
+	mu        sync.Mutex
+	Update    UpdateInfo
+	preparing bool
 }
 
 // UpdateInfo is the newest Winger for Windows the family server has.
@@ -53,26 +54,53 @@ func (f *Family) post(path string, body any, out any) bool {
 	return json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(out) == nil
 }
 
-// SyncBridges keeps the bridges meant for this computer; the number of new or changed ones.
+// SyncBridges keeps the bridges meant for this computer; the number of new or changed ones. The laptop has bridges of
+// its own (one call carries one device: on the phone's bridge the two push each other out of the call again and
+// again); the server makes them when this computer first asks (preparing). A bridge it had from before (the phone's)
+// is taken over in place by the laptop's own of the same service — and when the VPN runs on it, it goes on on the new.
 func (f *Family) SyncBridges(_ int) int {
 	_, auth := f.st.HomeHost()
 	if auth == "" {
 		return 0
 	}
 	var out struct {
-		Links []string `json:"links"`
+		Links     []string `json:"links"`
+		Preparing bool     `json:"preparing"`
 	}
-	if !f.post("/api/winger_bridge", map[string]string{"auth": auth}, &out) {
+	if !f.post("/api/winger_bridge", map[string]string{"auth": auth, "device": "laptop"}, &out) {
 		return 0
 	}
+	f.mu.Lock()
+	f.preparing = out.Preparing
+	f.mu.Unlock()
 	n := 0
 	for _, l := range out.Links {
 		if p, err := ParseLink(l); err == nil && p.Bridge && f.st.Keep(p) {
 			n++
 		}
 	}
-	Logf("bridges from the server: %d, new %d", len(out.Links), n)
+	Logf("bridges from the server: %d, new %d%s", len(out.Links), n, map[bool]string{true: " (the laptop's own are being made)"}[out.Preparing])
+	if st := f.eng.Status(); n > 0 && st.Phase != "off" && st.Active != "" && !f.st.Has(st.Active) {
+		// the bridge in use was renewed: on again on its new link (the same service, chosen as with a tap on it)
+		if was, err := ParseLink(st.Active); err == nil {
+			for i, p := range f.st.Profiles() {
+				if p.Same(was) {
+					f.st.Update(func(s *Settings) { s.Current = i })
+					Logf("bridge: the one in use was renewed (the laptop's own) — on again on it")
+					_ = f.eng.Connect()
+					break
+				}
+			}
+		}
+	}
 	return n
+}
+
+// Preparing: the server is making this laptop's own bridges.
+func (f *Family) Preparing() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.preparing
 }
 
 // RenewNow: the family server, asked by its name, gives this computer's own current link; when it moved to a new
@@ -177,22 +205,25 @@ func (f *Family) download(c *http.Client, url, want string) (string, error) {
 	return path, nil
 }
 
-// Loop: a minute after the start, then every hour; the bridges every 20 minutes while there is none yet (as the phone).
+// Loop: a minute after the start, then every hour; the bridges every 20 minutes while there is none yet (as the phone),
+// every 5 while the server makes the laptop's own.
 func (f *Family) Loop() {
 	time.Sleep(time.Minute)
-	var last time.Time
+	var last, lastBridges time.Time
 	for {
-		if last.IsZero() || time.Since(last) >= time.Hour {
-			last = time.Now()
+		switch {
+		case last.IsZero() || time.Since(last) >= time.Hour:
+			last, lastBridges = time.Now(), time.Now()
 			f.SyncBridges(0)
 			if p := f.st.Chosen(); p != nil && !p.Bridge {
 				f.RenewNow(p)
 			}
 			f.CheckUpdate()
-		} else if !f.hasBridge() {
+		case f.Preparing() || !f.hasBridge() && time.Since(lastBridges) >= 20*time.Minute:
+			lastBridges = time.Now()
 			f.SyncBridges(0)
 		}
-		time.Sleep(20 * time.Minute)
+		time.Sleep(5 * time.Minute)
 	}
 }
 

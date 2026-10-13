@@ -13,7 +13,7 @@ header h1{margin:0;font-size:22px}header small{color:var(--muted)}
 .power.wait{background:linear-gradient(135deg,#a79cff,#7fe0cf);animation:pulse 1.4s infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 16px rgba(91,79,240,.12)}}
 .state{font-size:22px;font-weight:700;margin-top:14px}.state.on{color:var(--ok)}.state.wait{color:var(--wait)}
-.note{color:var(--muted);min-height:20px;margin-top:4px;white-space:pre-line}.note.err{color:#dc2626}
+.note{color:var(--muted);min-height:20px;margin-top:4px;white-space:pre-line}.note.err{color:#dc2626}.note.prep{font-size:13px;margin:0 4px 10px}
 .ping{margin-top:12px;border:0;border-radius:20px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer;background:var(--card);color:var(--muted)}
 .ping.good{color:#10b981;background:rgba(16,185,129,.14)}.ping.slow{color:#f59e0b;background:rgba(245,158,11,.14)}.ping.bad{color:#dc2626;background:rgba(220,38,38,.12)}
 .ping[hidden]{display:none}

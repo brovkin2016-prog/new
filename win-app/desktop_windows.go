@@ -123,7 +123,7 @@ func runTray() error {
 		other := systray.AddMenuItem("Через мост", "")
 		other.Hide()
 		systray.AddSeparator()
-		quit := systray.AddMenuItem("Убрать значок", "VPN продолжит работать")
+		quit := systray.AddMenuItem("Выйти", "VPN выключится, значок уйдёт; снова — ярлык Winger")
 		shown, was := "", ""
 		go func() {
 			for {
@@ -201,6 +201,10 @@ func runTray() error {
 				case <-other.ClickedCh:
 					_, _ = api("switch")
 				case <-quit.ClickedCh:
+					// out of Winger: the VPN off (it does not come back by itself after a restart either), the icon gone
+					if b, _ := api("state"); !strings.Contains(string(b), `"phase":"off"`) {
+						_, _ = api("disconnect")
+					}
 					systray.Quit()
 				}
 			}

@@ -97,7 +97,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		}
 		reply(w, map[string]any{"status": status, "conns": conns, "onlyApps": s.OnlyApps, "apps": s.Apps,
 			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo(), "captcha": Captcha(),
-			"down": down, "up": up, "activeName": name, "switch": other})
+			"down": down, "up": up, "activeName": name, "switch": other, "preparing": fam.Preparing()})
 	})
 	mux.HandleFunc("/api/connect", func(w http.ResponseWriter, r *http.Request) {
 		if err := eng.Connect(); err != nil {

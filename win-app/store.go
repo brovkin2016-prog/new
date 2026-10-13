@@ -106,6 +106,16 @@ func (st *Store) Profiles() []*Profile {
 	return out
 }
 
+// Has: this link is among the saved connections.
+func (st *Store) Has(link string) bool {
+	for _, sv := range st.Get().Profiles {
+		if sv.Link == link {
+			return true
+		}
+	}
+	return false
+}
+
 // Chosen is the connection the person chose (nil when there is none).
 func (st *Store) Chosen() *Profile {
 	all := st.Profiles()
