@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The video templates (ai-app/server/templates.json), checked where GitHub's runners can reach the free stock sites:
 each page's direct video file is found (Mixkit's CDN, the Pexels page's own file links), a few seconds are fetched and
-cut the way the family server will cut them (ffmpeg: the template's seconds, 9:16, 480×854). Nothing of the videos is
+cut the way the family server will cut them (ffmpeg: up to the catalog's seconds, 9:16, 480×854). Nothing of the videos is
 kept or published — only manifest.json: per template the file's address that worked (or why none did), its size and
 shape. The family server downloads the templates itself from those addresses.
 Also asks the Hugging Face Spaces that put a person into a template for their API (names and inputs).
@@ -83,21 +83,22 @@ def check(t, seconds):
                 os.remove(path)
                 continue
             dur, w, h = probe(path)
+            secs = round(min(seconds, dur - t.get("start", 0)), 1)  # the whole clip when it is shorter
             cut = f"{OUT}/{t['id']}.cut.mp4"
-            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(t.get("start", 0)), "-i", path, "-t", str(seconds),
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(t.get("start", 0)), "-i", path, "-t", str(secs),
                                 "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=25",
                                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "96k", cut],
                                capture_output=True, text=True)
-            ok = r.returncode == 0 and os.path.exists(cut) and probe(cut)[0] > seconds - 1.5
-            people, counts, tallest = faces(cut, seconds, OUT) if ok else (None, [], 0)
+            ok = r.returncode == 0 and os.path.exists(cut) and secs >= 4 and probe(cut)[0] > secs - 1.5
+            people, counts, tallest = faces(cut, secs, OUT) if ok else (None, [], 0)
             for p in (path, cut):
                 if os.path.exists(p):
                     os.remove(p)
-            if ok and dur >= seconds - 0.5:
+            if ok:
                 return {"id": t["id"], "ok": True, "url": final if "pexels.com/download" not in url else final,
-                        "source": url, "bytes": size, "duration": round(dur, 1), "w": w, "h": h,
+                        "source": url, "bytes": size, "duration": round(dur, 1), "seconds": secs, "w": w, "h": h,
                         "faces": people, "face_counts": counts, "face_h": tallest, "tried": tried}
-            tried.append(f"{url} cut failed or too short ({dur:.1f} s): {r.stderr[-160:]}")
+            tried.append(f"{url} cut failed or shorter than 4 s ({dur:.1f} s): {r.stderr[-160:]}")
         except Exception as e:
             tried.append(f"{url} {str(e)[:120]}")
     return {"id": t["id"], "ok": False, "tried": tried}
@@ -115,7 +116,7 @@ def space_api(space):
 cat = json.load(open(CAT))
 res, t0 = [], time.time()
 for t in cat["templates"]:
-    r = check(t, cat.get("seconds", 5))
+    r = check(t, cat.get("seconds", 15))
     r["title"] = t["title"]
     res.append(r)
     print(("ok   " if r["ok"] else "FAIL ") + t["id"], t["title"], f"faces={r.get('faces')} {r.get('face_counts')}" if r["ok"] else "",

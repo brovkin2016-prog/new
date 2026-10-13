@@ -1,240 +1,465 @@
 {
  "themes": {
-  "dance": "💃 Танцы",
-  "movie": "🎬 Кино",
-  "hero": "🦸 Герои",
-  "sport": "⚽ Спорт",
-  "fun": "😂 Юмор",
+  "vlog": "🤳 Селфи и влог",
+  "friends": "👯 С друзьями",
+  "love": "❤️ Вдвоём",
+  "party": "🪩 Вечеринки",
   "holiday": "🎉 Праздники",
   "travel": "🌍 Путешествия",
-  "fashion": "👗 Мода",
-  "kids": "🧸 Детские",
-  "love": "❤️ Романтика"
+  "dance": "💃 Танцы",
+  "fashion": "👗 Стиль",
+  "sport": "⚽ Спорт",
+  "hero": "🦸 Герои",
+  "kids": "🧸 Детские"
  },
- "seconds": 5,
+ "seconds": 15,
  "templates": [
   {
-   "id": "m415",
-   "theme": "dance",
-   "title": "Хип-хоп в солнечном лофте",
-   "page": "https://mixkit.co/free-stock-video/woman-dancing-hip-hop-415/",
+   "id": "m36059",
+   "theme": "friends",
+   "title": "Пижамная вечеринка",
+   "page": "https://mixkit.co/free-stock-video/couple-of-funny-female-friends-taking-selfies-36059/",
    "start": 0
   },
   {
-   "id": "p7570258",
-   "theme": "dance",
-   "title": "Соло в студии",
-   "page": "https://www.pexels.com/video/woman-dancing-7570258/",
+   "id": "m41290",
+   "theme": "vlog",
+   "title": "Влог крупным планом",
+   "page": "https://mixkit.co/free-stock-video/face-of-a-vlogger-speaking-to-the-camera-41290/",
    "start": 0
   },
   {
-   "id": "p6003772",
-   "theme": "dance",
-   "title": "Танцую дома",
-   "page": "https://www.pexels.com/video/a-woman-dancing-at-home-6003772/",
+   "id": "m9045",
+   "theme": "holiday",
+   "title": "День рождения: селфи",
+   "page": "https://mixkit.co/free-stock-video/friends-celebrate-birthday-and-take-selfie-at-party-9045/",
    "start": 0
   },
   {
-   "id": "p6616339",
-   "theme": "dance",
-   "title": "Контемпорари",
-   "page": "https://www.pexels.com/video/dancing-woman-6616339/",
+   "id": "m42323",
+   "theme": "vlog",
+   "title": "Инфлюенсер в кадре",
+   "page": "https://mixkit.co/free-stock-video/portrait-of-an-influencer-talking-to-the-camera-42323/",
    "start": 0
   },
   {
-   "id": "p8929221",
-   "theme": "dance",
-   "title": "Хип-хоп на улице",
-   "page": "https://www.pexels.com/video/a-man-dancing-on-the-street-8929221/",
+   "id": "m21235",
+   "theme": "friends",
+   "title": "Селфи на полу с подругами",
+   "page": "https://mixkit.co/free-stock-video/happy-female-friends-taking-selfies-on-the-floor-21235/",
    "start": 0
   },
   {
-   "id": "p10265189",
-   "theme": "dance",
-   "title": "Хип-хоп на балконе",
-   "page": "https://www.pexels.com/video/man-dancing-hip-hop-on-balcony-10265189/",
+   "id": "m46352",
+   "theme": "vlog",
+   "title": "Влог на закате",
+   "page": "https://mixkit.co/free-stock-video/vlogger-man-recording-video-outdoors-46352/",
    "start": 0
   },
   {
-   "id": "m449",
-   "theme": "dance",
-   "title": "Брейк с дредами",
-   "page": "https://mixkit.co/free-stock-video/man-with-dreadlocks-breakdancing-449/",
+   "id": "m15917",
+   "theme": "travel",
+   "title": "Селфи в Лондоне",
+   "page": "https://mixkit.co/free-stock-video/diverse-friends-take-selfie-in-london-street-15917/",
    "start": 0
   },
   {
-   "id": "m40929",
-   "theme": "dance",
-   "title": "Неоновый клуб",
-   "page": "https://mixkit.co/free-stock-video/girl-dancing-on-the-floor-illuminated-by-neon-lights-40929/",
+   "id": "m42299",
+   "theme": "party",
+   "title": "Ночь с подругой",
+   "page": "https://mixkit.co/free-stock-video/pair-of-female-friends-having-fun-on-a-night-out-42299/",
    "start": 0
   },
   {
-   "id": "m50458",
+   "id": "m42508",
+   "theme": "love",
+   "title": "Объятия в лесу",
+   "page": "https://mixkit.co/free-stock-video/romantic-couple-embracing-in-the-middle-of-a-forest-42508/",
+   "start": 0
+  },
+  {
+   "id": "m8884",
+   "theme": "travel",
+   "title": "Селфи на отдыхе",
+   "page": "https://mixkit.co/free-stock-video/friends-taking-social-media-selfie-on-holiday-8884/",
+   "start": 0
+  },
+  {
+   "id": "m34449",
+   "theme": "party",
+   "title": "Костюмированная вечеринка",
+   "page": "https://mixkit.co/free-stock-video/friends-taking-a-selfie-at-a-costume-party-34449/",
+   "start": 0
+  },
+  {
+   "id": "m51257",
+   "theme": "vlog",
+   "title": "Обед в кафе",
+   "page": "https://mixkit.co/free-stock-video/a-young-woman-captured-eating-a-delicious-ramen-and-engaging-51257/",
+   "start": 0
+  },
+  {
+   "id": "m41569",
+   "theme": "love",
+   "title": "Селфи с видом",
+   "page": "https://mixkit.co/free-stock-video/girl-and-boy-taking-a-selfie-on-a-natural-landscape-41569/",
+   "start": 0
+  },
+  {
+   "id": "m43149",
+   "theme": "travel",
+   "title": "Селфи в походе",
+   "page": "https://mixkit.co/free-stock-video/explorers-taking-a-selfie-43149/",
+   "start": 0
+  },
+  {
+   "id": "m51538",
+   "theme": "holiday",
+   "title": "Новый год: шампанское",
+   "page": "https://mixkit.co/free-stock-video/a-group-of-cheerful-friends-with-champagne-glasses-and-happy-51538/",
+   "start": 0
+  },
+  {
+   "id": "m41272",
+   "theme": "vlog",
+   "title": "Ютубер в студии",
+   "page": "https://mixkit.co/free-stock-video/youtuber-vlogging-in-his-studio-41272/",
+   "start": 0
+  },
+  {
+   "id": "m9029",
+   "theme": "friends",
+   "title": "Смотрим селфи",
+   "page": "https://mixkit.co/free-stock-video/friends-smile-at-selfies-on-mobile-phone-9029/",
+   "start": 0
+  },
+  {
+   "id": "m49686",
+   "theme": "love",
+   "title": "Ретро-селфи в машине",
+   "page": "https://mixkit.co/free-stock-video/retro-selfie-video-of-a-couple-in-a-car-on-49686/",
+   "start": 0
+  },
+  {
+   "id": "m34455",
+   "theme": "holiday",
+   "title": "Хэллоуин: селфи",
+   "page": "https://mixkit.co/free-stock-video/two-friends-dressed-up-for-halloween-taking-a-selfie-34455/",
+   "start": 0
+  },
+  {
+   "id": "m42291",
    "theme": "dance",
-   "title": "Киберпанк в лазерах",
-   "page": "https://mixkit.co/free-stock-video/neon-lasers-light-up-a-cyberpunk-dancer-50458/",
+   "title": "Снимаем танец на телефон",
+   "page": "https://mixkit.co/free-stock-video/girls-recording-and-dancing-with-a-cell-phone-42291/",
+   "start": 0
+  },
+  {
+   "id": "m46000",
+   "theme": "travel",
+   "title": "В кабриолете",
+   "page": "https://mixkit.co/free-stock-video/friends-having-fun-in-the-back-of-a-convertible-car-46000/",
+   "start": 0
+  },
+  {
+   "id": "m42510",
+   "theme": "love",
+   "title": "Куртка для неё",
+   "page": "https://mixkit.co/free-stock-video/guy-puts-his-shirt-on-his-girlfriend-when-its-cold-42510/",
+   "start": 0
+  },
+  {
+   "id": "m36034",
+   "theme": "friends",
+   "title": "Селфи посреди улицы",
+   "page": "https://mixkit.co/free-stock-video/friends-taking-selfies-in-the-middle-of-a-street-36034/",
+   "start": 0
+  },
+  {
+   "id": "m34487",
+   "theme": "vlog",
+   "title": "Влог на прогулке",
+   "page": "https://mixkit.co/free-stock-video/blogging-girl-down-the-street-with-his-cell-34487/",
+   "start": 0
+  },
+  {
+   "id": "m42301",
+   "theme": "dance",
+   "title": "Танцуем вдвоём",
+   "page": "https://mixkit.co/free-stock-video/two-girls-having-fun-and-dancing-42301/",
+   "start": 0
+  },
+  {
+   "id": "m23947",
+   "theme": "travel",
+   "title": "Селфи у костра",
+   "page": "https://mixkit.co/free-stock-video/friends-taking-a-selfie-in-the-campfire-23947/",
+   "start": 0
+  },
+  {
+   "id": "m5497",
+   "theme": "vlog",
+   "title": "Подписывайтесь!",
+   "page": "https://mixkit.co/free-stock-video/tech-vlogger-reminds-people-to-subscribe-with-gestures-5497/",
+   "start": 0
+  },
+  {
+   "id": "m40038",
+   "theme": "love",
+   "title": "Селфи в поездке",
+   "page": "https://mixkit.co/free-stock-video/man-and-woman-taking-selfies-during-a-road-trip-40038/",
+   "start": 0
+  },
+  {
+   "id": "m43249",
+   "theme": "friends",
+   "title": "Селфи в кафе",
+   "page": "https://mixkit.co/free-stock-video/friends-taking-a-selfie-in-the-cafe-43249/",
+   "start": 0
+  },
+  {
+   "id": "m42303",
+   "theme": "fashion",
+   "title": "Городские модели",
+   "page": "https://mixkit.co/free-stock-video/couple-of-urban-models-posing-for-the-camera-42303/",
+   "start": 0
+  },
+  {
+   "id": "m23156",
+   "theme": "vlog",
+   "title": "Снимаю себя в гараже",
+   "page": "https://mixkit.co/free-stock-video/a-young-man-filming-himself-in-the-garage-23156/",
+   "start": 0
+  },
+  {
+   "id": "m21382",
+   "theme": "love",
+   "title": "Перед поездкой вдвоём",
+   "page": "https://mixkit.co/free-stock-video/happy-couple-holding-hands-before-their-roadtrip-21382/",
+   "start": 0
+  },
+  {
+   "id": "m43257",
+   "theme": "friends",
+   "title": "Листаем ленту в кафе",
+   "page": "https://mixkit.co/free-stock-video/friends-looking-at-social-networks-in-the-cafe-43257/",
+   "start": 0
+  },
+  {
+   "id": "m43573",
+   "theme": "fashion",
+   "title": "Яркий стиль",
+   "page": "https://mixkit.co/free-stock-video/fashion-women-with-colorful-styles-taking-selfies-43573/",
+   "start": 0
+  },
+  {
+   "id": "m15797",
+   "theme": "vlog",
+   "title": "Выступление на сцене",
+   "page": "https://mixkit.co/free-stock-video/closeup-of-conference-speaker-on-stage-gesturing-at-camera-15797/",
+   "start": 0
+  },
+  {
+   "id": "m42512",
+   "theme": "love",
+   "title": "Фото на природе вдвоём",
+   "page": "https://mixkit.co/free-stock-video/boy-and-girl-taking-photos-in-nature-42512/",
+   "start": 0
+  },
+  {
+   "id": "m41219",
+   "theme": "friends",
+   "title": "Селфи с подругой в кофейне",
+   "page": "https://mixkit.co/free-stock-video/selfie-between-two-friends-in-a-coffee-shop-41219/",
+   "start": 0
+  },
+  {
+   "id": "m52189",
+   "theme": "vlog",
+   "title": "Смех в подкасте",
+   "page": "https://mixkit.co/free-stock-video/from-behind-the-podcast-professional-microphones-the-camera-capture-a-52189/",
+   "start": 0
+  },
+  {
+   "id": "m41578",
+   "theme": "love",
+   "title": "Селфи на прогулке",
+   "page": "https://mixkit.co/free-stock-video/selfie-as-a-couple-during-a-walk-in-nature-41578/",
+   "start": 0
+  },
+  {
+   "id": "m43265",
+   "theme": "friends",
+   "title": "Селфи в кафе вдвоём",
+   "page": "https://mixkit.co/free-stock-video/two-female-friends-taking-a-selfie-in-the-cafe-43265/",
+   "start": 0
+  },
+  {
+   "id": "m42293",
+   "theme": "fashion",
+   "title": "Модные очки",
+   "page": "https://mixkit.co/free-stock-video/a-pair-of-young-urban-trendy-girls-wearing-stylish-sunglasses-42293/",
+   "start": 0
+  },
+  {
+   "id": "m42506",
+   "theme": "love",
+   "title": "Разговор в дороге",
+   "page": "https://mixkit.co/free-stock-video/boy-and-girl-talking-on-a-road-trip-through-nature-42506/",
+   "start": 0
+  },
+  {
+   "id": "m40028",
+   "theme": "friends",
+   "title": "Селфи в магазине керамики",
+   "page": "https://mixkit.co/free-stock-video/two-friends-taking-a-selfie-in-a-ceramic-vase-shop-40028/",
+   "start": 0
+  },
+  {
+   "id": "m50423",
+   "theme": "vlog",
+   "title": "Бьюти-блог",
+   "page": "https://mixkit.co/free-stock-video/a-young-influencer-recording-a-moisturizing-skincare-video-at-home-50423/",
+   "start": 0
+  },
+  {
+   "id": "m4905",
+   "theme": "love",
+   "title": "Селфи дома вдвоём",
+   "page": "https://mixkit.co/free-stock-video/couple-in-a-living-room-taking-a-selfie-4905/",
+   "start": 0
+  },
+  {
+   "id": "m51258",
+   "theme": "friends",
+   "title": "Фото подружек",
+   "page": "https://mixkit.co/free-stock-video/a-couple-of-young-teenager-women-take-photos-of-their-51258/",
+   "start": 0
+  },
+  {
+   "id": "m52187",
+   "theme": "vlog",
+   "title": "Подкаст",
+   "page": "https://mixkit.co/free-stock-video/the-camera-captures-a-mature-woman-with-abundant-curly-hair-52187/",
+   "start": 0
+  },
+  {
+   "id": "m15139",
+   "theme": "travel",
+   "title": "Отдых в дороге",
+   "page": "https://mixkit.co/free-stock-video/woman-resting-during-a-roadtrip-15139/",
+   "start": 0
+  },
+  {
+   "id": "m51253",
+   "theme": "friends",
+   "title": "Позирую подруге",
+   "page": "https://mixkit.co/free-stock-video/a-young-woman-playfully-poses-to-the-mobile-camera-playing-51253/",
+   "start": 0
+  },
+  {
+   "id": "m41181",
+   "theme": "vlog",
+   "title": "Утреннее селфи",
+   "page": "https://mixkit.co/free-stock-video/woman-taking-a-selfie-in-the-morning-41181/",
+   "start": 0
+  },
+  {
+   "id": "m51250",
+   "theme": "friends",
+   "title": "Селфи у неоновой вывески",
+   "page": "https://mixkit.co/free-stock-video/a-couple-of-young-teenager-girls-taking-a-selfie-with-51250/",
+   "start": 0
+  },
+  {
+   "id": "m4834",
+   "theme": "vlog",
+   "title": "Психолог советует",
+   "page": "https://mixkit.co/free-stock-video/therapist-in-his-office-talking-to-the-camera-4834/",
+   "start": 0
+  },
+  {
+   "id": "m12125",
+   "theme": "friends",
+   "title": "Обнимашки и селфи",
+   "page": "https://mixkit.co/free-stock-video/couple-of-friends-hugging-taking-selfies-with-the-cell-phone-12125/",
+   "start": 0
+  },
+  {
+   "id": "m43068",
+   "theme": "vlog",
+   "title": "Селфи у бассейна",
+   "page": "https://mixkit.co/free-stock-video/woman-taking-selfies-by-the-pool-43068/",
+   "start": 0
+  },
+  {
+   "id": "m43256",
+   "theme": "friends",
+   "title": "Болтаем в кафе",
+   "page": "https://mixkit.co/free-stock-video/two-friends-talking-in-the-cafeteria-43256/",
+   "start": 0
+  },
+  {
+   "id": "m40064",
+   "theme": "vlog",
+   "title": "Снимаю в дороге",
+   "page": "https://mixkit.co/free-stock-video/boy-recording-with-her-cell-phone-during-a-road-trip-40064/",
+   "start": 0
+  },
+  {
+   "id": "m43089",
+   "theme": "friends",
+   "title": "Селфи у бассейна вдвоём",
+   "page": "https://mixkit.co/free-stock-video/friends-taking-a-selfie-by-a-pool-43089/",
+   "start": 0
+  },
+  {
+   "id": "m10441",
+   "theme": "vlog",
+   "title": "Видеозвонок",
+   "page": "https://mixkit.co/free-stock-video/happy-man-chatting-on-a-video-call-10441/",
+   "start": 0
+  },
+  {
+   "id": "m33399",
+   "theme": "vlog",
+   "title": "Бабушка-фотограф",
+   "page": "https://mixkit.co/free-stock-video/old-woman-taking-photos-with-her-camera-33399/",
+   "start": 0
+  },
+  {
+   "id": "m42319",
+   "theme": "vlog",
+   "title": "Позирую в камеру",
+   "page": "https://mixkit.co/free-stock-video/happy-girl-posing-in-front-of-the-camera-42319/",
+   "start": 0
+  },
+  {
+   "id": "m33478",
+   "theme": "kids",
+   "title": "Девочка с фотоаппаратом",
+   "page": "https://mixkit.co/free-stock-video/little-girl-taking-photos-with-a-camera-33478/",
    "start": 0
   },
   {
    "id": "m49096",
-   "theme": "dance",
+   "theme": "fashion",
    "title": "Красная помада",
    "page": "https://mixkit.co/free-stock-video/vertical-shot-of-a-young-woman-with-red-lipstick-dancing-49096/",
    "start": 0
   },
   {
-   "id": "p5108693",
-   "theme": "movie",
-   "title": "Под дождём с зонтом",
-   "page": "https://www.pexels.com/video/man-walking-in-the-rain-with-umbrella-5108693/",
-   "start": 0
-  },
-  {
-   "id": "p17016628",
-   "theme": "movie",
-   "title": "Замедленная прогулка",
-   "page": "https://www.pexels.com/video/a-young-woman-walking-in-slow-motion-17016628/",
-   "start": 0
-  },
-  {
-   "id": "m49576",
-   "theme": "movie",
-   "title": "Мастер кунг-фу у водопада",
-   "page": "https://mixkit.co/free-stock-video/martial-arts-master-performing-near-a-waterfall-49576/",
-   "start": 0
-  },
-  {
-   "id": "m43672",
-   "theme": "movie",
-   "title": "Танец с огненным мечом",
-   "page": "https://mixkit.co/free-stock-video/talented-woman-doing-a-dance-with-a-sword-of-fire-43672/",
-   "start": 0
-  },
-  {
-   "id": "m36770",
-   "theme": "movie",
-   "title": "Покоритель скалы",
-   "page": "https://mixkit.co/free-stock-video/man-raising-his-hands-on-top-of-a-cliff-at-36770/",
-   "start": 0
-  },
-  {
-   "id": "p8115436",
-   "theme": "hero",
-   "title": "Волшебница с палочкой",
-   "page": "https://www.pexels.com/video/a-woman-wearing-harry-potter-costume-casting-a-spell-while-waving-a-wand-8115436/",
-   "start": 0
-  },
-  {
-   "id": "p8474614",
-   "theme": "hero",
-   "title": "Космонавт в пустыне",
-   "page": "https://www.pexels.com/video/an-astronaut-walking-in-a-desert-8474614/",
-   "start": 0
-  },
-  {
-   "id": "p5285035",
-   "theme": "hero",
-   "title": "Космонавт посреди нигде",
-   "page": "https://www.pexels.com/video/man-in-an-astronaut-costume-in-the-middle-of-nowhere-5285035/",
-   "start": 0
-  },
-  {
-   "id": "m50450",
-   "theme": "hero",
-   "title": "Кибер-герой в неоне",
-   "page": "https://mixkit.co/free-stock-video/electronic-dancer-standing-under-neon-lights-50450/",
-   "start": 0
-  },
-  {
-   "id": "m50449",
-   "theme": "hero",
-   "title": "Техно в неоне",
-   "page": "https://mixkit.co/free-stock-video/techno-dance-with-electronic-neon-lights-50449/",
-   "start": 0
-  },
-  {
-   "id": "m40276",
-   "theme": "sport",
-   "title": "Боксёр у груши",
-   "page": "https://mixkit.co/free-stock-video/low-view-of-a-boxer-punching-a-boxing-bag-40276/",
-   "start": 0
-  },
-  {
-   "id": "p19310016",
-   "theme": "sport",
-   "title": "Футбольный фристайл",
-   "page": "https://www.pexels.com/video/freestyle-football-by-ahmadrezafs-19310016/",
-   "start": 0
-  },
-  {
-   "id": "p6078265",
-   "theme": "sport",
-   "title": "Чеканка мяча",
-   "page": "https://www.pexels.com/video/football-player-juggling-with-ball-6078265/",
-   "start": 0
-  },
-  {
-   "id": "m2285",
-   "theme": "sport",
-   "title": "Проход и данк",
-   "page": "https://mixkit.co/free-stock-video/basketball-player-dribbling-then-dunking-2285/",
-   "start": 0
-  },
-  {
-   "id": "m34382",
-   "theme": "sport",
-   "title": "Скейт-пируэт",
-   "page": "https://mixkit.co/free-stock-video/boy-doing-a-pirouette-with-a-skateboard-in-a-park-34382/",
-   "start": 0
-  },
-  {
-   "id": "m101055",
-   "theme": "fun",
-   "title": "Концерт со шваброй",
-   "page": "https://mixkit.co/free-stock-video/woman-singing-for-an-imaginary-audience-while-cleaning-101055/",
-   "start": 0
-  },
-  {
-   "id": "m101308",
-   "theme": "fun",
-   "title": "Щётка-микрофон у зеркала",
-   "page": "https://mixkit.co/free-stock-video/man-dancing-in-the-mirror-101308/",
-   "start": 0
-  },
-  {
-   "id": "p4586953",
-   "theme": "fun",
-   "title": "Смешной танец",
-   "page": "https://www.pexels.com/video/a-man-dancing-in-a-funny-way-4586953/",
-   "start": 0
-  },
-  {
-   "id": "m45471",
-   "theme": "fun",
-   "title": "Танец в костюме",
-   "page": "https://mixkit.co/free-stock-video/cheerful-man-in-a-suit-dancing-energetically-on-a-white-45471/",
-   "start": 0
-  },
-  {
    "id": "m41321",
-   "theme": "fun",
+   "theme": "dance",
    "title": "Под радио, 80-е",
    "page": "https://mixkit.co/free-stock-video/80s-man-dancing-to-radio-music-41321/",
    "start": 0
   },
   {
    "id": "m41331",
-   "theme": "fun",
+   "theme": "dance",
    "title": "Ретро-танец в камеру",
    "page": "https://mixkit.co/free-stock-video/old-fashioned-man-dancing-while-looking-at-the-camera-41331/",
-   "start": 0
-  },
-  {
-   "id": "m48965",
-   "theme": "fun",
-   "title": "Человек-конь",
-   "page": "https://mixkit.co/free-stock-video/funny-man-with-horse-head-dancing-48965/",
    "start": 0
   },
   {
@@ -245,101 +470,10 @@
    "start": 0
   },
   {
-   "id": "p3403279",
-   "theme": "holiday",
-   "title": "Новый год: золотое конфетти",
-   "page": "https://www.pexels.com/video/a-woman-blowing-gold-confetti-from-her-hand-for-camera-effects-in-a-photo-shoot-3403279/",
-   "start": 0
-  },
-  {
-   "id": "p6212636",
-   "theme": "holiday",
-   "title": "Новый год: танцующий Дед Мороз",
-   "page": "https://www.pexels.com/video/dancing-santa-claus-6212636/",
-   "start": 0
-  },
-  {
-   "id": "p3197580",
-   "theme": "holiday",
-   "title": "Новый год: Дед Мороз в наушниках",
-   "page": "https://www.pexels.com/video/santa-claus-singing-and-dancing-with-the-music-from-his-headphone-3197580/",
-   "start": 0
-  },
-  {
-   "id": "p7351197",
-   "theme": "holiday",
-   "title": "8 Марта: тюльпаны за спиной",
-   "page": "https://www.pexels.com/video/a-woman-holding-flowers-behind-her-back-7351197/",
-   "start": 0
-  },
-  {
-   "id": "p7452289",
-   "theme": "holiday",
-   "title": "8 Марта: с букетом",
-   "page": "https://www.pexels.com/video/a-woman-holding-a-bouquet-of-flowers-7452289/",
-   "start": 0
-  },
-  {
-   "id": "p35088315",
-   "theme": "holiday",
-   "title": "23 Февраля: отдаю честь",
-   "page": "https://www.pexels.com/video/military-officer-salutes-with-pride-35088315/",
-   "start": 0
-  },
-  {
-   "id": "p35088319",
-   "theme": "holiday",
-   "title": "23 Февраля: в помещении",
-   "page": "https://www.pexels.com/video/military-officer-saluting-indoors-35088319/",
-   "start": 0
-  },
-  {
-   "id": "p4729764",
-   "theme": "travel",
-   "title": "Пляж на закате",
-   "page": "https://www.pexels.com/video/woman-walking-on-the-beach-with-sunset-4729764/",
-   "start": 0
-  },
-  {
-   "id": "m37018",
-   "theme": "travel",
-   "title": "На вершине",
-   "page": "https://mixkit.co/free-stock-video/mountaineer-celebrating-with-raised-arms-in-the-mountains-37018/",
-   "start": 0
-  },
-  {
-   "id": "m15836",
-   "theme": "travel",
-   "title": "Руки к горам",
-   "page": "https://mixkit.co/free-stock-video/man-in-denim-jacket-raises-arms-to-mountain-landscape-15836/",
-   "start": 0
-  },
-  {
-   "id": "m4702",
-   "theme": "travel",
-   "title": "Танец в цветочном поле",
-   "page": "https://mixkit.co/free-stock-video/girl-dancing-happily-in-a-field-of-flowers-4702/",
-   "start": 0
-  },
-  {
-   "id": "p9510022",
-   "theme": "fashion",
-   "title": "Подиум, чёрное платье",
-   "page": "https://www.pexels.com/video/a-female-model-walking-in-a-black-dress-9510022/",
-   "start": 0
-  },
-  {
-   "id": "p9512045",
-   "theme": "fashion",
-   "title": "Подиум",
-   "page": "https://www.pexels.com/video/a-woman-walking-down-the-runway-9512045/",
-   "start": 0
-  },
-  {
-   "id": "p12808863",
-   "theme": "fashion",
-   "title": "Летящее платье",
-   "page": "https://www.pexels.com/video/slow-motion-of-woman-walking-in-a-field-12808863/",
+   "id": "m40276",
+   "theme": "sport",
+   "title": "Боксёр у груши",
+   "page": "https://mixkit.co/free-stock-video/low-view-of-a-boxer-punching-a-boxing-bag-40276/",
    "start": 0
   },
   {
@@ -350,38 +484,38 @@
    "start": 0
   },
   {
-   "id": "p6265063",
-   "theme": "kids",
-   "title": "Ребёнок-супергерой",
-   "page": "https://www.pexels.com/video/a-boy-wearing-a-costume-6265063/",
-   "start": 0
-  },
-  {
-   "id": "m47405",
-   "theme": "kids",
-   "title": "Пряничный человечек",
-   "page": "https://mixkit.co/free-stock-video/animated-gingerbread-man-dancing-happily-against-a-christmas-backdrop-47405/",
-   "start": 0
-  },
-  {
-   "id": "p6657874",
-   "theme": "love",
-   "title": "Предложение",
-   "page": "https://www.pexels.com/video/a-man-kneeling-down-and-offering-a-ring-6657874/",
-   "start": 0
-  },
-  {
-   "id": "m14842",
-   "theme": "love",
-   "title": "Кружение в белом платье",
-   "page": "https://mixkit.co/free-stock-video/woman-in-white-dress-dancing-in-the-field-14842/",
-   "start": 0
-  },
-  {
    "id": "m49097",
-   "theme": "love",
+   "theme": "fashion",
    "title": "Сюрреалистичный свет",
    "page": "https://mixkit.co/free-stock-video/young-woman-dancing-in-a-surreal-ambience-49097/",
+   "start": 0
+  },
+  {
+   "id": "m449",
+   "theme": "dance",
+   "title": "Брейк с дредами",
+   "page": "https://mixkit.co/free-stock-video/man-with-dreadlocks-breakdancing-449/",
+   "start": 0
+  },
+  {
+   "id": "m49576",
+   "theme": "hero",
+   "title": "Мастер кунг-фу у водопада",
+   "page": "https://mixkit.co/free-stock-video/martial-arts-master-performing-near-a-waterfall-49576/",
+   "start": 0
+  },
+  {
+   "id": "m45471",
+   "theme": "dance",
+   "title": "Танец в костюме",
+   "page": "https://mixkit.co/free-stock-video/cheerful-man-in-a-suit-dancing-energetically-on-a-white-45471/",
+   "start": 0
+  },
+  {
+   "id": "m34382",
+   "theme": "sport",
+   "title": "Скейт-пируэт",
+   "page": "https://mixkit.co/free-stock-video/boy-doing-a-pirouette-with-a-skateboard-in-a-park-34382/",
    "start": 0
   }
  ]
