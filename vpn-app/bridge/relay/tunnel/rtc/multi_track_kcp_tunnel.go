@@ -30,8 +30,7 @@ const (
 	// nonce - 16 Poly1305 tag - 1 channel tag.
 	// winger: the budget is VP8FramePacketBudget (1184), not 1200 - 1: with 1199 bytes every full segment went as two
 	// packets, the second of 15 bytes.
-	kcpSegmentMTU     = VP8FramePacketBudget - tunnel.InterframeHdrLen - 24 - 16 - 1
-	kcpReceiveBufSize = 128 * 1024
+	kcpSegmentMTU = VP8FramePacketBudget - tunnel.InterframeHdrLen - 24 - 16 - 1
 	// winger: what one TCP read may take on the reliable way: a whole number of full segments (segment data = MTU
 	// - 24 KCP header) less the relay frame's own 9 bytes. A plain 1126-byte read made 1135 bytes, two segments of
 	// which the second carried 22 bytes and still took a packet of its own: half the call's packets nearly empty.
@@ -115,12 +114,11 @@ func computeKCPWindow(fps, batch int, carrierRTT time.Duration) int {
 }
 
 type trackKCPSession struct {
-	conv    uint32
-	vp8     *VP8DataTunnel
-	parent  *MultiTrackKCPTunnel
-	kcpMu   sync.Mutex
-	kcp     *kcp.KCP
-	recvBuf []byte
+	conv   uint32
+	vp8    *VP8DataTunnel
+	parent *MultiTrackKCPTunnel
+	kcpMu  sync.Mutex
+	kcp    *kcp.KCP
 
 	// winger: a session the far side may not hear (AddProbedSession) takes connections only while the far side
 	// answers on it; a removed one takes none, and a sender waiting for room on it gives up
@@ -213,10 +211,9 @@ func (r *netRTT) timeout() time.Duration {
 
 func newTrackKCPSession(parent *MultiTrackKCPTunnel, vp8 *VP8DataTunnel, conv uint32, window int) *trackKCPSession {
 	session := &trackKCPSession{
-		conv:    conv,
-		vp8:     vp8,
-		parent:  parent,
-		recvBuf: make([]byte, kcpReceiveBufSize),
+		conv:   conv,
+		vp8:    vp8,
+		parent: parent,
 	}
 	session.kcp = kcp.NewKCP(conv, session.output)
 	session.kcp.NoDelay(1, 10, 2, 1)
@@ -442,16 +439,14 @@ func (s *trackKCPSession) input(segment []byte) [][]byte {
 		if size <= 0 {
 			break
 		}
-		if size > len(s.recvBuf) {
-			s.recvBuf = make([]byte, size)
-		}
-		n := s.kcp.Recv(s.recvBuf)
+		// winger: each message is read straight into a buffer of its own (it was read into a shared 128 KB buffer
+		// and then copied out: every received byte copied twice)
+		message := make([]byte, size)
+		n := s.kcp.Recv(message)
 		if n <= 0 {
 			break
 		}
-		message := make([]byte, n)
-		copy(message, s.recvBuf[:n])
-		messages = append(messages, message)
+		messages = append(messages, message[:n])
 	}
 	s.kcpMu.Unlock()
 	return messages
@@ -482,9 +477,10 @@ type MultiTrackKCPTunnel struct {
 	onData   func([]byte)
 	onClose  func()
 
-	stopCh   chan struct{}
-	stopOnce sync.Once
-	nudge    chan struct{}
+	stopCh     chan struct{}
+	stopOnce   sync.Once
+	nudge      chan struct{}
+	updateIdle atomic.Bool // winger: the update loop ticks slowly and wants a nudge when work comes
 
 	currentWindow atomic.Int32
 	sendSessions  atomic.Int32 // winger: how many sessions this side sends on (0: all); the others only receive
@@ -550,7 +546,6 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 		t.sendRaw(connID, frame)
 		return
 	}
-	t.wake()
 
 	t.mu.Lock()
 	if len(t.sessions) == 0 {
@@ -584,6 +579,7 @@ func (t *MultiTrackKCPTunnel) SendData(frame []byte) {
 		session.send(frame)
 	}
 	t.sentMessages.Add(1)
+	t.wake() // winger: after the send: an update loop that went idle meanwhile either sees this data or gets the nudge
 
 	if msgType == tunnel.MsgClose {
 		t.mu.Lock()
@@ -708,8 +704,11 @@ func (t *MultiTrackKCPTunnel) retire(index int) {
 			callback(frame)
 		}
 	}
-	if len(conns) > 0 && t.logFn != nil {
-		t.logFn("kcptunnel: %d connections closed with session %d", len(conns), index)
+	if len(conns) > 0 {
+		t.wake() // winger: the closes may need resending
+		if t.logFn != nil {
+			t.logFn("kcptunnel: %d connections closed with session %d", len(conns), index)
+		}
 	}
 }
 
@@ -748,13 +747,13 @@ func (t *MultiTrackKCPTunnel) handleDecodedSegment(payload []byte) {
 		return
 	}
 	t.inputSegments.Add(1)
-	t.wake()
 	session.lastIn.Store(time.Now().UnixNano())
 	if session.probed && session.heard.CompareAndSwap(false, true) && t.logFn != nil {
 		t.logFn("kcptunnel: session %d answered by the far side, in use", conv-kcpConvBase)
 	}
 	messages := session.input(body)
 	session.pump() // winger: acks may have made room
+	t.wake()       // winger: acks to send wait for the update loop's next tick; an idle loop is woken for them
 	if callback == nil {
 		return
 	}
@@ -954,11 +953,29 @@ func (t *MultiTrackKCPTunnel) Done() <-chan struct{} {
 	return t.stopCh
 }
 
+// wake: nudge the update loop out of its idle pace. winger: only an idle loop is nudged: every segment received and
+// every message sent used to wake it, a goroutine wake-up each, almost always for nothing (it ticks every 10 ms anyway
+// while there is work, and keeps that pace while segments come in).
 func (t *MultiTrackKCPTunnel) wake() {
+	if !t.updateIdle.Load() {
+		return
+	}
 	select {
 	case t.nudge <- struct{}{}:
 	default:
 	}
+}
+
+// pendingAll: what the sessions hold to send, and data waiting for room in them.
+func (t *MultiTrackKCPTunnel) pendingAll(sessions []*trackKCPSession) int {
+	pending := 0
+	for _, session := range sessions {
+		pending += session.waitSnd()
+		if session.gate.hasWaiting() {
+			pending++
+		}
+	}
+	return pending
 }
 
 func (t *MultiTrackKCPTunnel) updateLoop() {
@@ -967,6 +984,7 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 	ticks := 0
 	idleTicks := 0
 	fast := true
+	var lastInput uint64
 	for {
 		select {
 		case <-t.stopCh:
@@ -975,7 +993,7 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 			idleTicks = 0 // winger: something came or went; acks may be waiting for the next flush
 			if !fast {
 				fast = true
-				idleTicks = 0
+				t.updateIdle.Store(false)
 				ticker.Reset(kcpUpdateInterval)
 			}
 		case <-ticker.C:
@@ -1002,18 +1020,32 @@ func (t *MultiTrackKCPTunnel) updateLoop() {
 				}
 			}
 			t.noteUnanswered(sessions, now)
+			// winger: segments received since the last tick leave acks for the next flush: the loop keeps its quick
+			// pace while they come in (they no longer nudge it each)
+			if in := t.inputSegments.Load(); in != lastInput {
+				lastInput = in
+				pending++
+			}
 			if pending > 0 {
 				idleTicks = 0
 				if !fast {
 					fast = true
+					t.updateIdle.Store(false)
 					ticker.Reset(kcpUpdateInterval)
 				}
 			} else if fast {
 				idleTicks++
 				if idleTicks >= kcpIdleAfterTicks {
-					fast = false
 					idleTicks = 0
-					ticker.Reset(kcpIdleUpdateInterval)
+					// say idle first, then look once more: a sender or a segment received either sees the flag and
+					// nudges, or is seen here
+					t.updateIdle.Store(true)
+					if t.pendingAll(sessions) == 0 && t.inputSegments.Load() == lastInput {
+						fast = false
+						ticker.Reset(kcpIdleUpdateInterval)
+					} else {
+						t.updateIdle.Store(false)
+					}
 				}
 			}
 			ticks++

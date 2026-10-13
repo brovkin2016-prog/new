@@ -110,6 +110,7 @@ func (s *trackKCPSession) admit(conn uint32, frame []byte, stop <-chan struct{})
 	s.gate.waiting = append(s.gate.waiting, it)
 	s.gate.mu.Unlock()
 	s.pump()
+	s.parent.wake() // an idle update loop pumps the gate again on its quick ticks
 	select {
 	case <-it.done:
 		return it.sent

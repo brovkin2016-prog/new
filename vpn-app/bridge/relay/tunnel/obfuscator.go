@@ -97,57 +97,47 @@ func NewTunnelObfuscator(secret []byte) (*TunnelObfuscator, error) {
 
 func (o *TunnelObfuscator) LocalEpoch() uint32 { return o.localEpoch }
 
-func (o *TunnelObfuscator) keepaliveHeader() []byte {
-	hdr := make([]byte, keepaliveHdrLen)
-	copy(hdr, vp8Keepalive)
-	binary.BigEndian.PutUint32(hdr[vp8KeepaliveLen:], o.localEpoch)
-	return hdr
-}
-
-func (o *TunnelObfuscator) dataHeader() []byte {
-	hdr := make([]byte, InterframeHdrLen)
-	copy(hdr, vp8Interframe)
-	binary.BigEndian.PutUint32(hdr[vp8InterframeLen:], o.localEpoch)
-	return hdr
-}
+// winger: every frame is built in one allocation: header, nonce and sealed payload go straight into the buffer that
+// leaves (it was three: header, nonce, frame). Same bytes as before.
 
 func (o *TunnelObfuscator) EncodeKeepalive(padLen int) []byte {
-	hdr := o.keepaliveHeader()
-	if padLen <= 0 {
-		return hdr
+	if padLen < 0 {
+		padLen = 0
 	}
 	out := make([]byte, keepaliveHdrLen+padLen)
-	copy(out, hdr)
-	if _, err := rand.Read(out[keepaliveHdrLen:]); err != nil {
-		return hdr
+	copy(out, vp8Keepalive)
+	binary.BigEndian.PutUint32(out[vp8KeepaliveLen:], o.localEpoch)
+	if padLen > 0 {
+		if _, err := rand.Read(out[keepaliveHdrLen:]); err != nil {
+			return out[:keepaliveHdrLen]
+		}
 	}
 	return out
 }
 
 func (o *TunnelObfuscator) EncodeData(payload []byte) []byte {
-	hdr := o.dataHeader()
-	nonce := make([]byte, o.aead.NonceSize())
+	nonceSize := o.aead.NonceSize()
+	out := make([]byte, InterframeHdrLen+nonceSize, InterframeHdrLen+nonceSize+len(payload)+o.aead.Overhead())
+	copy(out, vp8Interframe)
+	binary.BigEndian.PutUint32(out[vp8InterframeLen:], o.localEpoch)
+	nonce := out[InterframeHdrLen:]
 	if _, err := rand.Read(nonce); err != nil {
 		return nil
 	}
-	out := make([]byte, 0, len(hdr)+len(nonce)+len(payload)+o.aead.Overhead())
-	out = append(out, hdr...)
-	out = append(out, nonce...)
-	out = o.aead.Seal(out, nonce, payload, nil)
-	return out
+	// Seal appends after the nonce and never writes over what out already holds
+	return o.aead.Seal(out, nonce, payload, nil)
 }
 
 func (o *TunnelObfuscator) EncryptPayload(plaintext []byte) []byte {
 	if o == nil {
 		return plaintext
 	}
-	nonce := make([]byte, o.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	nonceSize := o.aead.NonceSize()
+	out := make([]byte, nonceSize, nonceSize+len(plaintext)+o.aead.Overhead())
+	if _, err := rand.Read(out); err != nil {
 		return nil
 	}
-	out := make([]byte, 0, len(nonce)+len(plaintext)+o.aead.Overhead())
-	out = append(out, nonce...)
-	return o.aead.Seal(out, nonce, plaintext, nil)
+	return o.aead.Seal(out, out[:nonceSize], plaintext, nil)
 }
 
 func (o *TunnelObfuscator) DecryptPayload(data []byte) ([]byte, bool) {
