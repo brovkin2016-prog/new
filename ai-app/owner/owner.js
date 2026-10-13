@@ -50,8 +50,7 @@
       if (!cache[want]) { draw(); scroll.append(el("div", { class: "status", style: "padding:20px" }, el("span", { class: "spin" }), "Загружаю…")); }
       try {
         const body = want === "claude" ? { op: OPS.claude, chat: claude.chat || undefined } : { op: OPS[want] };
-        const [end, ag] = await Promise.all([panel(body), want === "server" ? panel({ op: "agent_state" }).catch(() => null) : null]);
-        if (ag) cache.claudeOk = ag.t === "done" && !!ag.installed;
+        const end = await panel(body);
         if (end.t !== "done" && want === "claude") { cache.claude = { t: "done", installed: false, why: end.text }; if (part === want) draw(); return; }
         if (end.t !== "done") throw Object.assign(new Error(end.text || "Не получилось."), { said: true });
         cache[want] = end;
@@ -189,12 +188,7 @@
         load();
       } catch (e) { toast(problem(e)); } finally { S.busy.vpn = false; }
     }
-    // ---- the server at a glance, its bridges, traffic, events and the big buttons ----
-    function stat(title, value, sub, pct, bad) {
-      return el("div", { class: "stat" + (bad ? " bad" : "") }, el("small", { text: title }), el("b", { text: value }),
-        pct !== undefined ? el("div", { class: "bar" }, el("i", { style: `width:${Math.max(2, Math.min(100, pct))}%` + (pct > 85 ? ";background:var(--danger)" : "") })) : null,
-        sub ? el("small", { text: sub }) : null);
-    }
+    // ---- the server at a glance and its bridges ----
     function dur(sec) {
       if (!sec && sec !== 0) return "";
       sec = Math.max(0, sec);
@@ -472,20 +466,6 @@
         } }));
       });
     }
-    // the server's check goes to Claude as a new talk; a long one keeps its newest part (where the trouble is)
-    const clip = (t) => t.length <= 7900 ? t : t.slice(0, t.indexOf("\n\n") > 0 && t.indexOf("\n\n") < 600 ? t.indexOf("\n\n") + 2 : 300)
-      + "…(начало пропущено — новые строки ниже)…\n" + t.slice(-7300);
-    async function toClaude(text) {
-      part = "claude"; store.set("accessPart", "claude"); refreshTop();
-      try {
-        const st = await panel({ op: "agent_state" });
-        if (st.t !== "done") return toast("⚠️ " + st.text, 6000);
-        cache.claude = st; draw();
-        if (!st.installed) return;
-        if (st.busy) return toast("Claude ещё работает над прошлым — отправьте, когда закончит", 5000);
-        talk({ op: "agent_ask", chat: "new", text: clip(text) }, clip(text));
-      } catch (e) { toast(problem(e)); }
-    }
     function drawServer(d) {
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
@@ -501,31 +481,13 @@
         el("div", { class: "emoji", text: bad.length ? "⚠️" : "✅" }),
         el("div", { class: "grow" }, el("b", { text: bad.length ? "Есть проблемы" : "Всё работает" }),
           el("small", { text: bad.length ? bad.join(" · ") : `${d.host} · ${d.ip}` + (d.online !== null ? ` · в сети: ${d.online}` : "") }))));
-      // on top only what needs the owner: money running out, a new version, the bridges, remote desktop;
-      // the rest waits under «Подробнее»
+      // only what needs the owner: money running out and a new version (when they do), the bridges, remote desktop
       const u = d.update, p = (u && u.progress) || {};
       const urgentHost = host && host.set && host.days_left < 7;
       const urgentUpdate = u && (!u.ready || u.new || u.foreign || p.state === "running" || (p.state === "finished" && p.version && !p.ok));
       if (urgentHost) drawHosting(host);
       if (urgentUpdate) scroll.append(updateCard(u, "top"));
-      const cl = !!cache.claudeOk;  // Claude on the server: the server's check goes straight to it
       scroll.append(bridgesCard(d), remoteCard());
-      const more = store.get("serverMore", false);
-      scroll.append(el("button", { class: "btn line wide", style: "margin:0 0 12px",
-        text: more ? "▲ Скрыть подробности" : "▼ Подробнее: хостинг, версия, проверка, перезагрузка",
-        onclick: () => { store.set("serverMore", !more); draw(); } }));
-      if (!more) return;
-      const brOk = d.bridges.length - brBad.length;
-      scroll.append(el("div", { class: "stats" },
-        stat("VPN", d.vpn.ok ? "работает" : "не работает", d.vpn.ok && d.vpn.since ? dur(d.vpn.since) + " без перерыва" : UNIT[d.vpn.state] || d.vpn.state, undefined, !d.vpn.ok),
-        stat("Мосты", d.bridges.length ? `${brOk} из ${d.bridges.length}` : "нет", brBad.length ? "есть неработающие" : "", undefined, brBad.length > 0),
-        stat("Память", `${Math.round(100 * d.mem[0] / d.mem[1])}%`, `${(d.mem[0] / 1024).toFixed(1)} из ${(d.mem[1] / 1024).toFixed(1)} ГБ`, 100 * d.mem[0] / d.mem[1]),
-        stat("Диск", `${Math.round(100 * d.disk[0] / d.disk[1])}%`, `${d.disk[0]} из ${d.disk[1]} ГБ`, 100 * d.disk[0] / d.disk[1]),
-        stat("Нагрузка", `${Math.round(100 * d.load[0] / d.cpus)}%`, `ядер: ${d.cpus} · работает ${dur(d.uptime)}`, 100 * d.load[0] / d.cpus),
-        stat("Сертификат", d.cert_days !== null ? `ещё ${d.cert_days} дн.` : "?", "продлевается сам", undefined, d.cert_days !== null && d.cert_days < 10)));
-      if (host && !urgentHost) drawHosting(host);
-      if (u && u.ready) scroll.append(updateCard(u, urgentUpdate ? "extras" : "all"));
-      scroll.append(actionsCard(cl));
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
     const BRIDGES = [
@@ -620,32 +582,6 @@
           el("button", { class: "icon-btn", title: "Скопировать ссылку", text: "📋", onclick: () => { copyText(url); toast("✅ Ссылка скопирована"); } })));
       }
       return card;
-    }
-    // one tap: the server checks everything a fault hides in (VPN, bridges, MAX, Winger's journal); the report goes to
-    // Claude, or is copied when Claude is not on the server
-    function diagButton(cl) {
-      return el("button", { class: "btn line wide", style: "margin-bottom:8px", text: cl ? "🩺 Проверить сервер с Claude" : "🩺 Проверить сервер", onclick: async () => {
-        try {
-          const end = await panel({ op: "diag" }, (t) => toast(t, 60000));
-          document.querySelectorAll(".toast").forEach((t) => t.remove());
-          if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
-          if (cl) { toClaude("Вот отчёт проверки сервера. Посмотри, всё ли в порядке, и если что-то не так — найди причину и предложи исправление.\n\n" + end.text); return; }
-          copyText(end.text);
-          sheet("🩺 Проверка сервера", (box) => box.append(
-            el("div", { style: "font:11px/1.35 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--card);border-radius:12px;padding:10px;margin-bottom:12px;max-height:50vh;overflow:auto", text: end.text }),
-            el("button", { class: "btn line wide", text: "📋 Скопировать", onclick: () => { copyText(end.text); toast("✅ Скопировано"); } })));
-          toast("✅ Отчёт скопирован", 4000);
-        } catch (e) { toast(problem(e)); }
-      } });
-    }
-    function actionsCard(cl) {
-      return el("div", { class: "card" }, el("h3", { text: "🔧 Действия с сервером" }), diagButton(cl),
-        el("button", { class: "btn line wide", text: "💾 Резервная копия сейчас", onclick: async () => {
-          if (await confirmBox("Сделать резервную копию сейчас? Через минуту-две она ляжет на Яндекс Диск (папка «Семейный сервер — копии»), а без Диска придёт на почту.", "Сделать")) act({ op: "backup" }, "💾 Делаю копию — на Яндекс Диск");
-        } }),
-        el("button", { class: "btn line wide danger", style: "margin-top:8px", text: "♻️ Перезагрузить сервер", onclick: async () => {
-          if (await confirmBox("Перезагрузить сервер? VPN, мосты и помощник пропадут примерно на минуту.", "Перезагрузить")) act({ op: "reboot" }, "♻️ Перезагружаюсь, вернусь через минуту");
-        } }));
     }
     // the hosting: how many days the balance lasts, and when to pay (the balance is entered after a top-up)
     function drawHosting(h) {
@@ -831,7 +767,7 @@
     }
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      scroll.append(diskRow(), maxCard(), videoCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
+      scroll.append(diskRow(), videoCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
         el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Приложение помощника — ссылка",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется помощником" }));
@@ -867,21 +803,6 @@
       if (!name) return;
       const r = await appOp({ op: "app_add", name: name.replace(/\s+/g, " ").trim().slice(0, 40) }, null);
       if (r) makeLink({ op: "dl_aiapp", id: r.id }, "ИИ-помощник — " + r.name);
-    }
-    // ---- the assistant in MAX: the owner connects the family's bot once; people link with a code ----
-    async function maxCode(u) {
-      try {
-        const end = await panel({ op: "max_code", id: u.id });
-        if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
-        if (!end.on) { toast("Сначала подключите бота MAX: «🤖 Помощник» → «💬 Помощник в MAX»", 5000); return; }
-        sheet("💬 MAX — " + u.name, (box) => box.append(
-          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: end.link
-            ? "Отправьте приглашение человеку: он откроет ссылку — MAX сам откроет помощника и подключит его. Одноразовое."
-            : "Отправьте это сообщение человеку как удобно. Код одноразовый." }),
-          el("div", { style: "font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap;background:var(--card);border-radius:12px;padding:12px;margin-bottom:12px;user-select:all", text: end.text }),
-          el("button", { class: "btn wide", text: "📤 Отправить приглашение", onclick: () => (navigator.share ? navigator.share({ text: end.text }).catch(() => {}) : (copyText(end.text), toast("✅ Скопировано — отправьте как удобно"))) }),
-          el("button", { class: "btn line wide", style: "margin-top:8px", text: "📋 Копировать", onclick: () => { copyText(end.text); toast("✅ Скопировано — отправьте как удобно"); } })));
-      } catch (e) { toast(problem(e)); }
     }
     // ---- video from a photo on Hugging Face: the owner's free minutes; the owner has it, others when allowed ----
     let video = null;
@@ -933,71 +854,6 @@
           } }) : "");
       });
     }
-    function maxCard() {
-      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "💬 MAX: проверяю…" }));
-      const fill = (m) => {
-        card.innerHTML = "";
-        card.append(el("div", { class: "row" },
-          el("div", { class: "grow" }, m.on ? `💬 Помощник в MAX ✓ ${m.bot ? "@" + m.bot : ""}` : "💬 Помощник в MAX",
-            el("small", { text: m.on ? (m.error === "token" ? "⚠️ MAX не принимает токен — подключите заново."
-              : `Подключено людей: ${m.people.length}. Код для человека — в его карточке ниже.`)
-              : "Родные пишут и говорят с помощником прямо в MAX — работает и при «белых списках»." })),
-          el("button", { class: "btn" + (m.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.on ? "Настроить" : "Подключить", onclick: () => maxSetup(m, fill) })));
-        if (m.on) {  // the server's news to the owner's MAX: problems, fixes, new versions, the hosting's money
-          card.append(el("div", { class: "row" },
-            el("div", { class: "grow" }, "🔔 Тревоги сервера в MAX",
-              el("small", { text: !m.owner_linked ? "Свяжите свой MAX: «💬 Пригласить в MAX» в своей карточке ниже."
-                : m.alerts ? "Сбои, починки, новые версии, оплата хостинга. О VPN в MAX ни слова — только «посмотрите в приложении»."
-                  : "Выключено." })),
-            el("button", { class: "btn" + (m.alerts ? " line" : ""), style: "flex:none;padding:8px 14px", text: m.alerts ? "Выключить" : "Включить",
-              onclick: async () => {
-                const end = await panel({ op: "max_alerts", on: !m.alerts }).catch(() => null);
-                if (end && end.t === "done") { fill(end); toast(end.alerts ? "🔔 Тревоги сервера будут приходить в MAX" : "🔕 Тревоги в MAX выключены"); }
-              } })));
-        }
-      };
-      panel({ op: "max_get" }).then((m) => (m.t === "done" ? fill(m) : card.remove())).catch(() => card.remove());
-      return card;
-    }
-    function maxSetup(m, after) {
-      sheet("💬 Помощник в MAX", (box, close) => {
-        const inp = el("input", { class: "input", placeholder: "Токен бота", autocomplete: "off", spellcheck: "false" });
-        box.append(
-          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Тот же помощник, что в приложении, но в MAX: вопросы, голосовые, фото, "
-            + "документы, проверка сообщений на мошенников (вам придёт уведомление), напоминания. Без слов о VPN." }),
-          el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-            el("li", { text: "На платформе «MAX для партнёров» (нужен подтверждённый профиль ИП или самозанятого): «Чат-боты» → создайте бота → «Интеграция» → «Получить токен»." }),
-            el("li", { text: "Скопируйте токен бота и вставьте сюда." }),
-            el("li", { text: "Людям — «💬 Пригласить в MAX» в их карточке: они откроют ссылку и смогут писать. Или сами: «☰ Ещё» → «💬 Помощник в MAX»." })),
-          m.on ? el("div", { style: "margin-bottom:10px", text: `Сейчас: @${m.bot || "бот"}. Подключены: ${m.people.map((p) => p.name).join(", ") || "пока никто"}` }) : "",
-          inp,
-          el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
-            let t = "";
-            try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
-            if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
-          } }),
-          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить", onclick: async () => {
-            if (!inp.value.trim()) { toast("Сначала вставьте токен"); return; }
-            toast("⏳ Проверяю токен…", 20000);
-            try {
-              const end = await panel({ op: "max_set", token: inp.value.trim() });
-              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
-              toast(`✅ Бот подключён: @${end.bot || end.name}`, 5000);
-              close(); after(end);
-            } catch (e) { toast(problem(e)); }
-          } }),
-          ...(m.people || []).map((p) => el("button", { class: "btn line wide", style: "margin-top:8px", text: `✂️ Отвязать MAX от «${p.name}»`, onclick: async () => {
-            if (!(await confirmBox(`Отвязать MAX от «${p.name}»? Чтобы снова пользоваться, понадобится новый код.`, "Отвязать"))) return;
-            const end = await panel({ op: "max_unlink", max: p.max });
-            close(); after(end); toast("Отвязан");
-          } })),
-          m.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "Отключить бота", onclick: async () => {
-            if (!(await confirmBox("Отключить помощника в MAX? Люди перестанут получать ответы, пока не подключите снова.", "Отключить"))) return;
-            const end = await panel({ op: "max_off" });
-            close(); after(end); toast("Бот отключён");
-          } }) : "");
-      });
-    }
     function person(id) {
       const d = cache.app;
       const u = d && d.users.find((x) => x.id === id);
@@ -1011,12 +867,11 @@
           text: (u.off ? "Доступ отключён" : !u.seen ? "Ещё не входил(а)" : "Был(а) " + ago(u.seen) + " назад") + ` · телефонов: ${u.devices}` }),
           el("div", { style: "font-size:14px;margin-bottom:6px", text: `Сегодня: вопросов ${t.text || 0}${lim("text")}, картинок ${t.draw || 0}${lim("draw")}, фото ${t.photo || 0}${lim("photo")}` }),
           act(mine ? "🔗 Ссылка: приложение + код для второго телефона (24 ч)" : "🔗 Ссылка: приложение + код входа (24 ч)",
-            () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""),
-          act("💬 Пригласить в MAX", () => maxCode(u)));
+            () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""));
         if (!mine) {  // video from a photo: the owner's Hugging Face minutes, only for whom the owner allows
           box.append(el("div", { class: "row", style: "margin-top:10px" },
             el("div", { class: "grow" }, "🎬 Видео из фото", el("small", { text: !(video && video.on) ? "Сначала подключите: «🎬 Видео из фото» выше в разделе."
-              : u.video ? "Включено: в «🖼 Фото» есть «🎬 Оживить» (и в MAX)." : "Выключено: минуты Hugging Face общие — включайте тем, кому нужно." })),
+              : u.video ? "Включено: в «🖼 Фото» есть «🎬 Оживить»." : "Выключено: минуты Hugging Face общие — включайте тем, кому нужно." })),
             el("button", { class: "toggle" + (u.video ? " on" : ""), disabled: !(video && video.on), onclick: () => {
               close(); appOp({ op: "app_set", id: u.id, video: !u.video }, u.video ? "🎬 Видео из фото выключено" : "🎬 Видео из фото включено");
             } })));

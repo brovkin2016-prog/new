@@ -1287,14 +1287,6 @@
       }
       lim.append(el("div", { style: "font-size:13px;color:var(--muted);margin-top:6px", text: "Лимиты обнуляются в полночь." }));
       scroll.append(lim);
-      if (me.max && me.max.on) {  // the same assistant in MAX: one tap opens it there, already as this person
-        const bot = me.max.bot ? "@" + me.max.bot : "";
-        scroll.append(el("div", { class: "card" }, el("div", { class: "row" },
-          el("div", { class: "grow" }, "💬 Помощник в MAX" + (me.max.linked ? " ✓" : ""),
-            el("small", { text: me.max.linked ? `Подключён: пишите ${bot || "помощнику"} в MAX — это тот же помощник.`
-              : "Тот же помощник в мессенджере MAX: вопросы, голосовые, фото." })),
-          me.max.linked ? null : el("button", { class: "act", text: "Подключить", onclick: maxInvite }))));
-      }
       const theme = el("select", { onchange: () => { store.set("theme", theme.value); applyTheme(); } });
       for (const [k, v] of Object.entries(THEMES)) theme.append(el("option", { value: k, text: v, selected: k === store.get("theme", "system") }));
       const appCard = el("div", { class: "card" }, el("h3", { text: "Приложение" }),
@@ -1312,19 +1304,6 @@
         if (await confirmBox("Выйти из приложения? Для входа снова понадобится код.", "Выйти")) logout("");
       } }));
       scroll.append(appCard);
-    }
-    async function maxInvite() {
-      const m = await api("/api/max", { invite: true }).catch((e) => { toast(problem(e)); return null; });
-      if (!m) return;
-      if (m.linked) { S.me.max = m; draw(); return toast("✅ MAX уже подключён"); }
-      if (!m.code) return toast("Помощник в MAX сейчас выключен.");
-      sheet("💬 Помощник в MAX", (box) => box.append(
-        el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px", text: m.link
-          ? "Откроется MAX — нажмите там «Начать». Дальше просто пишите или говорите голосом."
-          : `Найдите в MAX ${m.bot ? "@" + m.bot : "помощника семьи"}, нажмите «Начать» и отправьте код.` }),
-        m.link ? el("a", { class: "btn wide", style: "text-decoration:none", href: m.link, target: "_blank", rel: "noopener", text: "💬 Открыть MAX" }) : null,
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:12px", text: (m.link ? "Не открылось? Найдите в MAX " + (m.bot ? "@" + m.bot : "помощника") + " и отправьте ему код " : "Код: ")
-          + m.code + " — одноразовый, действует 2 дня." })));
     }
     draw();
     return { root, redraw: draw, onShow: () => api("/api/me", {}).then((m) => { S.me = m; draw(); }).catch(() => {}) };
