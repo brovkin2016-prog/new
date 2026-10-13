@@ -138,3 +138,48 @@ func TestGateLetsGoOnStop(t *testing.T) {
 		t.Fatal("the sender stayed blocked after its session went")
 	}
 }
+
+// a sender that read its connection's session just before the far side stopped hearing it (retire, from watchProbed)
+// and asks for room just after: it is let go, its data not put into the deaf session, whether the session is full or
+// has room
+func TestGateRetireRaceLetsGo(t *testing.T) {
+	for _, full := range []bool{true, false} {
+		k := newStillTunnel(t)
+		share := NewVP8DataTunnelWithQueue(nil, nil, func(string, ...any) {}, KCPCarrierQueueDepth)
+		k.mt.AddSubTunnel(share)
+		k.AddProbedSession(share, tunnel.EncodeFrame(tunnel.ControlConnID, tunnel.MsgConfigAck, nil))
+		s1 := k.sessions[1]
+		s1.heard.Store(true)
+		k.mu.Lock()
+		k.connPin[5] = 1
+		k.mu.Unlock()
+		body := bulkFrame(5)
+		if full {
+			for s1.trySendNow(body) {
+			}
+		}
+		before := s1.waitSnd()
+
+		// SendData's first step: the connection's session
+		k.mu.Lock()
+		session := k.sessions[k.connPin[5]]
+		k.mu.Unlock()
+		// watchProbed finds the session deaf
+		s1.heard.Store(false)
+		k.retire(1)
+		// SendData's second step
+		done := make(chan bool, 1)
+		go func() { done <- session.admit(5, body, k.stopCh) }()
+		select {
+		case sent := <-done:
+			if sent {
+				t.Fatalf("full=%v: a retired connection's data went into the deaf session", full)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("full=%v: a sender that raced the retire still waits after 3 s (gate waiting=%v)", full, s1.gate.hasWaiting())
+		}
+		if after := s1.waitSnd(); after != before {
+			t.Fatalf("full=%v: the deaf session holds %d segments more", full, after-before)
+		}
+	}
+}

@@ -805,6 +805,14 @@ func (t *MultiTrackKCPTunnel) ReadySessions() int {
 // retiredPin marks a connection closed with its session: what more it sends is dropped until its own close.
 const retiredPin = -1
 
+// retiredConn: the connection was closed with its session (retire).
+func (t *MultiTrackKCPTunnel) retiredConn(conn uint32) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	index, pinned := t.connPin[conn]
+	return pinned && index == retiredPin
+}
+
 // retire (winger): the connections on this session are closed at both ends: the far side is told on a session it
 // hears, and this side's relay as if the far side had said so. Their later data is dropped, never carried on another
 // session, which would hand the far side a stream with a piece missing. Used when a session is removed or the far

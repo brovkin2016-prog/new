@@ -28,7 +28,7 @@ type gateItem struct {
 	sent  bool
 }
 
-// sessionGate: what waits for room in one session's KCP (lock order: gate.mu, then book.mu or kcpMu).
+// sessionGate: what waits for room in one session's KCP (lock order: gate.mu, then the tunnel's mu, book.mu or kcpMu).
 type sessionGate struct {
 	mu      sync.Mutex
 	waiting []*gateItem
@@ -97,18 +97,24 @@ func (b *connBook) prune(now time.Time) {
 // admit: puts conn's data frame into KCP once there is room and its turn has come; false if the session went (or
 // the connection was closed with it) or the tunnel stopped first.
 func (s *trackKCPSession) admit(conn uint32, frame []byte, stop <-chan struct{}) bool {
-	if s.gate.idle() && s.trySendNow(frame) {
-		s.gate.book.charge(conn, len(frame), time.Now())
+	g := &s.gate
+	g.mu.Lock()
+	// winger: whether the connection was closed with its session (retire) is asked here, under the gate's lock: retire
+	// marks its connections before it lets go what waits for them (drop), so a sender that read its session before
+	// retire is either let go by drop or sees the mark. Asked before (in SendData alone), a sender that came just after
+	// drop waited on a deaf session for an answer that would not come, or put a closed connection's data into it.
+	if g.closed || s.parent.retiredConn(conn) {
+		g.mu.Unlock()
+		return false
+	}
+	if len(g.waiting) == 0 && s.trySendNow(frame) {
+		g.mu.Unlock()
+		g.book.charge(conn, len(frame), time.Now())
 		return true
 	}
 	it := &gateItem{conn: conn, frame: frame, done: make(chan struct{})}
-	s.gate.mu.Lock()
-	if s.gate.closed {
-		s.gate.mu.Unlock()
-		return false
-	}
-	s.gate.waiting = append(s.gate.waiting, it)
-	s.gate.mu.Unlock()
+	g.waiting = append(g.waiting, it)
+	g.mu.Unlock()
 	s.pump()
 	s.parent.wake() // an idle update loop pumps the gate again on its quick ticks
 	select {
@@ -117,13 +123,6 @@ func (s *trackKCPSession) admit(conn uint32, frame []byte, stop <-chan struct{})
 	case <-stop:
 		return false
 	}
-}
-
-// idle: nothing waits (a message then needs no turn).
-func (g *sessionGate) idle() bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return len(g.waiting) == 0 && !g.closed
 }
 
 // trySendNow: the frame into KCP if there is room for it now.
