@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The templates' catalog for the family servers, made anew every run of the CI job: the hand-picked ones (templates.json,
 Russian titles, checked by templates_check.py) first, then what the search found by itself — Mixkit clips
-(templates_discover.py) and photos (templates_photos.py) with 1–3 faces seen big, the biggest faces first. Titles of
+(templates_discover.py) with 1–3 faces seen big, the biggest faces first (photos.json: photo templates, if a search
+for them is ever added; each server makes its own now — the best frame of each clip, portraits it draws). Titles of
 the found ones are in English (title_en): each server puts them into Russian itself. Clips and photos with words of
 what a family app should not show, and the ones turned down by eye (templates-deny.json), are left out.
 Writes catalog.json and manifest.json (the shapes the servers take: see the server's agent-docs app.md).
