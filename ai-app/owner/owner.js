@@ -526,7 +526,7 @@
       if (urgentUpdate) scroll.append(updateCard(u, "top"));
       if (fresh) scroll.append(eventsCard());
       const cl = !!cache.claudeOk;  // Claude on the server: memory, traffic, the week, Winger's journal and checks — ask it
-      scroll.append(bridgesCard(d), remoteCard(), diagCard(cl));
+      scroll.append(bridgesCard(d), remoteCard(cl), diagCard(cl));
       const more = store.get("serverMore", false);
       scroll.append(el("button", { class: "btn line wide", style: "margin:0 0 12px",
         text: more ? "▲ Скрыть подробности" : cl ? "▼ Подробнее: события, хостинг, версия, перезагрузка" : "▼ Подробнее: события, память, трафик, хостинг, перезагрузка",
@@ -650,22 +650,25 @@
     }
     // ---- remote desktop to the owner's Windows laptop: RustDesk through this server, only for the owner ----
     // The laptop is set up once by a command pasted into PowerShell (RustDesk as a service, this server and its key, a
-    // long password; it tells the server its ID). Then a tap here opens RustDesk on the phone straight to it, and
-    // another laptop gets a desktop shortcut from a command of its own. The password stays hidden until «Показать».
+    // long password; it tells the server its ID). Then a tap here opens RustDesk on the phone straight to it (the link
+    // carries the server and its key), and another laptop gets a desktop shortcut from a command of its own. A command
+    // stops working once it has done its job. The password stays hidden until «Показать».
     let remote = null;  // the last answer: a redraw shows it at once and asks again behind it
     const remoteQr = { cfg: "", png: null };
     const PS_HOW = "Откройте на ноутбуке PowerShell, вставьте команду, нажмите Enter и ответьте «Да» на вопрос Windows.";
-    function remoteCard() {
+    function remoteCard(cl) {
       const card = el("div", { class: "card" });
       let ticking = false;
+      // something is on its way: the laptop's ID, the laptop taking a new password, the server's part set up again
+      const waiting = (r) => r && (r.retrying || (r.ready && (!r.id || r.old_password)));
       const fill = (r) => {
         card.innerHTML = "";
         card.append(el("h3", { text: "🖥 Удалённый доступ" }));
         if (!r) { card.append(el("div", { class: "status", style: "font-size:14px" }, el("span", { class: "spin" }), "Проверяю…")); return; }
-        if (!r.ready) { card.append(el("div", { style: "font-size:14px;color:var(--muted)", text: r.why || "На сервере пока не готово." })); return; }
-        if (r.id) { remoteReady(card, r, fill); return; }
-        remoteFirst(card, r);
-        if (!ticking) { ticking = true; setTimeout(tick, 10000); }
+        if (!r.ready) remoteDown(card, r, cl, fill);
+        else if (r.id) remoteReady(card, r, fill);
+        else remoteFirst(card, r);
+        if (!ticking && waiting(r)) { ticking = true; setTimeout(tick, 10000); }
       };
       const get = () => panel({ op: "remote_state" }).then((r) => {
         if (r.t !== "done") throw Object.assign(new Error(r.text || "Не получилось."), { said: true });
@@ -673,10 +676,12 @@
         remote = r;
         if (card.isConnected) fill(r);
         if (was && was.ready && !was.id && r.id) toast("✅ Ноутбук настроен — можно подключаться", 5000);
+        else if (was && was.old_password && r.id && !r.old_password) toast("✅ Ноутбук получил новый пароль", 5000);
+        if (was && was.retrying && !r.retrying && r.ready) toast("✅ Удалённый доступ на сервере работает", 5000);
       });
-      // until the laptop tells its ID, look again every 10 s while the card is on screen
+      // while something is on its way, look again every 10 s as long as the card is on screen
       const tick = () => {
-        if (!card.isConnected || (remote && remote.id)) { ticking = false; return; }
+        if (!card.isConnected || !waiting(remote)) { ticking = false; return; }
         if (S.tab !== "vpn" || document.hidden) { setTimeout(tick, 10000); return; }
         get().catch(() => {}).finally(() => setTimeout(tick, 10000));
       };
@@ -689,9 +694,29 @@
       });
       return card;
     }
+    // the server's part does not work: why, in one line; it tries again by itself every hour, «🔄 Повторить» at once,
+    // and Claude on the server can look into it
+    function remoteDown(card, r, cl, fill) {
+      card.append(el("div", { class: r.retrying ? "status" : "", style: "font-size:14px;color:var(--muted)" },
+        r.retrying ? el("span", { class: "spin" }) : "", r.why || "На сервере пока не готово."));
+      if (r.retrying) return;
+      const row = el("div", { class: "big-actions", style: "margin-top:10px" });
+      if (r.retry) row.append(el("button", { class: "btn", text: "🔄 Повторить", onclick: async () => {
+        try {
+          const n = await panel({ op: "remote_retry" });
+          if (n.t !== "done") { toast("⚠️ " + n.text, 6000); return; }
+          remote = n;
+          fill(n);
+        } catch (e) { toast(problem(e)); }
+      } }));
+      if (cl) row.append(el("button", { class: "btn line", text: "🛠 Спросить Claude", onclick: () =>
+        toClaude("Удалённый доступ к ноутбуку на сервере не работает. В приложении написано: «" + r.why + "». Найди причину и почини.") }));
+      if (row.childNodes.length) card.append(row);
+    }
     // a command for PowerShell: copied, or sent on (to oneself, then opened on the laptop) by the app's own share sheet
-    // (the Android WebView has no navigator.share), or the browser's where there is one
-    const SEND_HOW = "Перешлите команду себе (например, в «Избранное») и откройте на ноутбуке.";
+    // (the Android WebView has no navigator.share), or the browser's where there is one. It carries what opens the
+    // laptop until it has done its job: only to oneself
+    const SEND_HOW = "Перешлите команду только себе и откройте на ноутбуке: пока она не сработала, она как пароль.";
     function cmdButtons(cmd, done) {
       const send = Native && Native.shareFile ? () => shareBlob(new Blob([cmd], { type: "text/plain" }), "komanda.txt", cmd)
         : navigator.share ? () => navigator.share({ text: cmd }).catch(() => {}) : null;
@@ -704,27 +729,51 @@
         el("div", { class: "row", style: "align-items:flex-start;padding-top:4px" }, el("span", { style: "font-size:22px;line-height:1.2", text: "1️⃣" }),
           el("div", { class: "grow" }, el("b", { text: "Этот ноутбук" }), el("small", { text: PS_HOW }))),
         cmdButtons(r.host_cmd, "✅ Команда скопирована — перешлите её себе и вставьте в PowerShell на ноутбуке"),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Команда работает сутки. Когда ноутбук настроится, здесь появится «💻 Подключиться»." }));
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Действует сутки, а когда ноутбук настроится — перестаёт, и здесь появится «💻 Подключиться»." }));
+    }
+    // a tap on «Подключиться»: when the app goes to the background at once, RustDesk opened (the phone has it, the hint
+    // is not needed any more); still here after 4 s — nothing on this phone could open the link
+    function remoteOpened(num, r) {
+      let gone = false;
+      const away = () => { gone = true; };
+      document.addEventListener("visibilitychange", away, { once: true });
+      window.addEventListener("blur", away, { once: true });
+      setTimeout(() => {
+        document.removeEventListener("visibilitychange", away);
+        window.removeEventListener("blur", away);
+        if (!gone) { toast("Если RustDesk не открылся — установите его: «📱 Телефон» ниже", 6000); return; }
+        store.set("remotePhone", true);
+        if (num) num.textContent = "Номер ноутбука: " + r.id;
+      }, 4000);
     }
     function remoteReady(card, r, fill) {
-      const dots = "•".repeat(12);
-      const pw = el("div", { style: "font:15px/1.4 ui-monospace,monospace;overflow-wrap:anywhere", text: dots });
-      const show = el("button", { class: "btn line", style: "flex:none;padding:6px 12px;min-height:38px", text: "Показать", onclick: () => {
-        const on = pw.textContent === dots;
-        pw.textContent = on ? r.password : dots;
-        show.textContent = on ? "Скрыть" : "Показать";
-      } });
+      const pwRow = (label, value, title) => {
+        const dots = "•".repeat(12);
+        const pw = el("div", { style: "font:15px/1.4 ui-monospace,monospace;overflow-wrap:anywhere", text: dots });
+        const show = el("button", { class: "btn line", style: "flex:none;padding:6px 12px;min-height:38px", text: "Показать", onclick: () => {
+          const on = pw.textContent === dots;
+          pw.textContent = on ? value : dots;
+          show.textContent = on ? "Скрыть" : "Показать";
+        } });
+        return el("div", { class: "row" }, el("span", { style: "font-size:20px", text: "🔑" }), el("div", { class: "grow", style: "min-width:0" }, el("small", { text: label }), pw), show,
+          el("button", { class: "icon-btn", title, text: "📋", onclick: () => { copyText(value); toast("✅ Пароль скопирован"); } }));
+      };
       const go = (icon, title, sub, fn) => el("div", { class: "row", style: "cursor:pointer", onclick: fn },
         el("span", { style: "font-size:20px", text: icon }), el("div", { class: "grow" }, title, el("small", { text: sub })), "›");
-      // until the phone's steps have been opened once: RustDesk must be on this phone for the button to work
+      // until RustDesk has opened from here once: it must be on this phone for the button to work
       const num = el("div", { style: "font-size:13px;color:var(--muted);text-align:center;margin:6px 0 4px", text: "Номер ноутбука: " + r.id
         + (store.get("remotePhone", false) ? "" : " · на телефоне нужен RustDesk — «📱 Телефон» ниже") });
       card.append(
-        el("a", { class: "btn wide", href: r.connect, style: "text-decoration:none;font-size:17px;min-height:54px", text: "💻 Подключиться к ноутбуку" }),
-        num,
-        el("div", { class: "row" }, el("span", { style: "font-size:20px", text: "🔑" }), el("div", { class: "grow", style: "min-width:0" }, el("small", { text: "Пароль" }), pw), show,
-          el("button", { class: "icon-btn", title: "Скопировать пароль", text: "📋", onclick: () => { copyText(r.password); toast("✅ Пароль скопирован"); } })),
-        go("📱", "Телефон", "RustDesk и наш сервер — один раз", () => { remotePhone(r); num.textContent = "Номер ноутбука: " + r.id; }),
+        el("a", { class: "btn wide", href: r.connect, style: "text-decoration:none;font-size:17px;min-height:54px", text: "💻 Подключиться к ноутбуку",
+          onclick: () => remoteOpened(num, r) }),
+        num);
+      if (r.old_password) {  // a new password the laptop has not taken yet: the old one still opens it
+        card.append(el("div", { style: "font-size:14px;margin:6px 0 2px", text: "⏳ Пароль сменён, но ноутбук его ещё не знает: подключитесь со старым и запустите на ноутбуке команду («🛠 Этот ноутбук» ниже)." }),
+          pwRow("Старый пароль — работает сейчас", r.old_password, "Скопировать старый пароль"),
+          pwRow("Новый — заработает после команды на ноутбуке", r.password, "Скопировать пароль"));
+      } else card.append(pwRow("Пароль", r.password, "Скопировать пароль"));
+      card.append(
+        go("📱", "Телефон", "RustDesk — один раз", () => remotePhone(r, num)),
         go("💻", "Другой ноутбук", "Значок на рабочем столе — без паролей", () => remoteOther(r)),
         go("🛠", "Этот ноутбук", "Команда настройки — ещё раз", () => remoteHost(r)),
         el("div", { style: "font-size:13px;color:var(--muted);margin:8px 0 10px", text: "🎚 Качество или отклик — переключатель в окне подключения (значок экрана)." }),
@@ -739,34 +788,46 @@
         return remoteQr.png;
       } catch (e) { return null; }
     }
-    function remotePhone(r) {
-      store.set("remotePhone", true);
+    function remotePhone(r, num) {
       sheet("📱 RustDesk на телефоне", (box) => {
         const step = (title, text) => el("div", { style: "margin:14px 0 8px" }, el("b", { text: title }),
           el("div", { style: "font-size:14px;color:var(--muted);margin-top:2px", text }));
+        // not needed for «Подключиться» (its link carries the server and its key): only for typing the laptop's number
+        // into RustDesk itself; the QR is asked for when this opens
         const qr = el("div", { style: "min-height:60px;display:grid;place-items:center;margin:4px 0 8px" }, el("span", { class: "spin" }));
+        const more = el("details", { style: "margin-top:14px;font-size:14px;color:var(--muted)" },
+          el("summary", { style: "cursor:pointer;padding:6px 0", text: "Необязательно: наш сервер в самом RustDesk" }),
+          el("div", { style: "margin:4px 0 8px", text: "Нужно, только если набирать номер ноутбука в самом RustDesk. В RustDesk: «Настройки» → значок сканера вверху. "
+            + "QR на этом же телефоне? Нажмите на него → «⬇️ Сохранить», а в сканере выберите картинку и подтвердите." }),
+          qr,
+          el("div", { text: "Или вручную: «Настройки» → «ID/Ретранслятор»: сервер — в «Сервер ID», ключ — в «Key»." }),
+          el("div", { class: "big-actions", style: "margin-top:8px" },
+            el("button", { class: "btn line", text: "📋 Сервер", onclick: () => { copyText(r.host); toast("✅ Сервер скопирован"); } }),
+            el("button", { class: "btn line", text: "📋 Ключ", onclick: () => { copyText(r.key); toast("✅ Ключ скопирован"); } })));
+        let asked = false;
+        more.addEventListener("toggle", () => {
+          if (!more.open || asked) return;
+          asked = true;
+          remoteQrPng(r.android_cfg).then((png) => {
+            qr.innerHTML = "";
+            qr.append(png ? el("img", { src: urlOf(png), alt: "QR для RustDesk", onclick: () => viewer(png, "rustdesk-server.png"),
+              style: "display:block;width:220px;max-width:70%;background:#fff;border-radius:12px;padding:6px" })
+              : el("div", { style: "font-size:14px;color:var(--muted)", text: "QR не получился — настройте вручную, ниже." }));
+          });
+        });
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 0", text: "Один раз — дальше «💻 Подключиться» сразу открывает ноутбук." }),
           step("1️⃣ Установите RustDesk", "Официальное приложение, с GitHub."),
           el("a", { class: "btn line wide", href: (r.android_apk || {}).url || "https://github.com/rustdesk/rustdesk/releases",
             style: "text-decoration:none", text: "⬇️ Скачать RustDesk" }),
-          step("2️⃣ Подключите к нашему серверу", "В RustDesk: «Настройки» → значок сканера вверху. QR на этом же телефоне? Нажмите на него → «⬇️ Сохранить», "
-            + "а в сканере выберите картинку."),
-          qr,
-          el("div", { style: "font-size:13px;color:var(--muted)", text: "Или вручную: «Настройки» → «ID/Ретранслятор»: сервер — в «Сервер ID», ключ — в «Key»." }),
-          el("div", { class: "big-actions", style: "margin-top:8px" },
-            el("button", { class: "btn line", text: "📋 Сервер", onclick: () => { copyText(r.host); toast("✅ Сервер скопирован"); } }),
-            el("button", { class: "btn line", text: "📋 Ключ", onclick: () => { copyText(r.key); toast("✅ Ключ скопирован"); } })),
-          step("3️⃣ Первое подключение", "Нажмите «Подключиться», вставьте пароль и отметьте «Запомнить пароль»."),
-          el("button", { class: "btn wide", text: "📋 Скопировать пароль", onclick: () => { copyText(r.password); toast("✅ Пароль скопирован — вставьте его в RustDesk", 4000); } }),
-          el("a", { class: "btn line wide", href: r.connect, style: "text-decoration:none;margin-top:8px", text: "💻 Подключиться к ноутбуку" }),
+          step("2️⃣ Первое подключение", "Нажмите «Подключиться», вставьте пароль и отметьте «Запомнить пароль». Наш сервер RustDesk узнает из ссылки сам."),
+          el("button", { class: "btn wide", text: "📋 Скопировать пароль", onclick: () => {
+            copyText(r.old_password || r.password); toast("✅ Пароль скопирован — вставьте его в RustDesk", 4000);
+          } }),
+          el("a", { class: "btn line wide", href: r.connect, style: "text-decoration:none;margin-top:8px", text: "💻 Подключиться к ноутбуку",
+            onclick: () => remoteOpened(num, r) }),
           el("div", { style: "font-size:13px;color:var(--muted);margin-top:12px", text: "Интернет режут? Включите Winger — RustDesk пойдёт через него. "
-            + "Если в Winger выбраны отдельные приложения, добавьте туда RustDesk." }));
-        remoteQrPng(r.android_cfg).then((png) => {
-          qr.innerHTML = "";
-          qr.append(png ? el("img", { src: urlOf(png), alt: "QR для RustDesk", onclick: () => viewer(png, "rustdesk-server.png"),
-            style: "display:block;width:220px;max-width:70%;background:#fff;border-radius:12px;padding:6px" })
-            : el("div", { style: "font-size:14px;color:var(--muted)", text: "QR не получился — настройте вручную, ниже." }));
-        });
+            + "Если в Winger выбраны отдельные приложения, добавьте туда RustDesk." }),
+          more);
       });
     }
     function remoteOther(r) {
@@ -777,19 +838,21 @@
           el("li", { text: "Откройте значок «Ноутбук (удалённо)» на рабочем столе." }),
           el("li", { text: "В первый раз вставьте пароль (команда уже положила его в буфер) и отметьте «Запомнить пароль»." })),
         cmdButtons(r.client_cmd, "✅ Команда скопирована — перешлите её себе и вставьте в PowerShell на другом ноутбуке"),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: "Перешлите команду себе (например, в «Избранное») и откройте на том ноутбуке. Команда работает сутки. Права администратора не нужны." })));
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Сработает один раз (действует сутки). Права администратора не нужны." })));
     }
     function remoteHost(r, fresh) {
       sheet(fresh ? "🔑 Пароль новый" : "🛠 Этот ноутбук", (box) => box.append(
-        el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: fresh
-          ? "Теперь запустите команду на ноутбуке ещё раз — он получит новый пароль. На телефоне и другом ноутбуке при подключении введите новый."
-          : "Ещё раз — после «Новый пароль» или если к ноутбуку перестало подключаться." }),
+        fresh ? el("ol", { style: "margin:-6px 0 10px;padding-left:20px;font-size:15px;line-height:1.5" },
+          el("li", { text: "Подключитесь к ноутбуку как обычно — старый пароль пока работает." }),
+          el("li", { text: "Запустите на нём команду ниже — после неё работает только новый пароль." }),
+          el("li", { text: "На другом ноутбуке запустите его команду ещё раз («💻 Другой ноутбук») — новый пароль окажется в буфере. На телефоне вставьте новый (📋 в карточке)." }))
+          : el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Ещё раз — после «Новый пароль» или если к ноутбуку перестало подключаться." }),
         el("div", { style: "font-size:15px", text: PS_HOW }),
         cmdButtons(r.host_cmd, "✅ Команда скопирована — перешлите её себе и вставьте в PowerShell на ноутбуке"),
-        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Команда работает сутки." })));
+        el("div", { style: "font-size:13px;color:var(--muted);margin-top:8px", text: SEND_HOW + " Действует сутки, после настройки ноутбука — перестаёт." })));
     }
     async function remoteNewPw(fill) {
-      if (S.busy.vpn || !(await confirmBox("Сменить пароль ноутбука? Потом запустите команду на ноутбуке ещё раз, а при подключении введите новый пароль.", "🔑 Сменить"))) return;
+      if (S.busy.vpn || !(await confirmBox("Сменить пароль ноутбука? Старый будет работать, пока вы не запустите команду на ноутбуке ещё раз.", "🔑 Сменить"))) return;
       S.busy.vpn = true;
       try {
         const r = await panel({ op: "remote_password" });
