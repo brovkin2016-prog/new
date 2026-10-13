@@ -236,7 +236,7 @@
         } }));
       }
       if (!running) {
-        row.append(el("button", { class: "btn line", text: "🔎 Есть ли новее?", onclick: async () => {
+        row.append(el("button", { class: "btn line", text: "🔎 Проверить обновление", onclick: async () => {
           try {
             const end = await panel({ op: "server_check" }, (t) => toast(t, 30000));
             document.querySelectorAll(".toast").forEach((t) => t.remove());
@@ -481,12 +481,10 @@
         el("div", { class: "emoji", text: bad.length ? "⚠️" : "✅" }),
         el("div", { class: "grow" }, el("b", { text: bad.length ? "Есть проблемы" : "Всё работает" }),
           el("small", { text: bad.length ? bad.join(" · ") : `${d.host} · ${d.ip}` + (d.online !== null ? ` · в сети: ${d.online}` : "") }))));
-      // only what needs the owner: money running out and a new version (when they do), the bridges, remote desktop
-      const u = d.update, p = (u && u.progress) || {};
-      const urgentHost = host && host.set && host.days_left < 7;
-      const urgentUpdate = u && (!u.ready || u.new || u.foreign || p.state === "running" || (p.state === "finished" && p.version && !p.ok));
-      if (urgentHost) drawHosting(host);
-      if (urgentUpdate) scroll.append(updateCard(u, "top"));
+      // what the owner needs: the hosting's days left and the server's version (always), the bridges, remote desktop
+      const u = d.update;
+      if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
+      if (u) scroll.append(updateCard(u, "top"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить» when there is one
       scroll.append(bridgesCard(d), remoteCard());
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
