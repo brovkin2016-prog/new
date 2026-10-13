@@ -573,9 +573,9 @@
   }
 
   // ---------- the main screen ----------
-  const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼", "Фото"], ["more", "☰", "Ещё"]];
-  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", vpn: "Управление", more: "Ещё" };
-  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 3).concat([["vpn", "🛡", "Управление"]], TABS.slice(3)) : TABS);
+  const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼", "Фото"], ["video", "🎬", "Видео"], ["more", "☰", "Ещё"]];
+  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото и картинки", video: "Видео", vpn: "Управление", more: "Ещё" };
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "🛡", "Управление"]], TABS.slice(4)) : TABS);
   // «Управление» is not in this app: the server gives its code only to the owner's signed-in phone
   async function ownerCode() {
     try {
@@ -613,7 +613,7 @@
     const owner = S.me.panel ? ownerCode() : null;  // fetched while the conversations load
     if (S.me.panel) store.set("wasOwner", true);
     await DB.open();
-    for (const t of ["chat", "study", "photo"]) S.msgs[t] = await DB.list(t);
+    for (const t of ["chat", "study", "photo", "video"]) S.msgs[t] = await DB.list(t);
     const app = $("#app");
     app.innerHTML = "";
     const shell = el("div", { class: "shell" });
@@ -625,7 +625,7 @@
     }
     shell.append(S.top, S.viewsEl, tabs);
     app.append(shell);
-    S.views = { chat: chatView(), study: studyView(), photo: photoView(), more: moreView() };
+    S.views = { chat: chatView(), study: studyView(), photo: photoView(), video: videoView(), more: moreView() };
     if (S.me.panel) {
       S.views.vpn = ownerView(await owner);
       if (Native && Native.setOwner) {
@@ -1122,7 +1122,7 @@
   }
 
   // ---------- Photo: send a photo and say what to do; without a photo, describe a picture to draw ----------
-  const QUICK = ["enhance", "removebg", "restore", "colorize", "animate", "scan"];  // the rest is under «Ещё» or in words
+  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan"];  // the rest is under «Ещё» or in words; videos: «🎬 Видео»
   const STYLE_ASKS = [["🎌", "В стиле аниме", "Перерисуй в стиле аниме"], ["🧸", "Как мультфильм Pixar", "Сделай как кадр из мультфильма Pixar, 3D"],
     ["🌻", "Как картина Ван Гога", "Перерисуй как картину Ван Гога"], ["🏖", "Фон — море", "Замени фон на берег моря"],
     ["🧹", "Убрать лишних людей", "Убери посторонних людей на заднем плане"]];
@@ -1130,7 +1130,7 @@
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "🖼" }), el("h2", { text: "Фото и картинки" }),
-      el("div", { text: "Пришлите фото и напишите или скажите 🎤, что сделать: «убери фон», «раскрась», «оживи», «сделай в стиле аниме»."
+      el("div", { text: "Пришлите фото и напишите или скажите 🎤, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»."
         + (S.me.can.draw ? " Без фото — опишите картинку, и я её нарисую." : "") }),
       el("div", { class: "big-actions", style: "margin:16px 0 4px" },
         el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
@@ -1178,7 +1178,7 @@
     act.onclick = () => (ta.value.trim() ? send() : dictate(row, (t) => { ta.value = t; send(); }));
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); send(); } });
     function more() {
-      const items = Object.keys(S.me.photo_ops).filter((op) => !QUICK.includes(op))
+      const items = Object.keys(S.me.photo_ops).filter((op) => !QUICK.includes(op) && op !== "animate")
         .map((op) => { const [ic, ...rest] = label(op).split(" "); return [ic, rest.join(" "), () => runOp(op)]; });
       if (S.me.ai_ops.edit) {
         for (const [ic, name, words] of STYLE_ASKS) items.push([ic, name, () => { ta.value = words; send(); }]);
@@ -1231,6 +1231,114 @@
         th.redraw();
       }]],
       onShow: () => th.down(),
+    };
+  }
+
+  // ---------- Video: «Я в ролике» (yourself in a template video) and «Оживить фото» ----------
+  // The templates are short free clips on the server, by theme; the person adds their own photo (one face, best waist-up
+  // or full-length) and says it is theirs or the person agrees; the server puts them into the clip on Hugging Face (the
+  // owner's free minutes: a couple of clips a day for the family). An own clip (≤ 40 MB) works too.
+  function videoView() {
+    const root = el("div", { class: "view" });
+    const scroll = el("div", { class: "scroll" });
+    let tpls = null;  // the server's list, asked once a visit
+    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "🎬" }), el("h2", { text: "Видео" }),
+      el("div", { text: "«Я в ролике» — вы в популярном ролике: танцы, кино, праздники. Нужно одно ваше фото. "
+        + "«Оживить фото» — фото начинает двигаться. Кнопки — внизу." }));
+    const th = thread("video", scroll, empty);
+    scroll.append(th.box);
+    const bar = el("div", { style: "display:flex;gap:8px" },
+      el("button", { class: "btn", style: "flex:1", text: "🎭 Я в ролике", onclick: gallery }),
+      el("button", { class: "btn line", style: "flex:1", text: "🖼 Оживить фото", onclick: animate }));
+    root.append(scroll, el("div", { class: "composer" }, bar));
+    const NOT_ON = "Видео вам пока не включено — его включает владелец помощника.";
+
+    async function load() {
+      if (tpls) return tpls;
+      try { tpls = await api("/api/templates", {}); } catch (e) { toast(problem(e)); return null; }
+      return tpls;
+    }
+    async function gallery() {
+      if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
+      const t = await load();
+      if (!t) return;
+      if (!t.can) { toast(NOT_ON, 5000); return; }
+      sheet("🎭 Я в ролике", (box, close) => {
+        const chips = el("div", { class: "chips", style: "margin:0 0 10px" });
+        const grid = el("div", { class: "tpl-grid" });
+        let theme = store.get("tplTheme", "");
+        const fill = () => {
+          chips.innerHTML = "";
+          for (const [k, v] of [["", "Все"]].concat(Object.entries(t.themes || {}))) {
+            if (k && !t.items.some((x) => x.theme === k)) continue;
+            chips.append(el("button", { class: "chip" + (k === theme ? " on" : ""), text: v, onclick: () => { theme = k; store.set("tplTheme", k); fill(); } }));
+          }
+          grid.innerHTML = "";
+          grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(); } },
+            el("span", { class: "plus", text: "➕" }), el("span", { class: "name", text: "Свой шаблон" })));
+          for (const x of t.items.filter((x) => !theme || x.theme === theme)) {
+            grid.append(el("button", { class: "tpl", onclick: () => { close(); withPhoto({ id: x.id, title: x.title, thumb: x.thumb }); } },
+              x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null, el("span", { class: "name", text: x.title })));
+          }
+        };
+        fill();
+        box.append(t.items.length ? null : el("p", { class: "muted", style: "margin:0 0 10px", text: t.note || "Шаблонов пока нет." }),
+          chips, grid, el("div", { class: "muted", style: "font-size:13px;margin-top:10px", text: t.note && t.items.length ? t.note
+            : "Ролик — 5 секунд. Бесплатных минут хватает примерно на 2 ролика в день на всю семью." }));
+      });
+    }
+    async function ownClip() {
+      const f = await pickFile("video/*", false);
+      if (!f) return;
+      if (f.size > 40 * 1024 * 1024) { toast("Ролик больше 40 МБ — возьмите покороче (хватит 5–10 секунд)", 5000); return; }
+      withPhoto({ own: true, title: "Свой шаблон", clip: f });
+    }
+    // the person's photo and their word that it is theirs, then the clip
+    function withPhoto(tpl) {
+      let photo = null, agreed = false;
+      sheet("🎭 " + tpl.title, (box, close) => {
+        const pic = el("div", { class: "pick-row" });
+        const go = el("button", { class: "btn wide", text: "🎬 Сделать ролик", disabled: true, onclick: async () => {
+          close();
+          const body = { image: await b64(await shrink(photo, 2048, 0.92)), consent: true };
+          if (tpl.own) body.clip = await b64(tpl.clip); else body.template = tpl.id;
+          await th.run("/api/tvideo", body, { role: "me", image: photo, text: "🎭 " + tpl.title });
+        } });
+        const check = el("input", { type: "checkbox", onchange: () => { agreed = check.checked; ready(); } });
+        const ready = () => { go.disabled = !(photo && agreed); };
+        const showPic = () => {
+          pic.innerHTML = "";
+          if (photo) pic.append(el("img", { src: urlOf(photo), alt: "" }), el("span", { class: "muted", text: "Фото выбрано" }));
+          pic.append(el("button", { class: "btn line", text: "📷 Снять", onclick: async () => { const f = await pickFile("image/*", true); if (f) { photo = f; showPic(); ready(); } } }),
+            el("button", { class: "btn line", text: "🖼 Из галереи", onclick: async () => { const f = await pickFile("image/*", false); if (f) { photo = f; showPic(); ready(); } } }));
+        };
+        showPic();
+        box.append(tpl.thumb ? el("img", { class: "tpl-big", src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null,
+          el("p", { style: "margin:4px 0 8px", text: "Ваше фото: одно лицо, лучше по пояс или в полный рост, хороший свет." }),
+          pic,
+          el("label", { class: "agree" }, check, el("span", { text: "Это моё фото (или человек на фото согласен)" })),
+          go,
+          el("div", { class: "muted", style: "font-size:13px;margin-top:8px", text: "Обычно 2–5 минут. Ролик придёт сюда — его можно сохранить и отправить." }));
+      });
+    }
+    async function animate() {
+      if (!(S.me.ai_ops && S.me.ai_ops.animate) && !(S.me.photo_ops && S.me.photo_ops.animate)) { toast(NOT_ON, 5000); return; }
+      if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
+      const f = await pickFile("image/*", false);
+      if (!f) return;
+      await th.run("/api/animate", { image: await b64(await shrink(f, 3072, 0.92)) }, { role: "me", image: f, text: "🖼 Оживить фото" });
+    }
+    th.redraw();
+    return {
+      root, redraw: th.redraw,
+      sub: () => "вы в ролике, оживить фото",
+      buttons: () => [["🧹", "Очистить", async () => {
+        if (!S.msgs.video.length || !(await confirmBox("Удалить все ролики из списка?", "Очистить"))) return;
+        await DB.clear("video");
+        S.msgs.video = [];
+        th.redraw();
+      }]],
+      onShow: () => { tpls = null; th.down(); },
     };
   }
 

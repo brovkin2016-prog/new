@@ -484,7 +484,7 @@
       // what the owner needs: the hosting's days left and the server's version (always), the bridges, remote desktop
       const u = d.update;
       if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
-      if (u) scroll.append(updateCard(u, "top"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить» when there is one
+      if (u) scroll.append(updateCard(u, "all"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить», the night switch
       scroll.append(bridgesCard(d), remoteCard());
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
