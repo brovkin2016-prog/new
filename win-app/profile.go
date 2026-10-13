@@ -249,11 +249,12 @@ func (p *Profile) JoinParams(tunnel string) map[string]any {
 	return j
 }
 
-// Same: one bridge per call service (a new call replaces the old one); a server with the same address, ports and
-// person (a new key replaces the old one).
+// Same: one bridge per call service and per one or two tracks (the owner may keep the two-track trial beside the
+// usual one; a new call replaces the old one); a server with the same address, ports and person (a new key replaces
+// the old one).
 func (p *Profile) Same(o *Profile) bool {
 	if p.Bridge || o.Bridge {
-		return p.Bridge && o.Bridge && p.Platform == o.Platform
+		return p.Bridge && o.Bridge && p.Platform == o.Platform && p.DualTrack == o.DualTrack
 	}
 	return p.Host == o.Host && p.Ports == o.Ports && (p.Auth == o.Auth || user(p.Auth) != "" && user(p.Auth) == user(o.Auth))
 }

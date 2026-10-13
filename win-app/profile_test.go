@@ -67,3 +67,25 @@ func TestBridgeLinks(t *testing.T) {
 		t.Fatal(wb.Service())
 	}
 }
+
+// the owner's two-track trial stays beside the usual Telemost bridge; a new call of the same kind replaces it
+func TestBridgeSameKeepsTwoTrackTrialApart(t *testing.T) {
+	one, err := ParseLink("winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234&fps=24&batch=45&reliable=1&dual=0#a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := ParseLink("winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234&fps=24&batch=45&reliable=1&dual=1#b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := ParseLink("winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F99999999999999&fps=24&batch=45&reliable=1&dual=0#c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Same(two) || two.Same(one) {
+		t.Fatal("the two-track trial replaced the usual bridge")
+	}
+	if !one.Same(next) {
+		t.Fatal("a new call of the usual bridge did not replace the old one")
+	}
+}

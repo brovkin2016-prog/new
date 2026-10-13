@@ -616,7 +616,7 @@ public final class VpnSvc extends VpnService {
             Diag.upload(this, true, true);  // the journal goes now, past the bridge
             if (BridgeSync.refreshNow(this)) {
                 Profile fresh = null;  // this service's bridge as the server has it now
-                for (Profile x : Profile.all(this)) if (x.bridge && x.platformOrDefault().equals(p.platformOrDefault())) fresh = x;
+                for (Profile x : Profile.all(this)) if (x.bridge && x.platformOrDefault().equals(p.platformOrDefault()) && x.dualTrack == p.dualTrack) fresh = x;
                 if (fresh != null && !fresh.link.equals(p.link)) {
                     synchronized (lock) {
                         if (worker == Thread.currentThread()) {

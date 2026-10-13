@@ -291,8 +291,9 @@ final class Profile {
         int at = -1;
         for (int i = 0; i < list.size(); i++) {
             Profile o = list.get(i);
-            if (o.bridge || p.bridge) {  // a bridge: one per call service, a new call of it replaces the old one
-                if (o.bridge && p.bridge && o.platformOrDefault().equals(p.platformOrDefault())) at = i;
+            if (o.bridge || p.bridge) {  // a bridge: one per call service (and per one or two tracks: the owner may keep
+                // the two-track trial beside the usual one), a new call of it replaces the old one
+                if (o.bridge && p.bridge && o.platformOrDefault().equals(p.platformOrDefault()) && o.dualTrack == p.dualTrack) at = i;
                 continue;
             }
             // the same server and the same person (hysteria2://name:key@…): a new key replaces the old one, no dead copy stays

@@ -287,7 +287,7 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 		Logf("bridge: in the call, but nothing comes back through it")
 		if e.fam != nil && e.fam.SyncBridges(0) > 0 { // the server gave a new call: tried at once
 			for _, x := range e.st.Profiles() {
-				if x.Bridge && x.Platform == p.Platform && x.Link != p.Link {
+				if x.Bridge && x.Platform == p.Platform && x.DualTrack == p.DualTrack && x.Link != p.Link {
 					e.mu.Lock()
 					if e.gen != g || !e.wanted {
 						e.mu.Unlock()
