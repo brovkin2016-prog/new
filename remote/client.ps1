@@ -188,8 +188,13 @@ function Main {
 
     # 3. the shortcut
     Say "3/4 Создаю ярлык «$ShortcutName» на рабочем столе…"
+    # the desktop as Windows names it (OneDrive may hold it), else the profile's own; made when it is not there yet
+    $desk = [Environment]::GetFolderPath('Desktop')
+    if (-not $desk) { $desk = Join-Path $env:USERPROFILE 'Desktop' }
+    $why = ''
     try {
-        $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) ($ShortcutName + '.lnk')
+        if (-not (Test-Path -LiteralPath $desk)) { New-Item -ItemType Directory -Path $desk -Force | Out-Null }
+        $lnk = Join-Path $desk ($ShortcutName + '.lnk')
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($lnk)
         $sc.TargetPath = $exe
@@ -198,8 +203,18 @@ function Main {
         $sc.IconLocation = $exe + ',0'
         $sc.Description = 'Подключиться к ноутбуку'
         $sc.Save()
+        if (-not (Test-Path -LiteralPath $lnk)) { throw 'the shortcut file is not there after saving' }
     } catch {
-        Fail 'Не получилось создать ярлык на рабочем столе. Запустите команду ещё раз.'
+        $why = $_.Exception.Message
+        # no shortcut maker here: a small starter file on the desktop does the same
+        try {
+            $cmd = Join-Path $desk ($ShortcutName + '.cmd')
+            [IO.File]::WriteAllText($cmd, "@start `"`" `"$exe`" --connect $LaptopId`r`n", [Text.Encoding]::GetEncoding(866))
+            Say ("    Ярлык не создался ($why) — вместо него на рабочем столе файл с тем же именем, он делает то же.") 'Yellow'
+            $why = ''
+        } catch {
+            Fail ("Не получилось создать ярлык на рабочем столе ($why). Запустите команду ещё раз.")
+        }
     }
 
     # 4. the password for the first connection (RustDesk then remembers it)
