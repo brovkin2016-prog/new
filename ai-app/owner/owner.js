@@ -595,17 +595,20 @@
       return card;
     }
     // a bridge of the server as a Winger link, with its service's best settings ("" when its call is not there)
-    function wingerLink(b) {
+    // dual: Telemost's two-track trial (the screenshare as a second track) — a link of its own beside the usual one
+    function wingerLink(b, dual) {
       const link = b.link || "", enc = encodeURIComponent(link);
       const short = b.label.replace(/^\S+\s/, "");  // «Телефон · Телемост»; a person's «Мама · Телемост» — their Winger needs no name
       const name = encodeURIComponent("Мост · " + (b.label.startsWith("👤") ? short.replace(/^[^·]+· /, "") : short));
       const kind = bridgeKind(b);
+      if (kind === "tm" && dual) return "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=1#" + encodeURIComponent(TM2);
       return kind === "tm" ? "winger-bridge://telemost?link=" + enc + "&fps=24&batch=45&reliable=1&dual=0#" + name
         : kind === "wb" ? "winger-bridge://wbstream?room=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
         : kind === "dion" ? "winger-bridge://dion?room=" + enc + "#" + name
         : kind === "bitrix" ? "winger-bridge://bitrix?link=" + enc + "&mode=dc&fps=24&batch=30&reliable=1&dual=0#" + name
         : kind === "vk" ? "winger-bridge://vk?link=" + enc + "&mode=dc#" + name : "";
     }
+    const TM2 = "Мост · Телемост · 2 трека (проверка)";
     function bridgeKind(b) {
       const link = b.link || "";
       if (/^https:\/\/telemost(\.360)?\.yandex\.(ru|com)\/j\/[0-9A-Za-z_-]+$/.test(link)) return "tm";
@@ -632,6 +635,8 @@
         if (w) {
           box.append(el("a", { class: "btn line wide", href: w, style: "text-decoration:none;text-align:center;display:block;margin-top:8px", text: "📲 Добавить в Winger сейчас" }),
             el("div", { style: "font-size:12px;color:var(--muted);margin:4px 2px 0", text: "Не обязательно: Winger сам получает мосты в течение часа." }));
+          if (bridgeKind(b) === "tm") box.append(el("a", { class: "btn line wide", href: wingerLink(b, true), style: "text-decoration:none;text-align:center;display:block;margin-top:8px", text: "📲 Добавить «2 трека (проверка)»" }),
+            el("div", { style: "font-size:12px;color:var(--muted);margin:4px 2px 0", text: "Тот же звонок по двум трекам: вдвое быстрее, если Телемост пропускает второй. Обычная ссылка остаётся рядом." }));
         }
         if (link) box.append(el("button", { class: "btn soft wide", style: "margin-top:12px", text: "📋 Ссылка звонка — для другого устройства",
           onclick: () => { copyText(link); toast("✅ Ссылка скопирована"); } }));
@@ -1550,6 +1555,9 @@
             (got ? (got.ok ? "🟢 работает — нажмите, чтобы отправить ещё раз" : "🔴 сейчас не отвечает — отправить можно")
               : b.ok ? "🟢 ваш мост работает" : "🔴 ваш мост сейчас не отвечает — копия может не подняться"),
             () => { close(); giveBridge(u, b, got); }));
+          if (b.plat === "tm") box.append(giveTile("📹", "Телемост · 2 трека (проверка)" + (got ? " · мост уже выдан ✓" : ""),
+            "Тот же мост по двум трекам — вдвое быстрее, если Телемост пропускает второй. Отдельная ссылка рядом с обычной.",
+            () => { close(); giveBridge(u, Object.assign({}, b, { name: "Телемост · 2 трека (проверка)", dual: true }), got); }));
         }
         if (owned.length > 1) box.append(el("button", { class: "btn line wide", style: "margin-top:6px", text: "🌉 Все мосты сразу",
           onclick: () => { close(); userBridge(u, true); } }));
@@ -1571,7 +1579,7 @@
           u = end;
         } catch (e) { toast(problem(e)); return; }
       }
-      const link = wingerLink(got);
+      const link = wingerLink(got, b.dual);
       if (!link) { toast(`⚠️ У моста «${b.name}» для «${u.name}» ещё нет звонка — он поднимается сам, попробуйте через пару минут.`, 7000); return; }
       let png = null;
       try {
@@ -1581,7 +1589,7 @@
       const msg = `🌉 Мост «${b.name}» для «${u.name}»\n\nНужен в дни, когда мобильный интернет пускает только разрешённые сайты.\n`
         + `1️⃣ Скопируйте это сообщение целиком\n2️⃣ Откройте Winger → «📋 Вставить ссылку»\nДальше Winger сам включит мост, когда обычный VPN не отвечает.`
         + `\n\n${link}`;
-      shareSheet(`🌉 ${b.name} для «${u.name}»`, msg, link, png, `bridge-${b.plat}-${u.name}.png`,
+      shareSheet(`🌉 ${b.name} для «${u.name}»`, msg, link, png, `bridge-${b.plat}${b.dual ? "2" : ""}-${u.name}.png`,
         got.ok ? "🟢 Мост работает. Если у человека Winger уже с этим VPN — он возьмёт мост и сам, до 20 минут." : "🔴 Мост сейчас не отвечает — когда поднимется, Winger возьмёт его сам.");
     }
     async function userBridge(u, on) {
