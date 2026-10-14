@@ -565,7 +565,7 @@
     const c = s.match(/\b([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})\b/);
     return c ? { host: "", code: c[1] } : null;
   }
-  const NO_CODE = "Не вижу кода. Скопируйте сообщение от владельца помощника целиком и нажмите «📋 Вставить скопированное».";
+  const NO_CODE = "Не вижу кода. Скопируйте сообщение от владельца помощника целиком и нажмите «📋\u00a0Вставить скопированное».";  // the sign stays with its word; the name may wrap at a big font
   function renderLogin(message) {
     const app = $("#app");
     app.innerHTML = "";
@@ -577,7 +577,7 @@
       if (!p) { err.textContent = NO_CODE; return; }
       if (Native) {
         const host = p.host || (Native.getHost && Native.getHost());
-        if (!host) { err.textContent = "Нужна вся строка из сообщения, а не только код. Скопируйте её целиком и нажмите «📋 Вставить скопированное»."; return; }
+        if (!host) { err.textContent = "Нужна вся строка из сообщения, а не только код. Скопируйте её целиком и нажмите «📋\u00a0Вставить скопированное»."; return; }
         Native.setHost(host);
       }
       go.disabled = true;
@@ -617,7 +617,7 @@
       err.textContent = "";
       try {
         const r = await api("/api/owner_mail", {});
-        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «📋 Вставить скопированное».`;
+        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «📋\u00a0Вставить скопированное».`;
       } catch (e) {
         err.textContent = problem(e);
       }
@@ -711,7 +711,8 @@
     if (tab !== S.tab) document.querySelectorAll(".toast").forEach((t) => t.remove());
     S.tab = tab;
     store.set("tab", tab);
-    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+    // the tab is open: its mark «something came while you were away» (see thread().run) has done its job
+    document.querySelectorAll(".tab").forEach((b) => { b.classList.toggle("on", b.dataset.tab === tab); if (b.dataset.tab === tab) { b.classList.remove("dot"); b.removeAttribute("aria-label"); } });
     for (const [k, v] of Object.entries(S.views)) v.root.classList.toggle("hidden", k !== tab);
     const v = S.views[tab];
     S.top.innerHTML = "";
@@ -816,7 +817,8 @@
       // only fail once more after the same minutes
       const v = S.views[thread];
       const redo = m.tpl && v && v.th ? act("🔁 С другими фото", () => whoIsWho(m.tpl.kind, m.tpl, v.th)) : null;
-      const again = list.canRetry(m) ? act("🔄 Повторить", () => list.retry(m)) : null;
+      // the same photos again only fail again when the server asked for another photo (a face not seen well)
+      const again = list.canRetry(m) && !(redo && /друго[ей] фото|другие фото|лиц[оа]\s/i.test(m.text || "")) ? act("🔄 Повторить", () => list.retry(m)) : null;
       if (redo || again) wrap.append(el("div", { class: "acts" }, redo, again));
     }
     return wrap;
@@ -839,6 +841,106 @@
   function thread(name, scroll, emptyState, tail) {
     const box = el("div", { class: "msgs" });
     let last = null, liveEl = null;  // the last request (for «Повторить»), the bubble being written now
+    const PEND = "pend:" + name;  // the request still out (its number), so that its answer is not lost
+    // the bubble of an answer being made: what the server says it is doing, the words as they come, the time it takes
+    function live(first, path) {
+      const node = el("div", { class: "msg ai" });
+      const b = el("div", { class: "bubble" });
+      const content = el("div");
+      const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: first }));
+      b.append(content, status);
+      if (path === "/api/tvideo" || path === "/api/animate") {
+        b.append(el("div", { class: "live-note", text: "Можно перейти в другую вкладку или свернуть приложение — ролик придёт сюда." }));
+      }
+      node.append(b);
+      [...box.children].forEach((c) => { if (c.classList.contains("empty") || c.classList.contains("tail")) c.remove(); });
+      box.append(node);
+      liveEl = node;
+      api2.down();
+      let text = "", timer = null, said = first, t0 = Date.now();
+      const clock = setInterval(() => {
+        const sec = Math.round((Date.now() - t0) / 1000);
+        if (sec >= 5 && !status.classList.contains("hidden")) {
+          status.lastChild.textContent = said + " · " + (sec < 60 ? sec + " с" : "прошло " + Math.floor(sec / 60) + " мин");
+        }
+      }, 1000);
+      const paint = () => { timer = null; content.innerHTML = md(text); content.lastElementChild && content.lastElementChild.classList.add("typing"); api2.down(); };
+      const say = (t) => {
+        said = t;
+        t0 = Date.now();
+        status.lastChild.textContent = t;
+        status.classList.remove("hidden");
+        if (text) status.style.marginTop = "8px";
+      };
+      return {
+        event(ev) {
+          if (ev.t === "status") say(ev.text);
+          else if (ev.t === "reset") { text = ""; content.innerHTML = ""; status.style.marginTop = ""; }
+          else if (ev.t === "delta") {
+            text += ev.text;
+            status.classList.add("hidden");
+            if (!timer) timer = setTimeout(paint, 90);
+          }
+        },
+        // the server goes on without the phone: asked now and then for the answer (what it is doing meanwhile, and
+        // the words written so far); while the app is put aside nothing is asked
+        async wait(rid) {
+          if (!said.startsWith("⏳")) say("⏳ Связь прервалась — ответ ещё готовится и придёт сюда");
+          const until = Date.now() + 2 * 3600e3;
+          let pause = 1500;
+          while (Date.now() < until) {
+            await new Promise((r) => setTimeout(r, pause));
+            if (document.hidden) await new Promise((r) => document.addEventListener("visibilitychange", function on() { if (!document.hidden) { document.removeEventListener("visibilitychange", on); r(); } }));
+            let r;
+            try {
+              r = await api("/api/job", { rid });
+            } catch (e) {
+              if (e instanceof HttpError && (e.status === 404 || e.status === 401)) return { t: "error", text: problem(e) };
+              pause = Math.min(15000, pause * 1.5);  // no network yet, or asked too often: a little later
+              continue;
+            }
+            pause = 3000;
+            if (r.t !== "working") return r;
+            if (r.text) say(r.text);
+            if (r.partial && r.partial !== text) { text = r.partial; status.classList.add("hidden"); paint(); }
+          }
+          return { t: "error", text: "Ответ так и не пришёл — попробуйте ещё раз." };
+        },
+        stop() { clearTimeout(timer); clearInterval(clock); node.remove(); },
+      };
+    }
+    // the answer in: kept in the thread, the server told it may forget it, a notice when another tab is open
+    async function finish(lv, end, path, mine, rid) {
+      lv.stop();
+      liveEl = null;
+      S.busy[name] = false;
+      store.set(PEND, null);
+      if (rid) api("/api/job", { rid, ack: true }).catch(() => {});
+      let out;
+      if (end.t === "done") {
+        if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
+        if (end.remind) end.text = (end.text || "") + remindSet(end.remind);
+        out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
+          audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name, op: end.op,
+          result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null,
+          // a photo brought to life shows that photo until it is played
+          poster: end.video && path === "/api/animate" && last ? last.still : null,
+          pdf: end.pdf ? blobOf(end.pdf, "application/pdf") : null });
+        if (out.audio) playAudio(out.audio);
+      } else {
+        out = await api2.add({ role: "ai", text: "⚠️ " + end.text, err: true });
+      }
+      // a clip (5–8 min), a picture or an answer that came while another tab is open: a notice where the person is now,
+      // and a mark on its tab until it is opened (the chats have their own list: not marked)
+      const TAB_OF = { study: "Учёба", photo: "Фото", video: "Видео" };
+      if (TAB_OF[name] && S.tab !== name) {
+        toast((end.t === "done" ? "✅ Готово" : "⚠️ Не получилось") + " — откройте «" + TAB_OF[name] + "»", 6000);
+        const tb = document.querySelector(`.tab[data-tab="${name}"]`);
+        if (tb) { tb.classList.add("dot"); tb.setAttribute("aria-label", TAB_OF[name] + " — есть новое"); }
+      }
+      api2.redraw();
+      return out;
+    }
     const api2 = {
       box, name,
       redraw() {
@@ -875,76 +977,37 @@
         if (S.msgs[name].length === 1 && S.tab === name) refreshTop();  // «🧹 Очистить» on top once there is something to clear
         return m;
       },
-      // asks the server and shows the answer as it is written
+      // asks the server and shows the answer as it is written. Each request has a number of its own (rid): the server
+      // finishes it and keeps the answer even when the phone goes away (another tab, the app put aside or closed, the
+      // network gone) — then the answer is fetched by that number (see resume) instead of being lost
       async run(path, body, mine) {
         if (S.busy[name]) { toast("Подождите, ещё отвечаю…"); return null; }
         S.busy[name] = true;
         // «🔄 Повторить» sends the same again with no new bubble of its own: the photo a clip is made from stays known
         last = { path, body, still: mine ? mine.image || null : last && last.body === body ? last.still : null };
         if (mine) { await api2.add(mine); api2.redraw(); }
-        const live = el("div", { class: "msg ai" });
-        const b = el("div", { class: "bubble" });
-        const content = el("div");
+        const rid = newRid();
+        store.set(PEND, { rid, path, at: Date.now() });
         // a picture, a clip or a PDF is first sent off; «Думаю…» is for words, until the server says what it is doing
-        const first = /\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf)$/.test(path) ? "Отправляю…" : "Думаю…";
-        const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: first }));
-        b.append(content, status);
-        if (path === "/api/tvideo" || path === "/api/animate") {
-          b.append(el("div", { class: "live-note", text: "Можно свернуть приложение, но не закрывайте его — ролик придёт сюда." }));
-        }
-        live.append(b);
-        [...box.children].forEach((c) => { if (c.classList.contains("empty") || c.classList.contains("tail")) c.remove(); });
-        box.append(live);
-        liveEl = live;
-        api2.down();
-        let text = "", timer = null, said = first, t0 = Date.now();
-        const clock = setInterval(() => {
-          const sec = Math.round((Date.now() - t0) / 1000);
-          if (sec >= 5 && !status.classList.contains("hidden")) {
-            status.lastChild.textContent = said + " · " + (sec < 60 ? sec + " с" : "прошло " + Math.floor(sec / 60) + " мин");
-          }
-        }, 1000);
-        const paint = () => { timer = null; content.innerHTML = md(text); content.lastElementChild && content.lastElementChild.classList.add("typing"); api2.down(); };
+        const lv = live(/\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf)$/.test(path) ? "Отправляю…" : "Думаю…", path);
         let end;
         try {
-          end = await stream(path, body, (ev) => {
-            if (ev.t === "status") {
-              said = ev.text;
-              t0 = Date.now();
-              status.lastChild.textContent = ev.text;
-              status.classList.remove("hidden");
-              if (text) status.style.marginTop = "8px";
-            } else if (ev.t === "reset") { text = ""; content.innerHTML = ""; status.style.marginTop = ""; }
-            else if (ev.t === "delta") {
-              text += ev.text;
-              status.classList.add("hidden");
-              if (!timer) timer = setTimeout(paint, 90);
-            }
-          });
+          end = await stream(path, Object.assign({}, body, { rid }), lv.event);
         } catch (e) {
-          end = { t: "error", text: problem(e) };
+          end = e instanceof HttpError ? { t: "error", text: problem(e) } : null;  // the server said no / the line broke
         }
-        clearTimeout(timer);
-        clearInterval(clock);
-        liveEl = null;
-        live.remove();
-        S.busy[name] = false;
-        let out;
-        if (end.t === "done") {
-          if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
-          if (end.remind) end.text = (end.text || "") + remindSet(end.remind);
-          out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
-            audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name, op: end.op,
-            result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null,
-            // a photo brought to life shows that photo until it is played
-            poster: end.video && path === "/api/animate" ? last.still : null,
-            pdf: end.pdf ? blobOf(end.pdf, "application/pdf") : null });
-          if (out.audio) playAudio(out.audio);
-        } else {
-          out = await api2.add({ role: "ai", text: "⚠️ " + end.text, err: true });
-        }
-        api2.redraw();
-        return out;
+        if (!end) end = await lv.wait(rid);  // the line broke: the server goes on, its answer is fetched
+        return finish(lv, end, path, mine, rid);
+      },
+      // a request left unfinished (the app was put aside or closed, the line broke): its answer fetched by its number
+      async resume() {
+        const p = store.get(PEND, null);
+        if (!p || S.busy[name]) return;
+        if (!p.rid || Date.now() - (p.at || 0) > 2 * 3600e3) { store.set(PEND, null); return; }
+        S.busy[name] = true;
+        const lv = live("⏳ Ответ ещё готовится…", p.path);
+        const end = await lv.wait(p.rid);
+        await finish(lv, end, p.path, null, p.rid);
       },
       // «🔄 Повторить» under the last answer when it did not come: the same request once more
       canRetry(m) {
@@ -972,8 +1035,14 @@
       ask: null,  // set by the view
       onRedraw: null,  // set by the view that draws something of its own with the thread
     };
+    THREADS.set(name, api2);
+    setTimeout(() => api2.resume(), 0);  // an answer left out there when the app was closed: fetched now
     return api2;
   }
+  // the threads there are now (a chat's own once it is opened): coming back to the app, each fetches what it left out
+  const THREADS = new Map();
+  const newRid = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), (x) => x.toString(16).padStart(2, "0")).join("");
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) for (const t of THREADS.values()) t.resume(); });
 
   // speech to text in place of the input row; onText gets what was said
   async function dictate(row, onText) {
@@ -1206,7 +1275,7 @@
     ["8", "8 класс"], ["9", "9 класс"], ["10", "10 класс"], ["11", "11 класс"], ["s1", "Студент, 1 курс"], ["s2", "Студент, 2 курс"],
     ["s3", "Студент, 3 курс"], ["s4", "Студент, 4+ курс"], ["a", "Взрослый"]];
   const STUDY_MODES = {
-    solve: ["✅ Решить", "Полное решение с объяснением и ответом — как оформляют в школе."],
+    solve: ["🧮 Решить", "Полное решение с объяснением и ответом — как оформляют в школе."],
     explain: ["💡 Объяснить", "Подсказки и объяснение по шагам, без готового ответа — чтобы научиться самому."],
     check: ["🔍 Проверить", "Сфотографируйте своё решение: найду ошибки и объясню, как исправить."],
     essay: ["✍️ Сочинение", "Сочинение, эссе или изложение по теме — под возраст и требования."],
@@ -1317,7 +1386,7 @@
   }
 
   // ---------- Photo: send a photo and say what to do; without a photo, describe a picture to draw ----------
-  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan"];  // on the chosen photo; the rest under «⋯ Другое» or in words
+  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan"];  // on the chosen photo; the rest under «🧰 Другое» or in words
   // clearer names for some of the server's tools (only renames: the tools themselves are the server's)
   const OP_NAMES = { restore: "👴 Восстановить старое", scan: "📑 Скан документа", bw: "⬛ Чёрно-белое", cartoon: "🦸 Мульт",
     oil: "🖌️ Картина маслом", blurbg: "🌫️ Размыть фон", vintage: "🎞️ Винтаж" };
@@ -1349,7 +1418,10 @@
         el("button", { class: "x", text: "✕", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
       tools(QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
-        tool("✍️ Своё изменение", own), tool("⋯ Другое", more)))
+        tool("✍️ Своё изменение", own),
+        // «pick my photo, then put me in a picture»: the photo chosen here is offered in who-is-who
+        tplOk() ? tool("🎭 Я на фото", () => templatesSheet("photo", th)) : null,
+        tool("🧰 Другое", more)))
       // pages for a PDF being collected: their banner over the input is the next step (no second «📷» here)
       : S.scan.length ? null
       : S.msgs.photo.length ? el("div", { class: "tail big-actions next", style: "grid-template-columns:1fr 1fr" },
@@ -1482,6 +1554,7 @@
     th.redraw();
     return {
       root, th, set, redraw: th.redraw,
+      current: () => photo,  // the photo chosen now (null when none): «🎭 Я на фото» offers it for a face
       // a job started elsewhere (🎭 Я на фото) takes the choice away too: no «Что сделать с этим фото?» under its result
       drop() { photo = null; ownHint.classList.add("hidden"); sync(); },
       sub: () => (photo ? "фото выбрано" : S.me.can.draw ? "улучшить, изменить, нарисовать" : "улучшить и изменить фото"),
@@ -1508,15 +1581,14 @@
       off: "«Я в ролике» пока не включено — его включает владелец помощника.",
       hint: "Выберите ролик — потом покажете, кого в нём заменить на себя или родных. Подойдёт и свой ролик с телефона, до 20 секунд.",
       none: "Готовых роликов пока нет — загляните позже.", busy: "Подождите, ролик ещё делается",
-      foot: "Ролик будет готов обычно через несколько минут, не больше 8, и появится здесь. Приложение можно свернуть, но не закрывайте его." },
+      // one line at 360: where it comes and «можно свернуть, но не закрывайте» are said in the clip's own bubble while it
+      // is made (.live-note)
+      foot: "Ролик будет готов через 5–8 минут." },
     photo: { title: "🎭 Я на фото", path: "/api/tphoto", go: "✨ Создать картинку", find: "🔎 Ищу лица на картинке…",
       off: "«Я на фото» пока не включено — его включает владелец помощника.",
       hint: "Выберите картинку — потом покажете, кого на ней заменить на себя или родных.",
       none: "Готовых картинок пока нет — загляните позже.", busy: "Подождите, предыдущее фото ещё делается",
       foot: "Обычно готово за полминуты." } };
-  // «1 секунду», «3 секунды», «6 секунд»
-  const secs = (k) => k + " " + (k % 10 === 1 && k % 100 !== 11 ? "секунду"
-    : k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14) ? "секунды" : "секунд");
   // what the gallery loaded this visit of the tab: {theme, page, items, more, total, themes, can, note}; the tab's onShow forgets it
   const gal = { video: null, photo: null };
   // The owner reads the server's own words. The family reads them too while the feature is on («Шаблоны ещё
@@ -1528,8 +1600,11 @@
     if (S.busy[th.name]) { toast(T.busy); return; }
     if (!S.me.can.tvideo && !S.me.panel) { toast(T.off, 5000); return; }
     sheet(T.title, (box, close) => {
-      if (!gal[kind]) gal[kind] = { theme: store.get("tplTheme:" + kind, ""), page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0 };
+      if (!gal[kind]) gal[kind] = { theme: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0 };
       const st = gal[kind];
+      // each time it opens on «Все»: a theme kept from last time showed a few pictures with the way back out of sight
+      // (to the left of the chips), and that read as «there is only one video»
+      if (st.theme) { st.theme = ""; st.items = []; st.more = false; st.loaded = false; }
       const chips = el("div", { class: "chips" });
       const stick = el("div", { class: "sheet-stick" }, chips);
       const note = el("div", { class: "note-card hidden" });
@@ -1546,11 +1621,22 @@
           n > 1 ? el("span", { class: "ppl", text: "👥 " + n }) : null, el("span", { class: "name", text: x.title }));
       };
       function paint() {
+        const x = chips.scrollLeft;  // the row stays where it was scrolled to
         chips.innerHTML = "";
         for (const [k, v] of [["", "Все"], ["group", "👥 Компанией"]].concat(Object.entries(st.themes || {}))) {
           chips.append(el("button", { class: "chip" + (k === st.theme ? " on" : ""), "aria-pressed": k === st.theme ? "true" : "false",
             text: k && k !== "group" ? emo(v) : v, onclick: () => pick(k) }));
         }
+        chips.scrollLeft = x;
+        // the theme kept from last time (far to the right, «💼 Профессии») is in sight, not off the screen or behind the
+        // fade: the few pictures under it then have their reason. A frame later: the first paint is before the sheet is
+        // on the screen (the translator's language row has the same rule)
+        requestAnimationFrame(() => {
+          const on = chips.querySelector(".chip.on");
+          if (!on || !on.offsetWidth) return;
+          const a = chips.getBoundingClientRect(), o = on.getBoundingClientRect();
+          if (o.left < a.left || o.right > a.left + a.width * 0.85) chips.scrollLeft = Math.max(0, chips.scrollLeft + o.left - a.left - 12);
+        });
         const off = st.loaded && !st.can;
         hint.classList.toggle("hidden", off);  // «Выберите картинку…» over «not on yet» would ask for what cannot be done
         stick.classList.toggle("hidden", off || !st.loaded);
@@ -1597,7 +1683,6 @@
               note: r.note || "", loaded: true });
             if (page === 1 && st.theme && st.theme !== "group" && Object.keys(st.themes).length && !(st.theme in st.themes)) {
               st.theme = "";  // the theme kept from last time is gone: all of them
-              store.set("tplTheme:" + kind, "");
               continue;
             }
             added += items.filter(fits).length;
@@ -1615,7 +1700,9 @@
       }
       function pick(k) {
         st.theme = k;
-        store.set("tplTheme:" + kind, k);
+        // while the theme's pictures come, the sheet keeps its height (it is held at the bottom and sized to what is in
+        // it): the chips do not jump, and a next tap does not land on a picture that has just slid under the finger
+        box.style.minHeight = box.offsetHeight + "px";
         st.items = [];
         st.more = false;
         load(1);
@@ -1650,11 +1737,13 @@
         if (found.t !== "done") throw new HttpError(200, found.text || (kind === "photo" ? "Не получилось найти лица на картинке." : "Не получилось найти лица в ролике."));
         if (!found.faces || !found.faces.length) throw new HttpError(200, kind === "photo" ? "На картинке не нашлось лиц." : "В ролике не нашлось лиц.");
       } catch (e) {
-        wait.replaceWith(el("p", { style: "margin:4px 0 12px", text: problem(e) }),
-          el("button", { class: "btn line wide", text: kind === "photo" ? "↩️ Выбрать другую картинку" : "↩️ Выбрать другой ролик", onclick: () => {
-            close();
-            if (tpl.own) ownClip(th); else templatesSheet(kind, th);
-          } }));
+        const msg = problem(e);
+        wait.replaceWith(el("p", { style: "margin:4px 0 12px", text: msg }),
+          /владельц/i.test(msg) ? el("button", { class: "btn wide", text: "Понятно", onclick: close })  // another clip would not help
+            : el("button", { class: "btn line wide", text: kind === "photo" ? "↩️ Выбрать другую картинку" : "↩️ Выбрать другой ролик", onclick: () => {
+              close();
+              if (tpl.own) ownClip(th); else templatesSheet(kind, th);
+            } }));
         return;
       }
       const n = Math.min(3, found.faces.length);
@@ -1664,6 +1753,10 @@
       const why = el("div", { class: "why" });
       const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent === NO_TICK) why.textContent = ""; } });
       const rows = el("div");
+      // the photo already chosen in Фото («pick my photo, then put me in a picture»): one person — it is theirs right
+      // away; two or three — it is the first thing in each one's menu
+      const mine = kind === "photo" && S.views.photo && S.views.photo.current ? S.views.photo.current() : null;
+      if (mine && n === 1) photos[0] = mine;
       const take = async (i, camera) => {
         const f = await pickFile("image/*", camera);
         if (!f) return;
@@ -1676,14 +1769,14 @@
         found.faces.slice(0, n).forEach((p, i) => {
           const who = names[i];
           const slot = el("button", { class: "slot" + (photos[i] ? " set" : ""), "aria-label": "Фото для: " + who, onclick: () => menu(who, [
+            mine && photos[i] !== mine ? ["✅", "Фото, которое вы выбрали", () => { photos[i] = mine; if (why.textContent.startsWith("Нажмите")) why.textContent = ""; paintRows(); }] : null,
             ["📷", "Снять фото", () => take(i, true)], ["🖼️", "Из галереи", () => take(i, false)],
             photos[i] ? ["↩️", "Оставить как есть", () => { photos[i] = null; paintRows(); }] : null]) },
             photos[i] ? el("img", { src: urlOf(photos[i]), alt: "" }) : el("span", {}, el("b", { class: "plus", text: "+" }), "фото"));
           rows.append(el("div", { class: "who-row" },
             el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }), slot,
             el("div", { class: "who" }, el("b", { text: who }),
-              el("small", { text: photos[i] ? "✓ ваше фото" : n === 1 ? "нажмите «+\u00a0фото»" : "останется как есть" }),
-              kind === "video" && p.on ? el("small", { text: "на экране " + secs(Math.max(1, Math.round(p.on))) }) : null)));
+              el("small", { text: photos[i] ? "✓ ваше фото" : n === 1 ? "нажмите «+\u00a0фото»" : "останется как есть" }))));
         });
       };
       paintRows();
@@ -1727,7 +1820,13 @@
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото, или человек на фото согласен" : "Это мои фото, или люди на них согласны" })),
           why, goBtn));
-      if (big) big.classList.add("small");
+      // three people: the rows are the whole task, the picture goes (the face in each row says who is who)
+      if (big) { if (n > 2) big.remove(); else big.classList.add("small"); }
+      // a short screen or a large font: when a row would still be under the foot, the picture gives the rows its place
+      requestAnimationFrame(() => {
+        const foot = box.querySelector(".sheet-foot"), lastRow = rows.lastElementChild;
+        if (big && big.isConnected && foot && lastRow && lastRow.getBoundingClientRect().bottom > foot.getBoundingClientRect().top + 1) big.remove();
+      });
     });
   }
 
@@ -1739,12 +1838,13 @@
     const tv = () => !!S.me.can.tvideo;
     const an = () => !!((S.me.ai_ops || {}).animate || (S.me.photo_ops || {}).animate);
     const empty = () => {
-      const box = el("div", { class: "empty", style: "text-align:left" }, el("h2", { text: "Ролики с вами" }));
+      // the title centred as on the sibling tabs; the two features are cards with their words to the left (.feat)
+      const box = el("div", { class: "empty" }, el("h2", { text: "Ролики с вами" }));
       if (!tv() && !an() && !S.me.panel) { box.append(el("div", { class: "note-card", "data-off": "tv an", text: NOT_ON })); return box; }
       const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
         el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
       box.append(
-        feat(tv(), "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов обычно через несколько минут, не больше 8.",
+        feat(tv(), "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.",
           S.me.panel ? "Пока не работает — нажмите «🎭 Я в ролике» внизу, чтобы узнать почему." : "Пока не включено."),
         feat(an(), "an", "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
       return box;
@@ -1764,11 +1864,12 @@
       }
       toast(S.me.panel ? `«${name}» пока не работает — его подключают в «Управлении».` : `Попросите владельца помощника включить «${name}».`, 4000);
     }
-    const tvBtn = el("button", { class: "btn", text: "🎭 Я в ролике", onclick: () => {
+    // a large font on 360: the words go under the icon whole («Я в ролике», not «Я в / ролике»)
+    const tvBtn = el("button", { class: "btn", text: "🎭 Я\u00a0в\u00a0ролике", onclick: () => {
       if (!tv() && !S.me.panel) { offTap("tv", "Я в ролике"); return; }
       templatesSheet("video", th);
     } });
-    const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить фото", onclick: animate });
+    const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить\u00a0фото", onclick: animate });
     const paintBar = () => { tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an()); };
     root.append(scroll, el("div", { class: "composer" }, el("div", { class: "vbar" }, tvBtn, anBtn)));
     async function animate() {
