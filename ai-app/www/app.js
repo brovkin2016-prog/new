@@ -1754,10 +1754,10 @@
         note.textContent = off ? noteFor(kind, st) : "";
         grid.innerHTML = "";
         if (off) return;
-        if (kind === "video") {
-          grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(th); } },
-            el("span", { class: "plus", text: "+" }), el("span", { class: "name", text: "Свой ролик" })));
-        }
+        // «Свой ролик» first; under «🔥 Тренды» after them (their groups' names head full rows: it would stand alone)
+        const own = () => grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(th); } },
+          el("span", { class: "plus", text: "+" }), el("span", { class: "name", text: "Свой ролик" })));
+        if (kind === "video" && st.theme !== "trend") own();
         if (loading === 1 || (!st.loaded && !err)) {
           grid.append(el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
           return;
@@ -1771,6 +1771,7 @@
           }
           grid.append(tile(x));
         }
+        if (kind === "video" && st.theme === "trend" && !loading) own();
         if (err) {
           grid.append(el("p", { class: "gal-msg", text: problem(err) }),
             el("button", { class: "btn line gal-msg", text: "🔄 Повторить", onclick: () => load(errPage) }));
