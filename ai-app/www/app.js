@@ -467,20 +467,24 @@
   }
   // the tiles in a grid: two a row while every word fits its tile, else one a row. The CSS (9.6em columns) does it where
   // a large system font grows «em»; Android's text zoom may grow only the letters, so the words themselves are measured
-  // too — whenever the grid is first shown and when its size changes («Переводчик», never «Переводчи/к»)
-  const toolsSeen = typeof ResizeObserver === "function" ? new ResizeObserver((es) => requestAnimationFrame(() => es.forEach((e) => fitTools(e.target)))) : null;
+  // too — whenever the grid is first shown and when its size or its words' size changes («Переводчик», never «Переводчи/к»)
+  const toolsSeen = typeof ResizeObserver === "function" ? new ResizeObserver((es) => {
+    const grids = new Set(es.map((e) => e.target.closest(".tools") || e.target));
+    requestAnimationFrame(() => grids.forEach(fitTools));
+  }) : null;
+  const toolWords = (g) => [...g.querySelectorAll(".tool > span:last-child")];
   function fitTools(g) {
-    if (!g.isConnected) { toolsSeen.unobserve(g); return; }
+    if (!g.isConnected) { [g, ...toolWords(g)].forEach((x) => toolsSeen.unobserve(x)); return; }
     if (!g.clientWidth) return;  // on a hidden tab: measured once it is shown
     g.classList.remove("one");
     g.classList.add("probe");  // words unbroken for a moment: one wider than its tile sticks out
-    const tight = [...g.querySelectorAll(".tool > span:last-child")].some((s) => s.scrollWidth > s.clientWidth + 1);
+    const tight = toolWords(g).some((s) => s.scrollWidth > s.clientWidth + 1);
     g.classList.remove("probe");
     g.classList.toggle("one", tight);
   }
   function tools(...kids) {
     const g = el("div", { class: "tools" }, ...kids);
-    if (toolsSeen) toolsSeen.observe(g);
+    if (toolsSeen) [g, ...toolWords(g)].forEach((x) => toolsSeen.observe(x));
     return g;
   }
   function ask(title, placeholder, initial) {
@@ -1264,7 +1268,7 @@
             el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи")));
         }
       }
-      ta.placeholder = mode === "essay" ? "Тема сочинения" : S.msgs.study.length ? "Спросите про решение"
+      ta.placeholder = mode === "essay" ? "Тема сочинения" : S.msgs.study.length ? "Что непонятно?"
         : mode === "notes" || mode === "retell" ? "Текст или тема" : "Ваш вопрос";
     }
     async function shoot(camera) {
@@ -1372,7 +1376,8 @@
       const typed = !!ta.value.trim();
       act.textContent = typed ? "➤" : "🎤";
       act.setAttribute("aria-label", typed ? "Отправить" : "Сказать голосом");
-      // a placeholder stays one line (under ~22 letters); a longer «how» goes into ownHint above the input
+      // a placeholder stays one line even at a large font (1.3× on 360: under ~16 letters); a longer «how» goes into
+      // ownHint above the input
       ta.placeholder = photo ? "Что сделать?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
       if (!photo) ownHint.classList.add("hidden");
       scanBar.innerHTML = "";
@@ -1397,7 +1402,7 @@
     act.onclick = () => (ta.value.trim() ? send() : dictate(row, (t) => { ta.value = t; send(); }));
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); send(); } });
     function own() {
-      ta.placeholder = "Например: сделай зиму";
+      ta.placeholder = "Что изменить?";  // the examples are in ownHint over it: a placeholder fits one line at a large font
       ownHint.textContent = "Скажите 🎤 или напишите, что изменить: «сделай зиму», «добавь шляпу»";
       ownHint.classList.remove("hidden");
       ta.focus();
@@ -1508,7 +1513,7 @@
       off: "«Я на фото» пока не включено — его включает владелец помощника.",
       hint: "Выберите картинку — потом покажете, кого на ней заменить на себя или родных.",
       none: "Готовых картинок пока нет — загляните позже.", busy: "Подождите, предыдущее фото ещё делается",
-      foot: "Обычно до полуминуты. Готовая картинка появится здесь, во вкладке «Фото»." } };
+      foot: "Обычно готово за полминуты." } };
   // «1 секунду», «3 секунды», «6 секунд»
   const secs = (k) => k + " " + (k % 10 === 1 && k % 100 !== 11 ? "секунду"
     : k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14) ? "секунды" : "секунд");
@@ -1682,9 +1687,10 @@
         });
       };
       paintRows();
-      const where = kind === "video" ? "В ролике" : "На картинке";
+      // how many people there are, the rows below show: the words are only what to do (on a 360×640 phone the rows and
+      // the tick then stay in sight over the foot)
       const hint = n === 1 ? "Нажмите «+\u00a0фото» и выберите своё фото: одно лицо, крупно, при хорошем свете."
-        : `${where} ${n} человека. Нажмите «+\u00a0фото» у тех, кого заменить. Фото\u00a0— одно лицо, крупно, при хорошем свете.`;
+        : "Нажмите «+\u00a0фото» у тех, кого заменить. Фото\u00a0— одно лицо, крупно, при хорошем свете.";
       const goBtn = el("button", { class: "btn wide", text: T.go, onclick: async () => {
         if (!photos.some(Boolean)) { why.textContent = "Нажмите «+\u00a0фото» и выберите хотя бы одно фото."; return; }
         if (!check.checked) { why.textContent = NO_TICK; return; }
