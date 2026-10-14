@@ -124,13 +124,13 @@
           try { onEvent(ev); } catch (e) { console.error(e); }
         }
       }
-    });
+    }).catch((e) => { e.started = status === 200; throw e; });  // started: the server took it (else it may never have got there)
     if (status !== 200) {
       let js = {};
       try { js = JSON.parse(bytesToText(errParts)); } catch (e) { /* not json */ }
       throw new HttpError(status, js.error);
     }
-    if (!last) throw new Error("net");
+    if (!last) throw Object.assign(new Error("net"), { started: true });
     return last;
   }
   // what broke on the way to the server, from the phone's network stack, in plain words
@@ -994,7 +994,11 @@
         try {
           end = await stream(path, Object.assign({}, body, { rid }), lv.event);
         } catch (e) {
-          end = e instanceof HttpError ? { t: "error", text: problem(e) } : null;  // the server said no / the line broke
+          if (e instanceof HttpError) end = { t: "error", text: problem(e) };  // the server said no
+          else if (e.started) end = null;  // the line broke on the way back
+          else {  // it may never have got there (no internet): asked once by its number, else said plainly
+            end = await api("/api/job", { rid }).then((r) => (r.t === "working" ? null : r), () => ({ t: "error", text: problem(e) }));
+          }
         }
         if (!end) end = await lv.wait(rid);  // the line broke: the server goes on, its answer is fetched
         return finish(lv, end, path, mine, rid);
@@ -1444,13 +1448,18 @@
     root.append(scroll, el("div", { class: "composer" }, scanBar, ownHint, row));
 
     function label(op) { return OP_NAMES[op] || emo(S.me.photo_ops[op] || S.me.ai_ops[op] || op); }
+    // the picture that just came out: words typed after it change it (unless they ask to draw anew)
+    function lastPic() {
+      const m = S.msgs.photo[S.msgs.photo.length - 1];
+      return m && m.role === "ai" && m.result && /^image\//.test(m.result.type || "") ? m.result : null;
+    }
     function sync() {
       const typed = !!ta.value.trim();
       act.textContent = typed ? "➤" : "🎤";
       act.setAttribute("aria-label", typed ? "Отправить" : "Сказать голосом");
       // a placeholder stays one line even at a large font (1.3× on 360: under ~16 letters); a longer «how» goes into
       // ownHint above the input
-      ta.placeholder = photo ? "Что сделать?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
+      ta.placeholder = photo ? "Что сделать?" : lastPic() ? "Что изменить?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
       if (!photo) ownHint.classList.add("hidden");
       scanBar.innerHTML = "";
       scanBar.classList.toggle("hidden", !S.scan.length);
@@ -1525,7 +1534,8 @@
       refreshTop();
       if (im) body.image = await b64(await shrink(im, 3072, 0.92));
       const out = await th.run(path, body, { role: "me", image: im, text: shown });
-      if (out && out.op === "scan" && out.result) { S.scan.push(out.result); sync(); th.redraw(); }
+      if (out && out.op === "scan" && out.result) { S.scan.push(out.result); th.redraw(); }
+      sync();
     }
     function runOp(op) {
       if (op === "animate") go("/api/animate", {}, label(op));
@@ -1535,6 +1545,7 @@
       const text = ta.value.trim();
       if (!text) return;
       if (S.busy.photo) { toast("Подождите, предыдущее ещё делается"); return; }
+      if (!photo && !(/^\s*нарису/i.test(text) && S.me.can.draw)) photo = lastPic();
       if (!photo && !S.me.can.draw) { toast("Сначала пришлите фото: 📷 слева"); return; }
       ta.value = "";
       ta.style.height = "auto";
@@ -2057,7 +2068,7 @@
       try {
         const ev = await stream("/api/translate", { text, lang, target }, () => {});
         card.innerHTML = "";
-        if (ev.t !== "done") { card.append(el("div", { class: "src", text }), el("div", { style: "color:var(--danger)", text: ev.text })); return; }
+        if (ev.t !== "done") { card.append(el("div", { class: "src", text }), el("div", { style: "color:var(--danger-ink)", text: ev.text })); return; }
         const audio = ev.audio ? blobOf(ev.audio, "audio/ogg") : null;
         card.append(el("div", { class: "src", text: ev.src + " " + text }), el("div", { class: "dst", text: ev.dst + " " + ev.translation }),
           el("div", { class: "acts", style: "margin-top:8px" },

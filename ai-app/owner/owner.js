@@ -141,7 +141,7 @@
             if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
           } }),
           el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить", onclick: connect }),
-          d.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "Отключить Яндекс Диск", onclick: async () => {
+          d.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "Отключить Яндекс Диск", onclick: async () => {
             try {
               const end = await panel({ op: "disk_off" });
               close();
@@ -881,7 +881,7 @@
               toast(`✅ Подключено${end.name ? ": " + end.name : ""}. Пишите в «🖼 Фото»: «оживи»`, 5000);
             } catch (e) { toast(problem(e)); }
           } }),
-          v.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "Отключить видео из фото", onclick: async () => {
+          v.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "Отключить видео из фото", onclick: async () => {
             if (!(await confirmBox("Отключить видео из фото? У всех пропадёт «🎬 Оживить», токен удалится с сервера.", "Отключить"))) return;
             try { const end = await panel({ op: "hf_off" }); close(); fill(end); toast("Видео из фото отключено"); } catch (e) { toast(problem(e)); }
           } }) : "");
@@ -1039,7 +1039,7 @@
           el("button", { class: "btn line", text: "🔄 Сменить подключение", onclick: () => { close(); rekey(u); } }),
           u.owner ? null : el("button", { class: "btn line", text: u.until ? "⏰ Срок" : "⏰ Сделать гостем", onclick: () => { close(); guestDays(u); } })));
         if (!u.owner) {
-          box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
+          box.append(el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "🗑 Удалить", onclick: () => { close(); delVpn(u.name); } }));
         }
       });
     }
