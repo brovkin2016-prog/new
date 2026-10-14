@@ -316,7 +316,8 @@ def focus(text, query, limit):
             lines.append(line[:cut].strip())
             line = line[cut:].strip()
         lines.append(line)
-    hits = [{k for k in keys if any(w.startswith(k) for w in WORD.findall(ln.lower().replace("ё", "е")))} for ln in lines]
+    words = [WORD.findall(ln.lower().replace("ё", "е")) for ln in lines]
+    hits = [{k for k in keys if any(w.startswith(k) for w in ws)} for ws in words]
     common = max(3, len(lines) // 8)
     weight = {k: 1.0 if sum(k in h for h in hits) <= common else 0.4 for k in keys}
     score = []
