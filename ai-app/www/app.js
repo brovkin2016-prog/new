@@ -61,15 +61,16 @@
     if (t) h.Authorization = "Bearer " + t;
     return h;
   }
-  function send(path, body, onStatus, onBytes) {
+  function send(path, body, onStatus, onBytes, extra) {
+    const h = Object.assign(headers(), extra || {});
     if (Native) {
       return new Promise((resolve, reject) => {
         const id = "r" + (++seq);
         pending[id] = { head: onStatus, data: onBytes, end: resolve, fail: reject };
-        Native.request(id, path, JSON.stringify(headers()), body === null ? "" : body);
+        Native.request(id, path, JSON.stringify(h), body === null ? "" : body);
       });
     }
-    return fetch(path, { method: body === null ? "GET" : "POST", headers: headers(), body: body === null ? undefined : body })
+    return fetch(path, { method: body === null ? "GET" : "POST", headers: h, body: body === null ? undefined : body })
       .then(async (r) => {
         onStatus(r.status);
         if (!r.body || !r.body.getReader) { onBytes(new Uint8Array(await r.arrayBuffer())); return; }
@@ -132,6 +133,29 @@
     }
     if (!last) throw Object.assign(new Error("net"), { started: true });
     return last;
+  }
+  // a big answer (a clip, a picture) kept on the server: fetched in pieces, and a piece the line broke continues where
+  // it stopped instead of from the start (one number's answer never changes, so the pieces always fit)
+  const pieces = {};
+  async function fetchResult(rid, size) {
+    const p = pieces[rid] || (pieces[rid] = { parts: [], got: 0 });
+    for (let tries = 0; tries < 6; tries++) {
+      let status = 0;
+      try {
+        await send("/api/result?rid=" + rid, null, (s) => {
+          status = s;
+          if (s === 200) { p.parts = []; p.got = 0; }  // the whole of it after all
+        }, (b) => { if (status === 200 || status === 206) { p.parts.push(b); p.got += b.length; } },
+        p.got ? { Range: "bytes=" + p.got + "-" } : null);
+      } catch (e) { /* the line broke: what came is kept */ }
+      if (status === 404 || status === 401 || status === 403) { delete pieces[rid]; throw new HttpError(status, status === 404 ? "Ответ уже не найти — спросите ещё раз." : ""); }
+      if (p.got >= size && (status === 200 || status === 206 || status === 416)) {
+        delete pieces[rid];
+        return JSON.parse(bytesToText(p.parts));
+      }
+      await new Promise((r) => setTimeout(r, 1500 * (tries + 1)));
+    }
+    throw new Error("net");
   }
   // what broke on the way to the server, from the phone's network stack, in plain words
   function netWhy(m) {
@@ -893,7 +917,8 @@
             if (document.hidden) await new Promise((r) => document.addEventListener("visibilitychange", function on() { if (!document.hidden) { document.removeEventListener("visibilitychange", on); r(); } }));
             let r;
             try {
-              r = await api("/api/job", { rid });
+              r = await api("/api/job", { rid, lite: true });
+              if (r.t === "ready") { say("📥 Ответ готов — загружаю…"); r = await fetchResult(rid, r.size); }
             } catch (e) {
               if (e instanceof HttpError && (e.status === 404 || e.status === 401)) return { t: "error", text: problem(e) };
               pause = Math.min(15000, pause * 1.5);  // no network yet, or asked too often: a little later
@@ -940,6 +965,30 @@
       }
       api2.redraw();
       return out;
+    }
+    // the request may never have got there (the line broke on the way out, no internet for a moment): sent again, at
+    // most twice, with the same number — the server never runs one number twice (it follows that job or gives its answer)
+    async function resend(path, body, rid, lv, e) {
+      for (const pause of [2000, 6000]) {
+        await new Promise((r) => setTimeout(r, pause));
+        try {
+          const r = await api("/api/job", { rid, lite: true });
+          return ["done", "error", "quota"].includes(r.t) ? r : null;  // it got there after all: its answer is fetched
+        } catch (x) {
+          if (!(x instanceof HttpError)) { e = x; continue; }  // still no line: a little later
+          if (x.status === 401) return { t: "error", text: problem(x) };
+          if (x.status !== 404) continue;  // 404: the server never had it
+        }
+        lv.event({ t: "status", text: "📶 Связь прервалась — отправляю ещё раз…" });
+        try {
+          return await stream(path, Object.assign({}, body, { rid }), lv.event);
+        } catch (x) {
+          if (x instanceof HttpError) return { t: "error", text: problem(x) };
+          if (x.started) return null;
+          e = x;
+        }
+      }
+      return { t: "error", text: problem(e) };
     }
     const api2 = {
       box, name,
@@ -996,9 +1045,7 @@
         } catch (e) {
           if (e instanceof HttpError) end = { t: "error", text: problem(e) };  // the server said no
           else if (e.started) end = null;  // the line broke on the way back
-          else {  // it may never have got there (no internet): asked once by its number, else said plainly
-            end = await api("/api/job", { rid }).then((r) => (r.t === "working" ? null : r), () => ({ t: "error", text: problem(e) }));
-          }
+          else end = await resend(path, body, rid, lv, e);  // it may never have got there
         }
         if (!end) end = await lv.wait(rid);  // the line broke: the server goes on, its answer is fetched
         return finish(lv, end, path, mine, rid);
@@ -1174,7 +1221,7 @@
           return;
         }
         const body = Object.assign({ context: context(name) }, req);
-        if (im) body.image = await b64(await shrink(im, 2048, 0.88));
+        if (im) body.image = await b64(await shrink(im, 1600, 0.86));  // lighter on a weak line; models see less anyway
         if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
         await t.run("/api/chat", body, mine);
       };
@@ -1611,11 +1658,14 @@
     if (S.busy[th.name]) { toast(T.busy); return; }
     if (!S.me.can.tvideo && !S.me.panel) { toast(T.off, 5000); return; }
     sheet(T.title, (box, close) => {
-      if (!gal[kind]) gal[kind] = { theme: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0 };
+      if (!gal[kind]) gal[kind] = { theme: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0, credit: null };
       const st = gal[kind];
-      // each time it opens on «Все»: a theme kept from last time showed a few pictures with the way back out of sight
-      // (to the left of the chips), and that read as «there is only one video»
-      if (st.theme) { st.theme = ""; st.items = []; st.more = false; st.loaded = false; }
+      // each time it opens on «🔥 Тренды» when the server has them (the first chip), else on «Все»: a theme kept from
+      // last time showed a few pictures with the way back out of sight (to the left of the chips), and that read as
+      // «there is only one video»
+      let opening = true;
+      const home = () => ("trend" in (st.themes || {}) ? "trend" : "");
+      if (st.theme !== home()) { st.theme = home(); st.items = []; st.more = false; st.loaded = false; }
       const chips = el("div", { class: "chips" });
       const stick = el("div", { class: "sheet-stick" }, chips);
       const note = el("div", { class: "note-card hidden" });
@@ -1634,7 +1684,8 @@
       function paint() {
         const x = chips.scrollLeft;  // the row stays where it was scrolled to
         chips.innerHTML = "";
-        for (const [k, v] of [["", "Все"], ["group", "👥 Компанией"]].concat(Object.entries(st.themes || {}))) {
+        const ent = Object.entries(st.themes || {});
+        for (const [k, v] of ent.filter(([k]) => k === "trend").concat([["", "Все"], ["group", "👥 Компанией"]], ent.filter(([k]) => k !== "trend"))) {
           chips.append(el("button", { class: "chip" + (k === st.theme ? " on" : ""), "aria-pressed": k === st.theme ? "true" : "false",
             text: k && k !== "group" ? emo(v) : v, onclick: () => pick(k) }));
         }
@@ -1677,6 +1728,8 @@
             text: loading ? "Загружаю…" : st.theme === "group" ? "Показать ещё" : "Показать ещё · осталось " + Math.max(0, st.total - st.items.length),
             onclick: () => load(st.page + 1) }));
         }
+        // the stock site that asks to be named (Coverr)
+        if (st.credit && st.credit.url) grid.append(el("p", { class: "gal-msg muted credit" }, el("a", { href: st.credit.url, target: "_blank", rel: "noopener", text: st.credit.text })));
       }
       async function load(page) {
         const my = ++st.ticket;
@@ -1691,8 +1744,11 @@
             const items = r.items || [];
             st.items = page === 1 ? items : st.items.concat(items);
             Object.assign(st, { page: r.page || page, more: !!r.more, total: r.total || 0, themes: r.themes || {}, can: r.can !== false,
-              note: r.note || "", loaded: true });
-            if (page === 1 && st.theme && st.theme !== "group" && Object.keys(st.themes).length && !(st.theme in st.themes)) {
+              note: r.note || "", loaded: true, credit: r.credit || null });
+            // the first time: the server has trends now — they are opened first
+            if (opening && page === 1 && !st.theme && "trend" in st.themes) { opening = false; st.theme = "trend"; continue; }
+            opening = false;
+            if (page === 1 && st.theme && st.theme !== "group" && (st.theme === "trend" || Object.keys(st.themes).length) && !(st.theme in st.themes)) {
               st.theme = "";  // the theme kept from last time is gone: all of them
               continue;
             }
@@ -1804,7 +1860,7 @@
         why.textContent = "";
         const images = [];
         try {
-          for (let i = 0; i < n; i++) images.push(photos[i] ? await b64(await shrink(photos[i], 2048, 0.92)) : null);
+          for (let i = 0; i < n; i++) images.push(photos[i] ? await b64(await shrink(photos[i], 1600, 0.9)) : null);
         } catch (e) {
           goBtn.disabled = false;
           goBtn.textContent = T.go;
@@ -1888,7 +1944,7 @@
       if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
       const f = await pickFile("image/*", false);
       if (!f) return;
-      await th.run("/api/animate", { image: await b64(await shrink(f, 3072, 0.92)) }, { role: "me", image: f, text: "🖼️ Оживить фото" });
+      await th.run("/api/animate", { image: await b64(await shrink(f, 2048, 0.9)) }, { role: "me", image: f, text: "🖼️ Оживить фото" });
     }
     paintBar();
     th.redraw();
