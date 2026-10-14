@@ -116,13 +116,16 @@ class Parsers(unittest.TestCase):
                 return url, ("текст страницы " * 20) + url
             ws.read_page = read
             t0 = time.time()
+            ws.cache.clear()
             got = ws.gather("вопрос", n_pages=2, budget=10)  # p1 and p3 at once, p2 soon after: p1, p2; p0 not waited for
             self.assertLess(time.time() - t0, ws.GRACE + 0.5)
             self.assertEqual([p["url"] for p in got["pages"]], ["https://p1.ru", "https://p2.ru"])
             t0 = time.time()
+            ws.cache.clear()
             got = ws.gather("вопрос", n_pages=3, budget=10)  # p1, p2, p3 read, p0 the first and the slow: not waited for
             self.assertLess(time.time() - t0, ws.GRACE + 0.5)
             self.assertEqual([p["url"] for p in got["pages"]], ["https://p1.ru", "https://p2.ru", "https://p3.ru"])
+            ws.cache.clear()
             got = ws.gather("вопрос", n_pages=4, budget=1.0)  # not all in time: those read by then
             self.assertEqual([p["url"] for p in got["pages"]], ["https://p1.ru", "https://p2.ru", "https://p3.ru"])
         finally:
@@ -197,6 +200,32 @@ class Parsers(unittest.TestCase):
             self.assertIsNone(ws.direct("таблица КХЛ"))  # (no ESPN for it)
         finally:
             ws.read_page, ws._json = old
+
+    def test_stats_and_cache(self):
+        # how each engine answered last (for the owner's «🌐 Поиск» card); the same search within 10 minutes: from memory
+        old, old_read = ws.ENGINES, ws.read_page
+        try:
+            calls = []
+            def robot(q):
+                raise ws.Blocked("проверка на робота")
+            def other(q):
+                return [{"title": "Франция", "url": "https://fr.ru", "snippet": ""}]
+            def good(q):
+                calls.append(q)
+                return [{"title": f"Спартак {i}", "url": f"https://s{i}.ru", "snippet": ""} for i in range(3)]
+            ws.ENGINES = [("duckduckgo", robot), ("bing", other), ("wikipedia", good)]
+            ws.read_page = lambda url, limit=4000, query=None: ("Т", "Спартак " * 60)
+            ws.cache.clear()
+            got = ws.gather("Спартак")
+            self.assertEqual(ws.STATS["duckduckgo"]["why"], "проверка на робота")
+            self.assertEqual((ws.STATS["bing"]["ok"], ws.STATS["bing"]["why"]), (False, "выдал чужое"))
+            self.assertEqual((ws.STATS["wikipedia"]["ok"], ws.STATS["wikipedia"]["n"]), (True, 3))
+            self.assertTrue(got["pages"])
+            self.assertIs(ws.gather("  спартак "), got)
+            self.assertEqual(len(calls), 1)
+        finally:
+            ws.ENGINES, ws.read_page = old, old_read
+            ws.cache.clear()
 
     def test_page_text(self):
         title, text = ws.page_text(PAGE)

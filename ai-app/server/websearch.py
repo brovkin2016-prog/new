@@ -492,7 +492,10 @@ def bing_rss(xml):
 
 def duckduckgo(query):
     _, ctype, raw = fetch("https://html.duckduckgo.com/html/", "POST", {"q": query, "kl": "ru-ru"})
-    found = ddg_html(decode(raw, ctype))
+    html = decode(raw, ctype)
+    found = ddg_html(html)
+    if not found and re.search(r"anomaly|challenge|captcha", html, re.I):  # its robot check: the lite page would get one too
+        raise Blocked("проверка на робота")
     if not found:
         _, ctype, raw = fetch("https://lite.duckduckgo.com/lite/", "POST", {"q": query, "kl": "ru-ru"})
         found = ddg_lite(decode(raw, ctype))
@@ -519,6 +522,7 @@ def wikipedia(query):
 
 
 ENGINES = [("duckduckgo", duckduckgo), ("bing", bing), ("wikipedia", wikipedia)]
+STATS = {}  # engine -> how it answered last: {"at", "ok", "n" (results about the question), "why" (when not)}
 
 
 # words that say little about which pages are the right ones: a page about the Falkland Islands has «время» too
@@ -586,9 +590,15 @@ def _search(query, end):
             if name == "wikipedia" and sum(map(len, got.values())) >= 3:
                 break
             try:
-                got[name] = relevant(f.result(timeout=max(0.1, end - time.time())), query)
-            except Exception:
+                found = f.result(timeout=max(0.1, end - time.time()))
+            except Exception as e:
+                why = "не ответил вовремя" if isinstance(e, concurrent.futures.TimeoutError) else \
+                    str(e)[:80] if isinstance(e, Blocked) else "нет связи"
+                STATS[name] = {"at": int(time.time()), "ok": False, "n": 0, "why": why}
                 continue
+            got[name] = relevant(found, query)
+            STATS[name] = {"at": int(time.time()), "ok": bool(got[name]), "n": len(got[name]),
+                           "why": "" if got[name] else "выдал чужое" if found else "ничего не нашёл"}
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     web = [r for row in itertools.zip_longest(*[got.get(name, []) for name, _ in ENGINES if name != "wikipedia"])
@@ -599,10 +609,25 @@ def _search(query, end):
 GRACE = 1.5  # seconds
 
 
+CACHE_SEC = 600
+cache = {}  # query -> (time, gather's result): the same search within 10 minutes is not made again
+
+
 def gather(query, n_pages=4, page_chars=3500, budget=20.0):
     """Search, then read the first pages that read well (in parallel), each page's part about the query. The search
     results' snippets stay as well, so even pages that did not open still give something."""
-    start = time.time()
+    key, start = re.sub(r"\s+", " ", query.lower()).strip(), time.time()
+    if key in cache and start - cache[key][0] < CACHE_SEC:
+        return cache[key][1]
+    got = _gather(query, n_pages, page_chars, budget, start)
+    if got["pages"]:
+        for k in [k for k, v in cache.items() if start - v[0] >= CACHE_SEC] + list(cache)[:max(0, len(cache) - 200)]:
+            cache.pop(k, None)
+        cache[key] = (start, got)
+    return got
+
+
+def _gather(query, n_pages, page_chars, budget, start):
     results, engine = search(query, budget=min(12.0, budget))
     pages = []
     if results:

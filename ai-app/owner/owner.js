@@ -815,7 +815,7 @@
           u.id === d.me ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delPerson(u); } }),
           "›"));
       }
-      scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), diskRow(), videoCard(), trendsCard());
+      scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), diskRow(), videoCard(), trendsCard(), searchCard());
     }
     async function delPerson(u) {
       if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
@@ -922,6 +922,85 @@
           } }) : "");
       });
     }
+    // ---- «🌐 Поиск в интернете»: how each source answered the chat last, and a check from the server now ----
+    function searchCard() {
+      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🌐 Поиск: проверяю…" }));
+      const fill = (v) => {
+        card.innerHTML = "";
+        const seen = (v.engines || []).filter((e) => e.at);
+        const g = v.groq || {};
+        const parts = seen.map((e) => e.name + (e.ok ? " ✓" : " ⚠️ " + e.why));
+        if (g.key) parts.push("Groq" + (!g.at || g.ok ? " ✓" : " ⚠️ " + g.why));
+        const c = v.check || {};
+        const checked = c.at ? "Проверка " + ago(c.at) + " назад: " + (c.error ? "⚠️ поиск не ответил"
+          : `найдено ${c.results}, прочитано страниц ${c.pages}`) + " · погода " + (c.weather ? "✓" : "⚠️") + " · таблица РПЛ "
+          + (c.table ? "✓" : "⚠️") + (c.sec ? ` (за ${c.sec} с)` : "") + "." : "Проверки ещё не было.";
+        const bad = c.at && (c.error || !c.pages || !c.weather || !c.table);
+        card.append(el("div", { class: "row" },
+          el("div", { class: "grow" }, "🌐 Поиск в интернете",
+            el("small", { text: (parts.length ? "Последние ответы: " + parts.join(" · ") + ". " : "С последнего перезапуска сервера в интернете ещё не искали. ") }),
+            el("small", { style: "display:block;margin-top:4px" + (bad ? ";color:var(--danger-ink)" : ""), text: checked }),
+            g.env ? "" : el("a", { href: "#", style: "display:inline-block;padding:8px 0 0;font-size:14px",
+              text: g.key ? "🔑 Groq подключён · изменить" : "🔑 Подключить Groq (по желанию)",
+              onclick: (e) => { e.preventDefault(); groqSheet(v, fill); } })),
+          el("button", { class: "btn line", style: "flex:none;padding:8px 14px", text: "Проверить", onclick: async (e) => {
+            const b = e.currentTarget;
+            busyBtn(b, "⏳ До минуты");
+            try {
+              const end = await panel({ op: "search_test" });
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
+              fill(end);
+              const k = end.check || {};
+              toast(k.pages && k.weather && k.table ? "🌐 Поиск работает: страницы читаются, погода и таблица приходят"
+                : "⚠️ Поиск ответил не полностью — подробности в карточке", 6000);
+            } catch (x) { toast(problem(x)); freeBtn(b); }
+          } })));
+      };
+      panel({ op: "search_get" }).then((v) => (v.t === "done" && v.on ? fill(v) : card.remove())).catch(() => card.remove());
+      return card;
+    }
+
+    function groqSheet(v, fill) {  // the owner's Groq key: its web search answers beside the search pages
+      const on = !!(v.groq || {}).key;
+      sheet("🔑 Groq — ещё один поиск", (box, close) => {
+        const inp = el("input", { class: "input", placeholder: "ключ Groq (gsk_…)", autocomplete: "off", spellcheck: "false" });
+        box.append(
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Помощник и без Groq ищет в интернете сам. С ключом Groq "
+            + "к каждому поиску добавляется ещё и его поиск — ответы полнее. Бесплатно. По правилам Groq им пользуются не из России." }),
+          el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
+            el("li", { text: "Нажмите «🔑 Кабинет Groq» ниже — в браузере откроется сайт Groq (console.groq.com). Войдите через Google или почту." }),
+            el("li", { text: "На сайте Groq: слева «API Keys» → кнопка «Create API Key» → любое имя → «Submit». Нажмите «Copy» — ключ начинается с gsk_." }),
+            el("li", { text: "Вернитесь в это приложение, вставьте ключ сюда и нажмите «✅ " + (on ? "Заменить ключ" : "Подключить") + "». В чаты ключ не присылайте." })),
+          el("a", { class: "btn line wide", href: "https://console.groq.com/keys", target: "_blank", rel: "noopener",
+            style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Кабинет Groq" }),
+          inp,
+          el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
+            let t = "";
+            try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
+            if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
+          } }),
+          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ " + (on ? "Заменить ключ" : "Подключить"), onclick: async (e) => {
+            const b = e.currentTarget;
+            if (!inp.value.trim()) { toast("Сначала вставьте ключ"); return; }
+            busyBtn(b, "⏳ Проверяю ключ…");
+            try {
+              const end = await panel({ op: "groq_set", key: inp.value.trim() });
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
+              close(); fill(end); toast("✅ Groq подключён — помощник ищет и через него", 5000);
+            } catch (x) { toast(problem(x)); freeBtn(b); }
+          } }),
+          on ? el("button", { class: "btn line wide", style: "margin-top:8px", text: "Отключить Groq", onclick: async (e) => {
+            const b = e.currentTarget;
+            busyBtn(b, "⏳ Отключаю…");
+            try {
+              const end = await panel({ op: "groq_off" });
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
+              close(); fill(end); toast("Groq отключён — поиск идёт без него");
+            } catch (x) { toast(problem(x)); freeBtn(b); }
+          } }) : "");
+      });
+    }
+
     // ---- «🔥 Тренды»: the formats people film most on Instagram now (the server looks once a day), with their proof ----
     const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
     const dayRu = (iso) => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || ""); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]}` : iso || ""; };
