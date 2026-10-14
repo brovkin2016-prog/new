@@ -148,14 +148,15 @@ video { width: 100%; border-radius: 12px; }
 .tool { min-height: 52px; padding: 10px 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow);
   display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; color: var(--ink); text-align: left; line-height: 1.2; min-width: 0; }
 .tool .ic { font-size: 22px; flex: none; }
-.tool > span:last-child { min-width: 0; overflow-wrap: break-word; }  /* a long word wraps inside its tile, never past its edge */
+.tool > span:last-child { min-width: 0; overflow-wrap: break-word; -webkit-hyphens: auto; hyphens: auto; }  /* a long word wraps inside its tile with
+   a «-» (lang="ru"), never past its edge; overflow-wrap where hyphens are not known */
 .tool:active { background: var(--accent-soft); }
 /* narrow phones and wide fonts (Samsung's): the tiles take the screen's width less its 12px sides, a smaller icon and
    gaps, and on the narrowest one tile a row («Размер экрана: крупный») — «Поздравление» stays one word */
 @media (max-width: 400px) {
   .empty { padding-left: 0; padding-right: 0; }
-  .tool { padding: 10px 8px; gap: 6px; }
-  .tool .ic { font-size: 20px; }
+  .tool { padding: 10px 8px; gap: 4px; }
+  .tool .ic { font-size: 18px; }
 }
 @media (max-width: 380px) { .tool { font-size: 14px; } }
 @media (max-width: 340px) { .tools { grid-template-columns: 1fr; } }
@@ -181,6 +182,8 @@ video { width: 100%; border-radius: 12px; }
 .round.ghost { background: var(--card); border: 1px solid var(--line); }
 .inrow textarea, select, .input, .round.ghost, .chip:not(.on) { border-color: var(--field); }
 .inrow textarea::placeholder, .input::placeholder { color: var(--muted); opacity: 1; }
+/* a large system font: the placeholder is cut at the edge, never half a second line in the one-line field */
+.inrow textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rec { display: flex; align-items: center; gap: 10px; padding: 4px 6px; }
 .rec .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: blink 1s steps(2) infinite; }
 .rec .time { flex: 1; font-variant-numeric: tabular-nums; }
@@ -220,12 +223,18 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .seg button { flex: 1; min-height: 44px; padding: 8px 10px; border-radius: 9px; font-size: 14px; white-space: nowrap; color: var(--ink); font-weight: 500; }
 .seg.grid2 { display: grid; grid-template-columns: 1fr 1fr; }
 .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: none; }
-.big-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.big-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }  /* a long word never widens a column off the screen */
 .big { border-radius: 18px; padding: 18px 10px; background: var(--card); box-shadow: var(--shadow); display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--ink); min-height: 96px; }
+  align-items: center; justify-content: center; gap: 8px; font-weight: 600; color: var(--ink); min-height: 96px;
+  min-width: 0; overflow-wrap: break-word; -webkit-hyphens: auto; hyphens: auto; }
 .big .ic { font-size: 30px; }
 .big small { display: block; font-weight: 400; font-size: 13px; opacity: .85; margin-top: 2px; }
 .big.primary { background: linear-gradient(135deg, #7b6cff, #4a3cd8); color: #fff; }
+/* dark: the same filled look as .btn (light accent, dark ink), so «📷 Снять фото» is one kind of button everywhere */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .big.primary { background: linear-gradient(135deg, #9d93ff, #7e72ff); color: var(--accent-ink); }
+}
+:root[data-theme="dark"] .big.primary { background: linear-gradient(135deg, #9d93ff, #7e72ff); color: var(--accent-ink); }
 .big.wide { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; text-align: left; gap: 12px; min-height: 72px; padding: 14px 16px; }
 .next { margin-top: 12px; }
 .tail .btn { padding: 12px 10px; font-size: 15px; }
@@ -252,8 +261,8 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .sheet { width: 100%; max-height: 88vh; overflow-y: auto; background: var(--sheet); border-radius: 22px 22px 0 0;
   padding: 10px 14px calc(18px + var(--safe-b)); animation: up .2s ease-out;
   box-shadow: 0 -1px 0 rgba(255, 255, 255, .07), 0 -8px 30px rgba(0, 0, 0, .35); }
-.sheet-head { display: flex; align-items: center; gap: 8px; position: sticky; top: -10px; z-index: 2; background: var(--sheet); margin: 0 0 10px;
-  padding-top: 4px; box-shadow: 0 -2px 0 var(--sheet); }  /* the shadow covers the sliver of a scrolled list above the head */
+.sheet-head { display: flex; align-items: center; gap: 8px; position: sticky; top: -11px; z-index: 2; background: var(--sheet); margin: 0 0 10px;
+  padding-top: 5px; box-shadow: 0 -2px 0 var(--sheet); }  /* 1px past the sheet's top edge, and the shadow: no sliver of a scrolled list above */
 .sheet-head h2 { flex: 1; margin: 0; min-width: 0; font-size: 18px; line-height: 1.3; }
 .sheet-x { width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--raise); color: var(--muted); font-size: 18px; }
 .sheet .chip:not(.on), .sheet .act, .sheet .btn.line, .sheet .round.ghost, .sheet .input, .sheet select, .sheet .tpl.own, .sheet .tool { background: var(--raise); }
@@ -327,6 +336,7 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .tpl-grid > .status.gal-msg { padding: 16px 0; justify-content: center; }
 .tpl-big { display: block; height: 140px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 12px; margin: 0 auto 6px; }
 .tpl-big.photo { aspect-ratio: 3 / 4; }
+.tpl-big.small { height: 84px; margin-bottom: 4px; }  /* once the faces are found: the rows are the task */
 .who-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
 .who-row:first-child { border-top: 0; }
 .who-row .face { width: 56px; height: 56px; flex: none; border-radius: 50%; object-fit: cover; }

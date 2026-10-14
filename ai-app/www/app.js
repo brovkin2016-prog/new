@@ -754,7 +754,8 @@
     if (m.result) {
       b.append(el("img", { class: "result", src: urlOf(m.result), alt: "", onclick: () => viewer(m.result, m.name || "picture.jpg", again(m.result, "✏️ Изменить ещё")) }));
     }
-    if (m.video) b.append(el("video", { class: "result", controls: true, playsinline: true, src: urlOf(m.video) }));
+    // «#t=0.1»: the first frame is painted before it is played, not a black box with «0:00»
+    if (m.video) b.append(el("video", { class: "result", controls: true, playsinline: true, preload: "metadata", src: urlOf(m.video) + "#t=0.1" }));
     if (m.pdf) b.append(el("div", { class: "file-chip", style: "background:var(--accent-soft);margin-bottom:6px", text: "📄 " + (m.name || "document.pdf") }));
     if (m.role === "me") { if (m.text) b.append(el("div", { text: m.text })); }
     else if (m.text) b.append(el("div", { html: md(m.text) }));
@@ -784,8 +785,13 @@
         act("📋 Копировать", () => copyText(plain(m.text))),
         S.me.can.speak ? act("🔊 Прочитать вслух", () => speakMsg(m, b)) : null,
         !m.note && m === lastAi && !S.busy[thread] && list && list.ask ? [act("✂️ Короче", () => list.follow("short")), act("➕ Подробнее", () => list.follow("more"))] : null));
-    } else if (m.err && list && list.canRetry(m)) {
-      wrap.append(el("div", { class: "acts" }, act("🔄 Повторить", () => list.retry(m))));
+    } else if (m.err && list) {
+      // a clip or a picture with faces that did not come out: «🔁 С другими фото» first — the same photos again would
+      // only fail once more after the same minutes
+      const v = S.views[thread];
+      const redo = m.tpl && v && v.th ? act("🔁 С другими фото", () => whoIsWho(m.tpl.kind, m.tpl, v.th)) : null;
+      const again = list.canRetry(m) ? act("🔄 Повторить", () => list.retry(m)) : null;
+      if (redo || again) wrap.append(el("div", { class: "acts" }, redo, again));
     }
     return wrap;
   }
@@ -1222,7 +1228,7 @@
           seg, el("div", { class: "study-desc", text: STUDY_MODES[mode][1] })));
         if (!has) {
           head.append(el("div", { class: "big-actions", style: "margin-bottom:12px" },
-            el("button", { class: "big primary", onclick: () => shoot(true) }, el("span", { class: "ic", text: "📷" }), "Сфотографировать"),
+            el("button", { class: "big primary", onclick: () => shoot(true) }, el("span", { class: "ic", text: "📷" }), "Снять задание"),
             el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи")));
         }
       }
@@ -1307,7 +1313,7 @@
         el("button", { class: "x", text: "✕", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
       el("div", { class: "tools" }, QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
-        tool("✍️ Своё: скажите или напишите", own), tool("⋯ Другое", more)))
+        tool("✍️ Своё изменение", own), tool("⋯ Другое", more)))
       // pages for a PDF being collected: their banner over the input is the next step (no second «📷» here)
       : S.scan.length ? null
       : S.msgs.photo.length ? el("div", { class: "tail big-actions next", style: "grid-template-columns:1fr 1fr" },
@@ -1439,6 +1445,8 @@
     th.redraw();
     return {
       root, th, set, redraw: th.redraw,
+      // a job started elsewhere (🎭 Я на фото) takes the choice away too: no «Что сделать с этим фото?» under its result
+      drop() { photo = null; ownHint.classList.add("hidden"); sync(); },
       sub: () => (photo ? "фото выбрано" : S.me.can.draw ? "улучшить, изменить, нарисовать" : "улучшить и изменить фото"),
       buttons: () => (S.msgs.photo.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.photo.length) { toast("Здесь пока пусто"); return; }
@@ -1594,7 +1602,9 @@
     sheet("🎭 " + tpl.title, async (box, close) => {
       const said = el("span", { text: tpl.own ? "Загружаю ролик и ищу в нём лица… до минуты" : T.find });
       const wait = el("div", { class: "status", style: "margin:8px 0 14px" }, el("span", { class: "spin" }), said);
-      box.append(tpl.thumb ? el("img", { class: "tpl-big" + (kind === "photo" ? " photo" : ""), src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null, wait);
+      // big while the faces are looked for; smaller once they are there, so the face rows fit over the foot on a 640px phone
+      const big = tpl.thumb ? el("img", { class: "tpl-big" + (kind === "photo" ? " photo" : ""), src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null;
+      box.append(big, wait);
       // a stream: the server says it is still looking (a minute for a clip it has not seen), then who is in it
       try {
         found = await stream("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id }, (ev) => {
@@ -1663,9 +1673,10 @@
         close();
         const first = photos.find(Boolean);
         const many = photos.filter(Boolean).length;
+        if (kind === "photo" && S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
         const out = await th.run(T.path, { analysis: found.analysis, images, consent: true },
           { role: "me", image: first, text: "🎭 " + tpl.title + (many > 1 ? " · 👥 " + many : "") });
-        if (out && !out.err && !tpl.own) {  // «🔁 С другими фото» under it: the same template once more
+        if (out && !tpl.own) {  // «🔁 С другими фото» under it (a failed one too): the same template once more
           out.tpl = { kind, id: tpl.id, title: tpl.title, thumb: tpl.thumb };  // the picture too: the second run looks like the first
           await DB.put(out);
           th.redraw();
@@ -1678,6 +1689,7 @@
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото, или человек на фото согласен" : "Это мои фото, или люди на них согласны" })),
           why, goBtn));
+      if (big) big.classList.add("small");
     });
   }
 
@@ -1689,7 +1701,7 @@
     const tv = () => !!S.me.can.tvideo;
     const an = () => !!((S.me.ai_ops || {}).animate || (S.me.photo_ops || {}).animate);
     const empty = () => {
-      const box = el("div", { class: "empty" }, el("h2", { text: "Ролики с вами" }));
+      const box = el("div", { class: "empty", style: "text-align:left" }, el("h2", { text: "Ролики с вами" }));
       if (!tv() && !an() && !S.me.panel) { box.append(el("div", { class: "note-card", "data-off": "tv an", text: NOT_ON })); return box; }
       const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
         el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
@@ -1732,7 +1744,7 @@
     th.redraw();
     return {
       root, th, redraw: th.redraw,
-      sub: () => "ролики с вами и ожившие фото",
+      sub: () => (tv() || an() || S.me.panel ? "ролики с вами и ожившие фото" : "пока не включено"),
       buttons: () => (S.msgs.video.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.video.length) { toast("Здесь пока пусто"); return; }
         if (!(await confirmBox("Удалить все ролики из списка?", "Очистить", true))) return;
