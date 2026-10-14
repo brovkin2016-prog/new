@@ -86,7 +86,18 @@ class Parsers(unittest.TestCase):
                 raise OSError("blocked")
             ws.ENGINES = [("duckduckgo", down), ("bing", lambda q: b), ("wikipedia", wiki)]
             found, name = ws.search("Спартак")
-            self.assertEqual(([r["url"] for r in found], name), (["https://a.ru/0", "https://w.ru", "https://b.ru"], "bing+wikipedia"))
+            self.assertEqual(([r["url"] for r in found], name), (["https://a.ru/0", "https://b.ru", "https://w.ru"], "bing+wikipedia"))
+            # a long query that the web does not answer: once more by its main words
+            asked = []
+            cup = [{"title": f"Спартак — Родина {i}", "url": f"https://cup.ru/{i}", "snippet": "Кубок России"} for i in range(3)]
+
+            def picky(q):
+                asked.append(q)
+                return cup if q == "спартак родина кубок россии" else [{"title": "Лихорадка", "url": "https://f.ru", "snippet": ""}]
+            ws.ENGINES = [("duckduckgo", down), ("bing", picky), ("wikipedia", lambda q: [])]
+            found, name = ws.search("Спартак Родина Кубок России 2026 дата и время матча")
+            self.assertEqual(asked, ["Спартак Родина Кубок России 2026 дата и время матча", "спартак родина кубок россии"])
+            self.assertEqual(([r["url"] for r in found], name), ([r["url"] for r in cup], "bing"))
             ws.ENGINES = [("duckduckgo", down), ("bing", lambda q: b[:1]), ("wikipedia", lambda q: [])]
             self.assertEqual(ws.search("Спартак"), ([], None))
         finally:
@@ -130,6 +141,8 @@ class Parsers(unittest.TestCase):
         one_line = "Начало. " * 200 + "Матч Спартака с Родиной начнётся в 20:45. " + "Конец. " * 200
         self.assertIn("20:45", ws.focus(one_line, "Спартак Родина", 600))
         self.assertEqual(ws.stems("Во сколько Спартак — Родина, 2026?"), {"спарт", "роди", "2026"})
+        self.assertEqual(ws.core_query("Во сколько начнётся матч Спартак — Родина 1/8 Кубка России 2026, дата и время?"),
+                         "спартак родина кубка россии")
 
 
 class Guard(unittest.TestCase):
@@ -168,14 +181,13 @@ class Live(unittest.TestCase):
 
     def test_match_time(self):
         # «во сколько матч»: the pages read must carry a start time beside the teams, not only their menus
-        for q in ("Кубок России Спартак Родина дата и время", "Спартак Родина Кубок России 2026 дата и время матча",
-                  "Спартак Родина Кубок России"):
+        for q in ("Спартак Родина Кубок России 2026 дата и время матча", "Спартак Родина Кубок России"):
             try:
                 found = ws.bing(q)
                 print("bing:", q, len(found), len(ws.relevant(found, q)), [r["title"][:50] for r in found[:5]])
             except Exception as e:  # noqa: BLE001
                 print("bing:", q, repr(e)[:200])
-        got = ws.gather("Кубок России Спартак Родина дата и время")
+        got = ws.gather("Во сколько кубок России Спартак Родина?")  # as asked: the search makes do with it
         print("match:", got["engine"], [p["url"] for p in got["pages"]])
         for p in got["pages"]:
             print("\n==", p["url"], "\n" + "\n".join(ln for ln in p["text"].split("\n") if ws.WHEN.search(ln))[:800])

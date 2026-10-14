@@ -509,7 +509,8 @@ ENGINES = [("duckduckgo", duckduckgo), ("bing", bing), ("wikipedia", wikipedia)]
 
 
 # words that say little about which pages are the right ones: a page about the Falkland Islands has «время» too
-GENERIC = stems("дата время сегодня завтра вчера сейчас начало новости матч игра год цена")
+GENERIC = stems("дата время сегодня завтра вчера сейчас начало начнется начинается состоится пройдет расписание "
+                "новости матч игра год цена")
 
 
 def relevant(results, query):
@@ -528,15 +529,44 @@ def relevant(results, query):
     return out
 
 
+def core_query(query):
+    """The query without its common words and numbers: «Спартак Родина Кубок России 2026 дата и время матча» →
+    «спартак родина кубок россии» (Bing answers that long one with pages about a fever, the short one rightly)."""
+    words = []
+    for w in WORD.findall(query.lower().replace("ё", "е")):
+        k = stems(w)
+        if k and not (k & GENERIC) and not w.isdigit():
+            words.append(w)
+    return " ".join(words)
+
+
 def search(query, n=8, budget=12.0):
     """The results of the web engines, all asked at once, taken in turns (the first of each, then the second…), only
-    those about the question; Wikipedia's after them when the web gave fewer than three. ([], None): nothing found."""
+    those about the question. The web gave fewer than three: once more by the query's main words (core_query), and
+    Wikipedia's results after them. ([], None): nothing found."""
     query = query.strip()[:300]
     if not query:
         return [], None
+    end = time.time() + budget
+    web, wiki, names = _search(query, end)
+    short = core_query(query)
+    if len(web) < 3 and short and short != query.lower() and end - time.time() > 2:
+        web2, wiki2, names2 = _search(short, end)
+        web, wiki, names = web + web2, wiki or wiki2, names + names2
+    merged, seen = [], set()
+    for r in web + wiki:
+        if r["url"] not in seen:
+            seen.add(r["url"])
+            merged.append(r)
+    found = [r for r in merged if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][:n] or merged[:n]
+    return found, "+".join(dict.fromkeys(names)) or None
+
+
+def _search(query, end):
+    """(the web engines' results in turns, Wikipedia's — waited for only when the web gave fewer than three, the
+    engines that gave something)"""
     pool = concurrent.futures.ThreadPoolExecutor(len(ENGINES))
     futures = [(name, pool.submit(fn, query)) for name, fn in ENGINES]
-    end = time.time() + budget
     got = {}
     try:
         for name, f in futures:
@@ -548,14 +578,9 @@ def search(query, n=8, budget=12.0):
                 continue
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    merged, seen = [], set()
-    for row in itertools.zip_longest(*[got.get(name, []) for name, _ in ENGINES]):
-        for r in row:
-            if r and r["url"] not in seen:
-                seen.add(r["url"])
-                merged.append(r)
-    found = [r for r in merged if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][:n] or merged[:n]
-    return found, "+".join(name for name, _ in ENGINES if got.get(name)) or None
+    web = [r for row in itertools.zip_longest(*[got.get(name, []) for name, _ in ENGINES if name != "wikipedia"])
+           for r in row if r]
+    return web, got.get("wikipedia", []), [name for name, _ in ENGINES if got.get(name)]
 
 
 def gather(query, n_pages=4, page_chars=3500, budget=20.0):
