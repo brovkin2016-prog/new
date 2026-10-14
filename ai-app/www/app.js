@@ -772,8 +772,12 @@
     if (m.result) {
       b.append(el("img", { class: "result", src: urlOf(m.result), alt: "", onclick: () => viewer(m.result, m.name || "picture.jpg", again(m.result, "✏️ Изменить ещё")) }));
     }
-    // «#t=0.1»: the first frame is painted before it is played, not a black box with «0:00»
-    if (m.video) b.append(el("video", { class: "result", controls: true, playsinline: true, preload: "metadata", src: urlOf(m.video) + "#t=0.1" }));
+    // «#t=0.1»: the first frame is painted before it is played, not a black box with «0:00»; where the phone does not
+    // paint it, the poster stands in: the template's picture, or the photo that was brought to life
+    if (m.video) {
+      const poster = m.tpl && m.tpl.thumb ? "data:image/jpeg;base64," + m.tpl.thumb : m.poster ? urlOf(m.poster) : null;
+      b.append(el("video", { class: "result", controls: true, playsinline: true, preload: "metadata", poster, src: urlOf(m.video) + "#t=0.1" }));
+    }
     if (m.pdf) b.append(el("div", { class: "file-chip", style: "background:var(--accent-soft);margin-bottom:6px", text: "📄 " + (m.name || "document.pdf") }));
     if (m.role === "me") { if (m.text) b.append(el("div", { text: m.text })); }
     else if (m.text) b.append(el("div", { html: md(m.text) }));
@@ -871,7 +875,8 @@
       async run(path, body, mine) {
         if (S.busy[name]) { toast("Подождите, ещё отвечаю…"); return null; }
         S.busy[name] = true;
-        last = { path, body };
+        // «🔄 Повторить» sends the same again with no new bubble of its own: the photo a clip is made from stays known
+        last = { path, body, still: mine ? mine.image || null : last && last.body === body ? last.still : null };
         if (mine) { await api2.add(mine); api2.redraw(); }
         const live = el("div", { class: "msg ai" });
         const b = el("div", { class: "bubble" });
@@ -927,6 +932,8 @@
           out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
             audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name, op: end.op,
             result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null,
+            // a photo brought to life shows that photo until it is played
+            poster: end.video && path === "/api/animate" ? last.still : null,
             pdf: end.pdf ? blobOf(end.pdf, "application/pdf") : null });
           if (out.audio) playAudio(out.audio);
         } else {
@@ -940,12 +947,19 @@
         const l = S.msgs[name];
         return !!last && !!m.err && l[l.length - 1] === m && !S.busy[name];
       },
+      // A clip or picture from a template keeps its «🔁 С другими фото» when the second try comes out.
       async retry(m) {
         if (!api2.canRetry(m)) return;
+        const keep = m.tpl;
         await DB.del(m.id);
         S.msgs[name].pop();
         api2.redraw();
-        api2.run(last.path, last.body, null);
+        const out = await api2.run(last.path, last.body, null);
+        if (out && keep) {
+          out.tpl = keep;
+          await DB.put(out);
+          api2.redraw();
+        }
       },
       follow(kind) {
         const shown = { short: "✂️ Короче", more: "➕ Подробнее" }[kind];
@@ -1212,7 +1226,7 @@
     const th = thread("study", scroll, null, tail);
     th.onRedraw = () => drawHead();
     scroll.append(head, th.box);
-    const ta = el("textarea", { rows: 1, placeholder: "Задание, тема сочинения или вопрос" });
+    const ta = el("textarea", { rows: 1, placeholder: "Ваш вопрос" });
     autoGrow(ta);
     const cam = el("button", { class: "round ghost", text: "📷", title: "Фото задания", onclick: () => shoot(true) });
     const act = el("button", { class: "round main", text: "🎤", "aria-label": "Сказать голосом" });
