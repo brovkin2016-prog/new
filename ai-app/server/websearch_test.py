@@ -168,6 +168,13 @@ class Live(unittest.TestCase):
 
     def test_match_time(self):
         # «во сколько матч»: the pages read must carry a start time beside the teams, not only their menus
+        for q in ("Кубок России Спартак Родина дата и время", "Спартак Родина Кубок России 2026 дата и время матча",
+                  "Спартак Родина Кубок России"):
+            try:
+                found = ws.bing(q)
+                print("bing:", q, len(found), len(ws.relevant(found, q)), [r["title"][:50] for r in found[:5]])
+            except Exception as e:  # noqa: BLE001
+                print("bing:", q, repr(e)[:200])
         got = ws.gather("Кубок России Спартак Родина дата и время")
         print("match:", got["engine"], [p["url"] for p in got["pages"]])
         for p in got["pages"]:
