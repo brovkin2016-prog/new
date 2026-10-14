@@ -1658,34 +1658,35 @@
     if (S.busy[th.name]) { toast(T.busy); return; }
     if (!S.me.can.tvideo && !S.me.panel) { toast(T.off, 5000); return; }
     sheet(T.title, (box, close) => {
-      if (!gal[kind]) gal[kind] = { theme: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0, credit: null };
+      if (!gal[kind]) gal[kind] = { theme: "", home: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0, credit: null };
       const st = gal[kind];
-      // each time it opens on «🔥 Тренды» when the server has them (the first chip), else on «Все»: a theme kept from
-      // last time showed a few pictures with the way back out of sight (to the left of the chips), and that read as
-      // «there is only one video»
-      let opening = true;
-      const home = () => ("trend" in (st.themes || {}) ? "trend" : "");
-      if (st.theme !== home()) { st.theme = home(); st.items = []; st.more = false; st.loaded = false; }
+      // each time it opens where the server says (home): «🔥 Тренды» when it has enough of them, else «Все» — one request,
+      // the answer names the theme. A theme kept from last time showed a few pictures with the way back out of sight (to
+      // the left of the chips), and that read as «there is only one video»
+      let opening = !st.loaded || st.theme !== st.home;
+      if (opening) { st.theme = ""; st.items = []; st.more = false; st.loaded = false; }
       const chips = el("div", { class: "chips" });
       const stick = el("div", { class: "sheet-stick" }, chips);
       const note = el("div", { class: "note-card hidden" });
       const grid = el("div", { class: "tpl-grid" + (kind === "photo" ? " photo" : "") });
       const hint = el("p", { class: "muted", style: "margin:0 0 4px;font-size:15px", text: T.hint });
-      box.append(hint, stick, note, grid);
+      const trendNote = el("p", { class: "muted trend-note hidden", text: "Что сейчас чаще всего снимают в Instagram. Подборка обновляется каждый день." });
+      box.append(hint, stick, trendNote, note, grid);
       let loading = 0, err = null, errPage = 1;
       const group = (x) => (x.people || 1) > 1;  // «👥 Компанией»: for two or three
       const fits = (x) => st.theme !== "group" || group(x);
       const tile = (x) => {
         const n = Math.min(3, Math.max(1, x.people || 1));
-        return el("button", { class: "tpl", "aria-label": x.title, onclick: () => { close(); whoIsWho(kind, { id: x.id, title: x.title, thumb: x.thumb }, th); } },
+        return el("button", { class: "tpl", "aria-label": x.title + (x.trend || x.hot ? " — в трендах" : ""), onclick: () => { close(); whoIsWho(kind, { id: x.id, title: x.title, thumb: x.thumb }, th); } },
           x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null,
+          x.hot ? el("span", { class: "hot", text: "🔥" }) : null,
           n > 1 ? el("span", { class: "ppl", text: "👥 " + n }) : null, el("span", { class: "name", text: x.title }));
       };
       function paint() {
         const x = chips.scrollLeft;  // the row stays where it was scrolled to
         chips.innerHTML = "";
         const ent = Object.entries(st.themes || {});
-        for (const [k, v] of ent.filter(([k]) => k === "trend").concat([["", "Все"], ["group", "👥 Компанией"]], ent.filter(([k]) => k !== "trend"))) {
+        for (const [k, v] of ent.filter(([k]) => k === "trend").concat([["", "Все"], ["group", "👥 Вместе"]], ent.filter(([k]) => k !== "trend"))) {
           chips.append(el("button", { class: "chip" + (k === st.theme ? " on" : ""), "aria-pressed": k === st.theme ? "true" : "false",
             text: k && k !== "group" ? emo(v) : v, onclick: () => pick(k) }));
         }
@@ -1701,6 +1702,7 @@
         });
         const off = st.loaded && !st.can;
         hint.classList.toggle("hidden", off);  // «Выберите картинку…» over «not on yet» would ask for what cannot be done
+        trendNote.classList.toggle("hidden", off || st.theme !== "trend");
         stick.classList.toggle("hidden", off || !st.loaded);
         grid.classList.toggle("hidden", off);
         note.classList.toggle("hidden", !off);
@@ -1716,13 +1718,21 @@
           return;
         }
         const list = st.items.filter(fits);
-        for (const x of list) grid.append(tile(x));
+        let head = null;
+        for (const x of list) {
+          if (st.theme === "trend" && x.trend && x.trend !== head) {  // each trend: its name and what people do in it
+            head = x.trend;
+            grid.append(el("div", { class: "trend-head" }, el("b", { text: "🔥 " + x.trend }), x.why ? el("span", { text: " — " + x.why }) : null));
+          }
+          grid.append(tile(x));
+        }
         if (err) {
           grid.append(el("p", { class: "gal-msg", text: problem(err) }),
             el("button", { class: "btn line gal-msg", text: "🔄 Повторить", onclick: () => load(errPage) }));
           return;
         }
-        if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: st.theme ? "В этой теме пока пусто." : noteFor(kind, st) }));
+        if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: st.theme === "trend" ? "Сегодня в трендах пусто — загляните во «Все»."
+          : st.theme ? "В этой теме пока пусто." : noteFor(kind, st) }));
         if (st.more) {
           grid.append(el("button", { class: "btn line wide more", disabled: !!loading,
             text: loading ? "Загружаю…" : st.theme === "group" ? "Показать ещё" : "Показать ещё · осталось " + Math.max(0, st.total - st.items.length),
@@ -1739,14 +1749,14 @@
         let added = 0, pages = 0;
         try {
           for (;;) {
-            const r = await api("/api/templates", { kind, theme: st.theme && st.theme !== "group" ? st.theme : undefined, page });
+            const r = await api("/api/templates", { kind, theme: st.theme && st.theme !== "group" ? st.theme : undefined, page,
+              home: opening && page === 1 ? true : undefined });
             if (my !== st.ticket) return;  // another chip was tapped meanwhile
             const items = r.items || [];
             st.items = page === 1 ? items : st.items.concat(items);
             Object.assign(st, { page: r.page || page, more: !!r.more, total: r.total || 0, themes: r.themes || {}, can: r.can !== false,
               note: r.note || "", loaded: true, credit: r.credit || null });
-            // the first time: the server has trends now — they are opened first
-            if (opening && page === 1 && !st.theme && "trend" in st.themes) { opening = false; st.theme = "trend"; continue; }
+            if (opening) st.theme = st.home = r.theme || "";  // where the server opened it
             opening = false;
             if (page === 1 && st.theme && st.theme !== "group" && (st.theme === "trend" || Object.keys(st.themes).length) && !(st.theme in st.themes)) {
               st.theme = "";  // the theme kept from last time is gone: all of them
@@ -1766,6 +1776,7 @@
         paint();
       }
       function pick(k) {
+        opening = false;
         st.theme = k;
         // while the theme's pictures come, the sheet keeps its height (it is held at the bottom and sized to what is in
         // it): the chips do not jump, and a next tap does not land on a picture that has just slid under the finger

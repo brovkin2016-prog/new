@@ -359,6 +359,12 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .tpl-grid > p.gal-msg { margin: 8px 0; }
 .tpl-grid > .status.gal-msg { padding: 16px 0; justify-content: center; }
 .tpl-grid > p.credit { font-size: 13px; text-align: center; }
+.tpl-grid > p.credit a { color: var(--muted); text-decoration: none; }
+.tpl .hot { position: absolute; top: 6px; left: 6px; padding: 2px 6px; border-radius: 10px; font-size: 12px; background: rgba(0, 0, 0, .55); }
+.tpl-grid > .trend-head { grid-column: 1 / -1; margin: 10px 2px 0; font-size: 15px; line-height: 1.35; }
+.tpl-grid > .trend-head:first-of-type { margin-top: 2px; }
+.tpl-grid > .trend-head span { color: var(--muted); }
+.trend-note { margin: 2px 0 6px; font-size: 14px; }
 @media (max-width: 380px) { .tpl .name { font-size: 12px; } }
 .tpl-big { display: block; height: 140px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 12px; margin: 0 auto 6px; }
 .tpl-big.photo { aspect-ratio: 3 / 4; }
