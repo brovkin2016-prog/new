@@ -61,16 +61,26 @@
     if (t) h.Authorization = "Bearer " + t;
     return h;
   }
-  function send(path, body, onStatus, onBytes, extra) {
+  // ctl (optional): ctl.cancel() is set to give the request up — the phone's part then fails it at once (its own
+  // connection ends by its own timeout; what it still says is not listened to)
+  function send(path, body, onStatus, onBytes, extra, ctl) {
     const h = Object.assign(headers(), extra || {});
     if (Native) {
       return new Promise((resolve, reject) => {
         const id = "r" + (++seq);
         pending[id] = { head: onStatus, data: onBytes, end: resolve, fail: reject };
+        if (ctl) ctl.cancel = () => {
+          if (!pending[id]) return;
+          delete pending[id];
+          try { if (Native.cancel) Native.cancel(id); } catch (e) { /* an older app */ }
+          reject(new Error("stalled"));
+        };
         Native.request(id, path, JSON.stringify(h), body === null ? "" : body);
       });
     }
-    return fetch(path, { method: body === null ? "GET" : "POST", headers: h, body: body === null ? undefined : body })
+    const ac = typeof AbortController === "function" ? new AbortController() : null;
+    if (ctl && ac) ctl.cancel = () => ac.abort();
+    return fetch(path, { method: body === null ? "GET" : "POST", headers: h, body: body === null ? undefined : body, signal: ac ? ac.signal : undefined })
       .then(async (r) => {
         onStatus(r.status);
         if (!r.body || !r.body.getReader) { onBytes(new Uint8Array(await r.arrayBuffer())); return; }
@@ -106,11 +116,23 @@
     if (status !== 200) throw new HttpError(status, js.error);
     return js;
   }
+  // a pause that ends at once when the phone's internet comes back
+  function nap(ms) {
+    return new Promise((r) => {
+      const done = () => { clearTimeout(t); window.removeEventListener("online", done); r(); };
+      const t = setTimeout(done, ms);
+      window.addEventListener("online", done);
+    });
+  }
+  const STALL_MS = 40000;  // nothing at all for this long once the answer began (the server pings every 15 s): a dead line
   async function stream(path, body, onEvent) {
-    let status = 0, buf = "", last = null;
+    let status = 0, buf = "", last = null, heard = 0;
     const errParts = [];
     const dec = new TextDecoder();
-    await send(path, JSON.stringify(body), (s) => (status = s), (b) => {
+    const ctl = {};
+    const watch = setInterval(() => { if (heard && Date.now() - heard > STALL_MS && ctl.cancel) ctl.cancel(); }, 5000);
+    await send(path, JSON.stringify(body), (s) => { status = s; heard = Date.now(); }, (b) => {
+      heard = Date.now();
       if (status !== 200) { errParts.push(b); return; }
       buf += dec.decode(b, { stream: true });
       let i;
@@ -125,7 +147,8 @@
           try { onEvent(ev); } catch (e) { console.error(e); }
         }
       }
-    }).catch((e) => { e.started = status === 200; throw e; });  // started: the server took it (else it may never have got there)
+    }, null, ctl).catch((e) => { e.started = status === 200; throw e; })  // started: the server took it (else it may never have got there)
+      .finally(() => clearInterval(watch));
     if (status !== 200) {
       let js = {};
       try { js = JSON.parse(bytesToText(errParts)); } catch (e) { /* not json */ }
@@ -137,23 +160,29 @@
   // a big answer (a clip, a picture) kept on the server: fetched in pieces, and a piece the line broke continues where
   // it stopped instead of from the start (one number's answer never changes, so the pieces always fit)
   const pieces = {};
-  async function fetchResult(rid, size) {
+  async function fetchResult(rid, size, onProgress) {
     const p = pieces[rid] || (pieces[rid] = { parts: [], got: 0 });
     for (let tries = 0; tries < 6; tries++) {
       let status = 0;
+      const before = p.got;
       try {
         await send("/api/result?rid=" + rid, null, (s) => {
           status = s;
           if (s === 200) { p.parts = []; p.got = 0; }  // the whole of it after all
-        }, (b) => { if (status === 200 || status === 206) { p.parts.push(b); p.got += b.length; } },
-        p.got ? { Range: "bytes=" + p.got + "-" } : null);
+        }, (b) => {
+          if (status !== 200 && status !== 206) return;
+          p.parts.push(b);
+          p.got += b.length;
+          if (onProgress) onProgress(Math.min(99, Math.floor((p.got / size) * 100)));
+        }, p.got ? { Range: "bytes=" + p.got + "-" } : null);
       } catch (e) { /* the line broke: what came is kept */ }
       if (status === 404 || status === 401 || status === 403) { delete pieces[rid]; throw new HttpError(status, status === 404 ? "Ответ уже не найти — спросите ещё раз." : ""); }
       if (p.got >= size && (status === 200 || status === 206 || status === 416)) {
         delete pieces[rid];
         return JSON.parse(bytesToText(p.parts));
       }
-      await new Promise((r) => setTimeout(r, 1500 * (tries + 1)));
+      if (p.got > before) tries = -1;  // a piece came: the line works, only a break — the count starts afresh
+      await new Promise((r) => setTimeout(r, 1500 * Math.max(1, tries + 1)));
     }
     throw new Error("net");
   }
@@ -906,27 +935,54 @@
             if (!timer) timer = setTimeout(paint, 90);
           }
         },
-        // the server goes on without the phone: asked now and then for the answer (what it is doing meanwhile, and
-        // the words written so far); while the app is put aside nothing is asked
-        async wait(rid) {
-          if (!said.startsWith("⏳")) say("⏳ Связь прервалась — ответ ещё готовится и придёт сюда");
+        // the answer by its number (rid), whatever the line does: asked now and then (what the server is doing meanwhile,
+        // the words written so far); while there is no internet it waits for it (and asks at once when it is back);
+        // while the app is put aside nothing is asked. again(): the request sent once more with the same number, when
+        // the server says it never had it (the line broke on the way there) — the server never runs one number twice.
+        // Without again (the app was closed meanwhile and the request was too big to keep) it says the question did
+        // not get there.
+        async wait(rid, again, broke) {
+          const sayOnce = (t) => { if (t && t !== said) say(t); };  // the clock goes on while the words stay the same
+          const offline = "📶 Нет интернета — ответ придёт, когда связь вернётся";
+          sayOnce(navigator.onLine === false ? offline : broke || (said.startsWith("⏳") || said.startsWith("📶") ? said
+            : "⏳ Связь прервалась — ответ ещё готовится и придёт сюда"));
           const until = Date.now() + 2 * 3600e3;
-          let pause = 1500;
+          let pause = 1500, sent = 0;
           while (Date.now() < until) {
-            await new Promise((r) => setTimeout(r, pause));
+            await nap(pause);
             if (document.hidden) await new Promise((r) => document.addEventListener("visibilitychange", function on() { if (!document.hidden) { document.removeEventListener("visibilitychange", on); r(); } }));
+            if (navigator.onLine === false) { sayOnce(offline); pause = 15000; continue; }  // woken by «online» at once
             let r;
             try {
               r = await api("/api/job", { rid, lite: true });
-              if (r.t === "ready") { say("📥 Ответ готов — загружаю…"); r = await fetchResult(rid, r.size); }
+              if (r.t === "ready") {
+                sayOnce("📥 Ответ готов — загружаю…");
+                let shown = -10;
+                r = await fetchResult(rid, r.size, (pct) => { if (pct >= shown + 10) { shown = pct; sayOnce(`📥 Ответ готов — загружаю… ${pct}%`); } });
+              }
             } catch (e) {
-              if (e instanceof HttpError && (e.status === 404 || e.status === 401)) return { t: "error", text: problem(e) };
+              if (e instanceof HttpError && e.status === 404) {  // the server has no such request: it never got there
+                if (!again) return { t: "error", text: "Вопрос не дошёл до сервера — отправьте его ещё раз." };
+                if (sent >= 3) return { t: "error", text: "Не получается отправить — связь всё время обрывается. Попробуйте ещё раз чуть позже." };
+                sent++;
+                sayOnce("📶 Связь прервалась — отправляю ещё раз…");
+                try {
+                  const end = await again();
+                  if (end) return end;
+                } catch (x) {
+                  if (x instanceof HttpError) return { t: "error", text: problem(x) };  // the server said no
+                }
+                pause = 2000;
+                continue;
+              }
+              if (e instanceof HttpError && e.status === 401) return { t: "error", text: problem(e) };
+              if (!(e instanceof HttpError)) sayOnce(navigator.onLine === false ? offline : "📶 Связь прерывается — жду ответ сервера…");
               pause = Math.min(15000, pause * 1.5);  // no network yet, or asked too often: a little later
               continue;
             }
             pause = 3000;
             if (r.t !== "working") return r;
-            if (r.text) say(r.text);
+            if (r.text) sayOnce(r.text);
             if (r.partial && r.partial !== text) { text = r.partial; status.classList.add("hidden"); paint(); }
           }
           return { t: "error", text: "Ответ так и не пришёл — попробуйте ещё раз." };
@@ -965,30 +1021,6 @@
       }
       api2.redraw();
       return out;
-    }
-    // the request may never have got there (the line broke on the way out, no internet for a moment): sent again, at
-    // most twice, with the same number — the server never runs one number twice (it follows that job or gives its answer)
-    async function resend(path, body, rid, lv, e) {
-      for (const pause of [2000, 6000]) {
-        await new Promise((r) => setTimeout(r, pause));
-        try {
-          const r = await api("/api/job", { rid, lite: true });
-          return ["done", "error", "quota"].includes(r.t) ? r : null;  // it got there after all: its answer is fetched
-        } catch (x) {
-          if (!(x instanceof HttpError)) { e = x; continue; }  // still no line: a little later
-          if (x.status === 401) return { t: "error", text: problem(x) };
-          if (x.status !== 404) continue;  // 404: the server never had it
-        }
-        lv.event({ t: "status", text: "📶 Связь прервалась — отправляю ещё раз…" });
-        try {
-          return await stream(path, Object.assign({}, body, { rid }), lv.event);
-        } catch (x) {
-          if (x instanceof HttpError) return { t: "error", text: problem(x) };
-          if (x.started) return null;
-          e = x;
-        }
-      }
-      return { t: "error", text: problem(e) };
     }
     const api2 = {
       box, name,
@@ -1036,18 +1068,27 @@
         last = { path, body, still: mine ? mine.image || null : last && last.body === body ? last.still : null };
         if (mine) { await api2.add(mine); api2.redraw(); }
         const rid = newRid();
-        store.set(PEND, { rid, path, at: Date.now() });
+        // the request's number kept (and the request itself when it is small: a question, not a photo or a clip), so
+        // that its answer is fetched — or it is sent again — even after the app was closed
+        const small = JSON.stringify(body || {}).length < 100000;
+        store.set(PEND, { rid, path, at: Date.now(), body: small ? body : null });
         // a picture, a clip or a PDF is first sent off; «Думаю…» is for words, until the server says what it is doing
         const lv = live(/\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf)$/.test(path) ? "Отправляю…" : "Думаю…", path);
-        let end;
+        const again = () => stream(path, Object.assign({}, body, { rid }), lv.event).catch((e) => {
+          if (e instanceof HttpError) throw e;
+          return null;  // broke again (on the way there or back): asked by its number again
+        });
+        let end, broke = "";
         try {
           end = await stream(path, Object.assign({}, body, { rid }), lv.event);
         } catch (e) {
           if (e instanceof HttpError) end = { t: "error", text: problem(e) };  // the server said no
-          else if (e.started) end = null;  // the line broke on the way back
-          else end = await resend(path, body, rid, lv, e);  // it may never have got there
+          else {  // the line broke: the server goes on (or never got it — then it is sent again), its answer is fetched
+            end = null;
+            if (!e.started) broke = "📶 Связь прервалась — пробую ещё раз…";
+          }
         }
-        if (!end) end = await lv.wait(rid);  // the line broke: the server goes on, its answer is fetched
+        if (!end) end = await lv.wait(rid, again, broke);
         return finish(lv, end, path, mine, rid);
       },
       // a request left unfinished (the app was put aside or closed, the line broke): its answer fetched by its number
@@ -1057,7 +1098,11 @@
         if (!p.rid || Date.now() - (p.at || 0) > 2 * 3600e3) { store.set(PEND, null); return; }
         S.busy[name] = true;
         const lv = live("⏳ Ответ ещё готовится…", p.path);
-        const end = await lv.wait(p.rid);
+        const again = p.body ? () => stream(p.path, Object.assign({}, p.body, { rid: p.rid }), lv.event).catch((e) => {
+          if (e instanceof HttpError) throw e;
+          return null;
+        }) : null;
+        const end = await lv.wait(p.rid, again);
         await finish(lv, end, p.path, null, p.rid);
       },
       // «🔄 Повторить» under the last answer when it did not come: the same request once more
