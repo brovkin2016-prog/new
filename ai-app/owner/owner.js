@@ -887,8 +887,9 @@
             + "Бесплатно 5 минут видеокарты в день — на всех, кому вы включите." }),
           el("div", { style: "font-size:14px;margin:0 0 10px", text: "Новый аккаунт: «Я в ролике» в HD заработает через 30 дней после регистрации (и после подтверждения почты), остальное — сразу." }),
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-            el("li", { text: "Войдите на huggingface.co (нужна только почта)." }),
-            el("li", { text: "«🔑 Получить токен» → вверху выберите «Write» → в «Token name» впишите любое имя, например family → «Create token» → скопируйте (начинается с hf_)." }),
+            el("li", { text: "Нажмите «🔑 Получить токен» ниже — в браузере откроется сайт Hugging Face (huggingface.co), страница нового токена. Если сайт просит войти — войдите в свой аккаунт Hugging Face (нет аккаунта — «Sign Up», нужна только почта)." }),
+            el("li", { text: "На этой странице вверху три вкладки: «Fine-grained», «Read», «Write» — нажмите «Write». В поле «Token name» впишите любое имя, например family. Внизу нажмите «Create token»." }),
+            el("li", { text: "Появится окно с токеном (начинается с hf_) — нажмите «Copy» и вернитесь в это приложение." }),
             el("li", { text: "Вставьте сюда и нажмите «✅ " + (v.on ? "Заменить токен" : "Подключить") + "». В чаты токен не присылайте." })),
           el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens/new?tokenType=write",
             style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Получить токен" }),
@@ -988,8 +989,8 @@
           const inp = el("input", { class: "input", placeholder: "ключ API Coverr", autocomplete: "off", spellcheck: "false" });
           box.append(
             c.on && !coverrBad(c) ? "" : el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-              el("li", { text: "Откройте «🔑 Кабинет Coverr» и войдите (почта или Google)." }),
-              el("li", { text: "Создайте приложение (App) — ключ API бесплатный (статус Demo)." }),
+              el("li", { text: "Нажмите «🔑 Кабинет Coverr» ниже — в браузере откроется сайт Coverr (coverr.co), раздел для разработчиков. Войдите (почта или Google)." }),
+              el("li", { text: "На сайте Coverr создайте приложение (App) — ключ API выдаётся бесплатно (статус Demo). Скопируйте ключ и вернитесь в это приложение." }),
               el("li", { text: "Скопируйте ключ, вставьте сюда и нажмите «✅ " + (c.on ? "Заменить ключ" : "Подключить") + "». В чаты ключ не присылайте." })),
             c.on && !coverrBad(c) ? "" : el("a", { class: "btn line wide", href: "https://coverr.co/developers", target: "_blank", rel: "noopener",
               style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Кабинет Coverr" }),
