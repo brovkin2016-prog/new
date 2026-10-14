@@ -233,4 +233,9 @@ func TestLaptopBridgeTakesThePhonesPlace(t *testing.T) {
 	if st.Has(phone) || !st.Has(laptop) || !st.Has(phoneWB) {
 		t.Fatal("Has does not tell which links are saved")
 	}
+	// the journal says so when the bridge in use is not among the laptop's own from the server (the phone's call)
+	own := []string{laptop, "hysteria2://u:k@vpn.example.ru:443/#x"}
+	if !ownCall(own, mustParse(t, laptop)) || ownCall(own, mustParse(t, phone)) || ownCall(own, mustParse(t, phoneWB)) {
+		t.Fatal("ownCall does not tell the laptop's own call from the phone's")
+	}
 }

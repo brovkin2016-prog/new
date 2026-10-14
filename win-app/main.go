@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -51,6 +52,14 @@ func serve(tun bool, stop <-chan struct{}) error {
 	}
 	OpenJournal(dir)
 	Logf("Winger %s starts", versionName)
+	// the window's port first: when it cannot be had (another Winger has it, or Windows keeps it for itself), nothing
+	// is touched — no VPN switched on only to go off again on every restart Windows makes of the service, and no bridge
+	// program of the Winger that has the port ended under it
+	ln, err := net.Listen("tcp", "127.0.0.1:"+itoa(uiPort))
+	if err != nil {
+		Logf("the window's port: %v", err)
+		return err
+	}
 	endLeftRelays()
 	st := OpenStore(dir)
 	relay, err := relayPath(dir)
@@ -64,10 +73,9 @@ func serve(tun bool, stop <-chan struct{}) error {
 	if st.Get().KeepOn {
 		_ = eng.Connect()
 	}
-	srv := &http.Server{Addr: "127.0.0.1:" + itoa(uiPort), Handler: API(eng, fam, st, UIToken(dir)),
-		ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: API(eng, fam, st, UIToken(dir)), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
+	go func() { errc <- srv.Serve(ln) }()
 	select {
 	case err := <-errc:
 		eng.Shutdown()

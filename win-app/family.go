@@ -93,7 +93,24 @@ func (f *Family) SyncBridges(_ int) int {
 			}
 		}
 	}
+	if st := f.eng.Status(); !out.Preparing && st.Phase != "off" {
+		if was, err := ParseLink(st.Active); err == nil && was.Bridge && !ownCall(out.Links, was) {
+			// most likely the phone's (pasted by hand, or kept from before): one call carries one device, so the two
+			// push each other out of it again and again
+			Logf("bridge: the one in use is not this laptop's own (the phone's? the two push each other out of the call)")
+		}
+	}
 	return n
+}
+
+// ownCall: the bridge's call is among these links (the server's for this laptop).
+func ownCall(links []string, p *Profile) bool {
+	for _, l := range links {
+		if o, err := ParseLink(l); err == nil && o.Bridge && o.Platform == p.Platform && o.JoinLink == p.JoinLink {
+			return true
+		}
+	}
+	return false
 }
 
 // Preparing: the server is making this laptop's own bridges.

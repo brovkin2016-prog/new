@@ -180,6 +180,12 @@ func (b *Box) Rates() (down, up float64) {
 	return t.rateDown, t.rateUp
 }
 
+// Received: the bytes that came down through the VPN to the programs so far (all its runs together) — while they keep
+// coming the connection carries, whatever one look at it says.
+func (b *Box) Received() int64 {
+	return b.traffic.down.Load()
+}
+
 var boxCtx = include.Context(context.Background())
 
 // Check reads the configuration the way sing-box does, without starting anything.

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +54,16 @@ func activeIndex(all []*Profile, active string, current int) int {
 		}
 	}
 	return max(0, min(current, len(all)-1))
+}
+
+// carried: the programs the VPN carries with these settings (as Engine.start gives them to sing-box), nil: all of them.
+func carried(s Settings) []string {
+	if !s.OnlyApps || len(s.Apps) == 0 {
+		return nil
+	}
+	apps := append([]string(nil), s.Apps...)
+	sort.Strings(apps)
+	return apps
 }
 
 // API is the window's side of things: the state, the buttons, the settings.
@@ -219,8 +230,13 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 			}
 		}
 		sort.Strings(apps)
+		was := st.Get()
 		st.Update(func(s *Settings) { s.OnlyApps, s.Apps = only && len(apps) > 0, apps })
-		eng.Restart()
+		// on anew only when what goes through the VPN changed: a click on the mode it is in already, or the same list
+		// saved again, does not break every connection
+		if !slices.Equal(carried(was), carried(st.Get())) {
+			eng.Restart()
+		}
 		reply(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("/api/processes", func(w http.ResponseWriter, r *http.Request) {

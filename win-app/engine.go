@@ -26,6 +26,76 @@ const (
 	backMax   = 2 * time.Hour
 )
 
+// How the connection is watched: a page through it every 30 s. One look that gets nothing back is not a break (a network
+// that blinks, a line busy with a download, sing-box finding its way back to the server by itself after a network
+// change): the connection is made anew only when nothing at all came back — no page and none of the programs' data —
+// several looks in a row, 3 for a server, 4 for a bridge (its call is slower and its program gets back into the call by
+// itself), about the phone's 1–2 minutes. Pages that keep not coming while data still does: stuck all the same, after a
+// long while.
+const (
+	missesServer = 3
+	missesBridge = 4
+	noPageMax    = 20
+	// a connection that held this long starts the count of failures afresh (the retry waits short again); one that
+	// broke sooner keeps it, so a connection that keeps breaking is tried again less and less often
+	steadyFor = 5 * time.Minute
+)
+
+var (
+	lookEvery   = 30 * time.Second // a var: the tests look more often
+	pageThrough = Ping             // the tests' own
+)
+
+// health counts the looks in a row that found nothing coming back through the connection.
+type health struct {
+	need   int // looks in a row with nothing back that make a break
+	missed int // looks in a row with no page and none of the programs' data
+	noPage int // looks in a row with no page, whether data came or not
+}
+
+func newHealth(bridge bool) *health {
+	if bridge {
+		return &health{need: missesBridge}
+	}
+	return &health{need: missesServer}
+}
+
+// look takes one look: whether the page came (answered), whether programs' data came down through the connection since
+// the last look (flowed). Why it is to be made anew, or nil while it holds.
+func (h *health) look(answered, flowed bool) error {
+	if answered {
+		h.missed, h.noPage = 0, 0
+		return nil
+	}
+	h.noPage++
+	if flowed { // the page did not come, but the connection carries: busy, not broken
+		h.missed = 0
+	} else {
+		h.missed++
+	}
+	switch {
+	case h.missed >= h.need:
+		return errors.New("Связь с сервером пропала.")
+	case h.noPage >= noPageMax:
+		return errors.New("Связь есть, но страницы через неё не открываются.")
+	}
+	return nil
+}
+
+// failsAfterUp: the failures in a row once a connection that was up for held broke — counted afresh after one that held
+// a while, else kept (so the wait before the next try grows).
+func failsAfterUp(fails int, held time.Duration) int {
+	if held >= steadyFor {
+		return 0
+	}
+	return fails
+}
+
+// retryWait: how long to wait before trying again after this many failures in a row (2 s, 4 s … 30 s).
+func retryWait(fails int) time.Duration {
+	return min(30*time.Second, time.Second<<min(fails, 5))
+}
+
 // Engine connects and keeps the connection: the server, or a bridge when the server does not answer.
 type Engine struct {
 	st        *Store
@@ -191,11 +261,15 @@ func (e *Engine) run(g int) {
 	for e.mine(g) {
 		p, tunnel := e.cur()
 		err := e.start(g, p, tunnel)
+		held := time.Duration(0)
 		if err == nil && e.mine(g) {
-			fails = 0
 			e.set(g, "on", "")
 			Logf("connected via %s%s", p.Host+p.Platform, map[bool]string{true: " (" + tunnel + ")"}[p.Bridge])
-			err = e.watch(g)
+			up := time.Now()
+			err = e.watch(g, p.Bridge)
+			held = time.Since(up)
+			// kept when it broke soon after it came up: else it would be tried again every 2 s, round and round
+			fails = failsAfterUp(fails, held)
 		}
 		e.stopParts()
 		if !e.mine(g) {
@@ -209,7 +283,14 @@ func (e *Engine) run(g int) {
 			continue
 		}
 		fails++
-		Logf("retry %d: %v", fails, err)
+		if held > 0 {
+			Logf("retry %d: %v (it held %s)", fails, err, held.Round(time.Second))
+		} else {
+			Logf("retry %d: %v", fails, err)
+		}
+		// said at once: the parts are stopped, so «on» is over — and the family server is asked straight, not through
+		// the local port that has gone with them
+		e.set(g, "retrying", fmt.Sprint(err)+" Пробую снова…")
 		if !p.Bridge && fails == 1 && e.moved(g, p) {
 			fails = 0
 			continue
@@ -239,8 +320,7 @@ func (e *Engine) run(g int) {
 				continue
 			}
 		}
-		e.set(g, "retrying", fmt.Sprint(err)+" Пробую снова…")
-		if !e.sleep(g, min(30*time.Second, time.Second<<min(fails, 5))) {
+		if !e.sleep(g, retryWait(fails)) {
 			return
 		}
 	}
@@ -317,17 +397,22 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 	return errors.New("Сервер не отвечает.")
 }
 
-// watch keeps an eye on the connection: a page every 30 s; the chosen server looked at again when another one is used.
-func (e *Engine) watch(g int) error {
-	failed := 0
-	for e.sleep(g, 30*time.Second) {
+// watch keeps an eye on the connection: a page every 30 s, made anew only when nothing comes back for a while (health);
+// the chosen server looked at again when another one is used.
+func (e *Engine) watch(g int, bridge bool) error {
+	h := newHealth(bridge)
+	seen := e.box.Received()
+	for e.sleep(g, lookEvery) {
 		e.mu.Lock()
 		r, auto, back := e.relay, e.status.Auto, e.backAt
 		e.mu.Unlock()
 		if r != nil && !r.Alive() {
 			return errors.New("Мост остановился.")
 		}
-		ms := Ping(e.probePort, 10*time.Second)
+		ms := pageThrough(e.probePort, 10*time.Second)
+		got := e.box.Received()
+		flowed := got > seen
+		seen = got
 		e.mu.Lock()
 		e.status.PingMs = ms
 		p := e.profile
@@ -336,16 +421,28 @@ func (e *Engine) watch(g int) error {
 			e.st.SetPing(p.Link, ms)
 		}
 		if ms == 0 {
-			failed++
-			Logf("ping failed")
-			if failed >= 2 {
-				return errors.New("Связь с сервером пропала.")
+			if err := h.look(false, flowed); err != nil {
+				Logf("ping failed (%d of %d, %d in a row without a page): made anew", h.missed, h.need, h.noPage)
+				return err
+			}
+			if flowed {
+				Logf("ping failed, but the programs' data still comes through it: it holds")
+				continue
+			}
+			Logf("ping failed (%d of %d)", h.missed, h.need)
+			if h.missed >= 2 { // said while it waits a little more (a bridge's own «back into the call» note stays)
+				what := map[bool]string{true: "Мост", false: "Сервер"}[bridge]
+				e.mu.Lock()
+				if e.gen == g && e.wanted && e.status.Phase == "on" {
+					e.status.Phase, e.status.Note = "retrying", what+" не отвечает — жду, пока связь вернётся…"
+				}
+				e.mu.Unlock()
 			}
 			continue
 		}
-		failed = 0
+		_ = h.look(true, flowed)
 		e.mu.Lock()
-		if e.gen == g && e.wanted && e.status.Phase == "retrying" { // the bridge got back into its call: pages come again
+		if e.gen == g && e.wanted && e.status.Phase == "retrying" { // back in its call, or the server answers again
 			e.status.Phase, e.status.Note = "on", ""
 		}
 		e.mu.Unlock()
@@ -439,6 +536,9 @@ func (e *Engine) moved(g int, p *Profile) bool {
 		return false
 	}
 	fresh := e.fam.RenewNow(p)
+	if fresh == nil { // nothing new now: perhaps renewed before, and this connection is still on the old address
+		fresh = e.renewedMeanwhile(p)
+	}
 	if fresh == nil || !e.mine(g) || !e.probeServer(fresh) {
 		return false
 	}
@@ -449,6 +549,16 @@ func (e *Engine) moved(g int, p *Profile) bool {
 	e.mu.Unlock()
 	e.switchTo(g, fresh, false, "Сервер переехал на новый адрес — подключаюсь по новому…")
 	return true
+}
+
+// renewedMeanwhile: the chosen server's link when the hourly look (Family.Loop) renewed it while the VPN went on on the
+// old one — else the old address would be tried again and again; nil when it was not renewed.
+func (e *Engine) renewedMeanwhile(p *Profile) *Profile {
+	c := e.st.Chosen()
+	if c == nil || c.Bridge || p.Bridge || c.Auth != p.Auth || c.Ports != p.Ports || c.Link == p.Link {
+		return nil
+	}
+	return c
 }
 
 // autoChoice: Winger does not go from one connection to another by itself any more, as on the phone (the owner: it ran
