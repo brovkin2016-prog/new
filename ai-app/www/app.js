@@ -465,6 +465,24 @@
     const s = emo(text), i = s.indexOf(" ");
     return el("button", { class: "tool", onclick }, el("span", { class: "ic", text: i > 0 ? s.slice(0, i) : "•" }), el("span", { text: i > 0 ? s.slice(i + 1) : s }));
   }
+  // the tiles in a grid: two a row while every word fits its tile, else one a row. The CSS (9.6em columns) does it where
+  // a large system font grows «em»; Android's text zoom may grow only the letters, so the words themselves are measured
+  // too — whenever the grid is first shown and when its size changes («Переводчик», never «Переводчи/к»)
+  const toolsSeen = typeof ResizeObserver === "function" ? new ResizeObserver((es) => requestAnimationFrame(() => es.forEach((e) => fitTools(e.target)))) : null;
+  function fitTools(g) {
+    if (!g.isConnected) { toolsSeen.unobserve(g); return; }
+    if (!g.clientWidth) return;  // on a hidden tab: measured once it is shown
+    g.classList.remove("one");
+    g.classList.add("probe");  // words unbroken for a moment: one wider than its tile sticks out
+    const tight = [...g.querySelectorAll(".tool > span:last-child")].some((s) => s.scrollWidth > s.clientWidth + 1);
+    g.classList.remove("probe");
+    g.classList.toggle("one", tight);
+  }
+  function tools(...kids) {
+    const g = el("div", { class: "tools" }, ...kids);
+    if (toolsSeen) toolsSeen.observe(g);
+    return g;
+  }
   function ask(title, placeholder, initial) {
     return new Promise((resolve) => {
       sheet(title, (box, close) => {
@@ -990,7 +1008,7 @@
     const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "✦" }), el("h2", { text: "Спросите что угодно" }),
       el("p", { text: "Пишите или нажмите 🎤 и говорите. Фото и документы — через 📎." }),
       el("p", { class: "empty-sec", text: "Готовые задачи" }),
-      el("div", { class: "tools" },
+      tools(
         Native && Native.remindAdd ? tool("⏰ Напомнить", () => { ta.value = "Напомни "; sync(); ta.focus(); }) : null,
         tool("🗣️ Переводчик", translator),
         IDEAS_SHOWN.filter((k) => S.me.ideas[k]).map((k) => tool(S.me.ideas[k][0], () => pickIdea(k)))),
@@ -1233,7 +1251,7 @@
         }
       }
       ta.placeholder = mode === "essay" ? "Тема сочинения" : S.msgs.study.length ? "Спросите про решение"
-        : mode === "notes" || mode === "retell" ? "Текст или тема" : "Задание или вопрос";
+        : mode === "notes" || mode === "retell" ? "Текст или тема" : "Ваш вопрос";
     }
     async function shoot(camera) {
       const f = await pickFile("image/*", camera);
@@ -1312,7 +1330,7 @@
       el("div", { class: "preview" }, el("img", { src: urlOf(photo), alt: "", onclick: () => viewer(photo, "photo.jpg") }),
         el("button", { class: "x", text: "✕", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
-      el("div", { class: "tools" }, QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
+      tools(QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
         tool("✍️ Своё изменение", own), tool("⋯ Другое", more)))
       // pages for a PDF being collected: their banner over the input is the next step (no second «📷» here)
       : S.scan.length ? null
@@ -1341,7 +1359,7 @@
       act.textContent = typed ? "➤" : "🎤";
       act.setAttribute("aria-label", typed ? "Отправить" : "Сказать голосом");
       // a placeholder stays one line (under ~22 letters); a longer «how» goes into ownHint above the input
-      ta.placeholder = photo ? "Что сделать с фото?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
+      ta.placeholder = photo ? "Что сделать?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
       if (!photo) ownHint.classList.add("hidden");
       scanBar.innerHTML = "";
       scanBar.classList.toggle("hidden", !S.scan.length);

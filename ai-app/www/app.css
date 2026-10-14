@@ -143,23 +143,27 @@ video { width: 100%; border-radius: 12px; }
 .empty .empty-sec + .hints { justify-content: flex-start; margin-top: 0; }
 .hint { min-height: 44px; padding: 11px 15px; border-radius: 16px; background: var(--card); box-shadow: var(--shadow); font-size: 15px; color: var(--ink);
   text-align: left; }
-.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; }
+/* the tiles follow the size of the letters: two a row at the usual size on 360–393, one a row at a large system font
+   (1.3×), so «Переводчик» never breaks in the middle. Where the phone's text zoom does not grow «em», fitTools() sees a
+   word that no longer fits its tile and puts them one a row (.one); .probe is its brief measuring state */
+.tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.6em, 1fr)); gap: 8px; text-align: left; }
 .tools > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+.tools.one { grid-template-columns: 1fr; }
+.tools.one > :last-child:nth-child(odd) { grid-column: auto; }
 .tool { min-height: 52px; padding: 10px 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow);
   display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; color: var(--ink); text-align: left; line-height: 1.2; min-width: 0; }
 .tool .ic { font-size: 22px; flex: none; }
-.tool > span:last-child { min-width: 0; overflow-wrap: break-word; -webkit-hyphens: auto; hyphens: auto; }  /* a long word wraps inside its tile with
-   a «-» (lang="ru"), never past its edge; overflow-wrap where hyphens are not known */
+.tool > span:last-child { min-width: 0; overflow-wrap: break-word; }  /* the last resort: a word too long for its tile wraps inside it */
+.tools.probe .tool > span:last-child { overflow-wrap: normal; }
 .tool:active { background: var(--accent-soft); }
 /* narrow phones and wide fonts (Samsung's): the tiles take the screen's width less its 12px sides, a smaller icon and
-   gaps, and on the narrowest one tile a row («Размер экрана: крупный») — «Поздравление» stays one word */
+   gaps; on the narrowest («Размер экрана: крупный») 9.6em no longer fits twice, one tile a row */
 @media (max-width: 400px) {
   .empty { padding-left: 0; padding-right: 0; }
   .tool { padding: 10px 8px; gap: 4px; }
   .tool .ic { font-size: 18px; }
 }
 @media (max-width: 380px) { .tool { font-size: 14px; } }
-@media (max-width: 340px) { .tools { grid-template-columns: 1fr; } }
 
 /* composer */
 .composer { flex: none; padding: 8px; background: var(--bg); border-top: 1px solid var(--line); }
@@ -182,8 +186,8 @@ video { width: 100%; border-radius: 12px; }
 .round.ghost { background: var(--card); border: 1px solid var(--line); }
 .inrow textarea, select, .input, .round.ghost, .chip:not(.on) { border-color: var(--field); }
 .inrow textarea::placeholder, .input::placeholder { color: var(--muted); opacity: 1; }
-/* a large system font: the placeholder is cut at the edge, never half a second line in the one-line field */
-.inrow textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a large system font: the placeholders are short enough to fit at 1.3× on 360; this keeps any longer one to one line */
+.inrow textarea::placeholder { white-space: nowrap; overflow: hidden; }
 .rec { display: flex; align-items: center; gap: 10px; padding: 4px 6px; }
 .rec .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: blink 1s steps(2) infinite; }
 .rec .time { flex: 1; font-variant-numeric: tabular-nums; }
