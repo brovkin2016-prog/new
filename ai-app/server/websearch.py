@@ -6,6 +6,7 @@ home network behind it), small and quickly; their text is material for the answe
     read_page("https://…") -> ("title", "text") or raises
     gather("вопрос", n_pages=3) -> {"engine", "results", "pages": [{"title", "url", "text"}]}
 """
+import calendar
 import concurrent.futures
 import http.client
 import ipaddress
@@ -129,6 +130,7 @@ class _Text(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts, self.skip, self.title, self.in_title = [], 0, "", False
         self.main_start = None  # where <article> or <main> began in parts
+        self.ld, self.in_ld, self.about = [], False, ""  # the page's own data (JSON-LD) and its description
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIP_TAGS:
@@ -139,10 +141,21 @@ class _Text(HTMLParser):
             self.parts.append("\n")
         if tag in ("article", "main") and self.main_start is None:
             self.main_start = len(self.parts)
+        self._meta(tag, attrs)
+        if tag == "script" and "ld+json" in (dict(attrs).get("type") or "").lower() and len(self.ld) < 20:
+            self.in_ld = True
+            self.ld.append("")
 
     def handle_startendtag(self, tag, attrs):
         if tag in BLOCK_TAGS:
             self.parts.append("\n")
+        self._meta(tag, attrs)
+
+    def _meta(self, tag, attrs):
+        if tag == "meta" and not self.about:
+            a = dict(attrs)
+            if (a.get("name") or a.get("property") or "").lower() in ("description", "og:description"):
+                self.about = re.sub(r"\s+", " ", a.get("content") or "").strip()[:400]
 
     def handle_endtag(self, tag):
         if tag in SKIP_TAGS and self.skip:
@@ -151,16 +164,96 @@ class _Text(HTMLParser):
             self.in_title = False
         if tag in BLOCK_TAGS:
             self.parts.append("\n")
+        if tag == "script":
+            self.in_ld = False
 
     def handle_data(self, data):
-        if self.in_title:
+        if self.in_ld:
+            if len(self.ld[-1]) < 200_000:
+                self.ld[-1] += data
+        elif self.in_title:
             self.title += data
         elif not self.skip:
             self.parts.append(data)
 
 
+# The page's own data about an event (schema.org in JSON-LD): sports, concert and ticket sites often show the date and
+# time only through scripts, and give them there — the match's start is then on the page even though its text is not.
+EVENT_STATUS = {"EventCancelled": "отменено", "EventPostponed": "перенесено", "EventRescheduled": "перенесено",
+                "EventMovedOnline": "онлайн"}
+ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?)?")
+
+
+def msk_time(value):
+    """An ISO date, as people here read it: «15.10.2026 20:45 МСК» (a time with its zone, in Moscow time)."""
+    m = ISO.match(str(value or "").strip())
+    if not m:
+        return str(value or "")[:40]
+    y, mo, d, hh, mm, tz = m.groups()
+    if hh is None:
+        return f"{d}.{mo}.{y}"
+    if tz is None:
+        return f"{d}.{mo}.{y} {hh}:{mm} (по времени сайта)"
+    off = 0 if tz == "Z" else (1 if tz[0] == "+" else -1) * (int(tz[1:3]) * 60 + int(tz[-2:]))
+    t = time.gmtime(calendar.timegm((int(y), int(mo), int(d), int(hh), int(mm), 0)) - off * 60 + 3 * 3600)
+    return time.strftime("%d.%m.%Y %H:%M МСК", t)
+
+
+def _name(x):
+    if isinstance(x, list):
+        return ", ".join(n for n in (_name(y) for y in x[:4]) if n)
+    if isinstance(x, dict):
+        x = x.get("name") or ""
+    return re.sub(r"\s+", " ", str(x or "")).strip()[:120]
+
+
+def ld_facts(blobs):
+    """Lines about the events (and when an article came out) that the page's JSON-LD gives."""
+    out, seen = [], set()
+
+    def walk(x, depth):
+        if depth > 8 or len(out) >= 40:
+            return
+        if isinstance(x, list):
+            for y in x[:100]:
+                walk(y, depth + 1)
+            return
+        if not isinstance(x, dict):
+            return
+        kind = x.get("@type")
+        kind = " ".join(map(str, kind)) if isinstance(kind, list) else str(kind or "")
+        line = ""
+        if x.get("startDate"):
+            teams = " — ".join(n for n in (_name(x.get("homeTeam")), _name(x.get("awayTeam"))) if n) or _name(x.get("competitor"))
+            line = "Событие: " + (_name(x) or teams or kind)
+            if teams and teams not in line:
+                line += f" ({teams})"
+            line += " · начало: " + msk_time(x["startDate"])
+            if _name(x.get("location")):
+                line += " · место: " + _name(x.get("location"))
+            status = str(x.get("eventStatus") or "").rsplit("/", 1)[-1]
+            if status in EVENT_STATUS:
+                line += " · " + EVENT_STATUS[status]
+        elif x.get("datePublished") and re.search(r"Article|Posting|Report", kind):
+            line = "Опубликовано: " + msk_time(x.get("dateModified") or x["datePublished"])
+        if line and line not in seen:
+            seen.add(line)
+            out.append(line)
+        for k in ("@graph", "subEvent", "mainEntity", "itemListElement", "item", "event", "events"):
+            if x.get(k):
+                walk(x[k], depth + 1)
+
+    for blob in blobs:
+        try:
+            walk(json.loads(blob.strip().rstrip(";")), 0)
+        except ValueError:
+            continue
+    return out
+
+
 def page_text(html):
-    """(title, readable text): the article's or main part when the page has a real one, short menu lines dropped."""
+    """(title, readable text): the article's or main part when the page has a real one, short menu lines dropped; the
+    page's own data on its events and its description go first."""
     p = _Text()
     try:
         p.feed(html)
@@ -177,11 +270,93 @@ def page_text(html):
         if len(line) >= 40 or (len(line) >= 3 and re.search(r"\d", line)) or len(line.split()) >= 5:
             if not lines or lines[-1] != line:
                 lines.append(line)
-    return re.sub(r"\s+", " ", p.title).strip(), "\n".join(lines)
+    about = unescape(p.about)
+    head = ld_facts(p.ld) + ([about] if len(about) >= 40 and about not in "\n".join(lines[:5]) else [])
+    return re.sub(r"\s+", " ", p.title).strip(), "\n".join(head + lines)
 
 
-def read_page(url, limit=4000):
-    """(title, text up to limit characters) of one public web page."""
+# ---------- the part of a long page the question is about ----------
+
+WORD = re.compile(r"[0-9a-zа-яё]+")
+STOP = {"что", "как", "где", "когда", "сколько", "какой", "какая", "какое", "какие", "кто", "чем", "это", "для", "или",
+        "про", "при", "все", "его", "она", "они", "так", "уже", "еще", "есть", "был", "была", "были", "будет", "the",
+        "and", "for", "what", "when", "how", "who", "where", "with"}
+WHEN = re.compile(r"\b\d{1,2}:\d{2}\b|\b\d{1,2}\.\d{1,2}\.\d{2,4}\b|\bМСК\b|\b\d{1,2}\s+(?:январ|феврал|март|апрел|ма[яй]|"
+                  r"июн|июл|август|сентябр|октябр|ноябр|декабр)", re.I)
+
+
+def stems(query):
+    """The query's words as their beginnings («Спартак» → «спарт»), so that «Спартака» and «Родины» are found too."""
+    out = set()
+    for w in WORD.findall(query.lower().replace("ё", "е")):
+        if w.isdigit() and len(w) >= 2:
+            out.add(w)
+        elif len(w) >= 3 and w not in STOP:
+            out.add(w[:max(3, min(5, len(w) - 2))])
+    return out
+
+
+def focus(text, query, limit):
+    """At most limit characters of a page: its beginning, then the lines that have most of the query's words (rarer
+    words count more, a date or a time beside them more still) with the lines around them, in the page's order. A
+    page that fits, or no query: its beginning, as before."""
+    if len(text) <= limit or not query:
+        return text[:limit]
+    keys = stems(query)
+    if not keys:
+        return text[:limit]
+    lines = []
+    for line in text.split("\n"):  # a page in one long line is read sentence by sentence
+        while len(line) > 500:
+            cut = max(line.rfind(". ", 0, 400), line.rfind("! ", 0, 400), line.rfind("? ", 0, 400))
+            cut = cut + 1 if cut > 100 else 400
+            lines.append(line[:cut].strip())
+            line = line[cut:].strip()
+        lines.append(line)
+    hits = [{k for k in keys if any(w.startswith(k) for w in WORD.findall(ln.lower().replace("ё", "е")))} for ln in lines]
+    common = max(3, len(lines) // 8)
+    weight = {k: 1.0 if sum(k in h for h in hits) <= common else 0.4 for k in keys}
+    score = []
+    for ln, h in zip(lines, hits):
+        s = sum(weight[k] for k in h)
+        if s:
+            s += 1.0 if WHEN.search(ln) else 0.3 if re.search(r"\d", ln) else 0
+        score.append(s)
+    keep, used = set(), 0
+    for i, ln in enumerate(lines):  # the beginning: what the page is
+        if used + len(ln) + 1 > min(600, limit // 5):
+            break
+        keep.add(i)
+        used += len(ln) + 1
+    for i in sorted((i for i in range(len(lines)) if score[i]), key=lambda i: -score[i]):
+        for r in ((2, 1, 0) if score[i] >= 2 else (1, 0)):  # with the lines around it if they fit, else alone
+            add = [j for j in range(max(0, i - r), min(len(lines), i + r + 1)) if j not in keep]
+            cost = sum(len(lines[j]) + 1 for j in add)
+            if used + cost <= limit:
+                keep.update(add)
+                used += cost
+                break
+        if used > limit - 100:
+            break
+    for i, ln in enumerate(lines):  # room left: the page's text on from its beginning, as before
+        if used + len(ln) + 1 > limit:
+            break
+        if i not in keep:
+            keep.add(i)
+            used += len(ln) + 1
+    if not keep:
+        return text[:limit]
+    out, last = [], -1
+    for i in sorted(keep):
+        if last >= 0 and i != last + 1:
+            out.append("…")
+        out.append(lines[i])
+        last = i
+    return "\n".join(out)[:limit]
+
+
+def read_page(url, limit=4000, query=None):
+    """(title, text up to limit characters) of one public web page; with a query, its part about it (focus)."""
     final, ctype, raw = fetch(url)
     if "pdf" in ctype or final.lower().endswith(".pdf"):
         raise Blocked("PDF")
@@ -189,9 +364,9 @@ def read_page(url, limit=4000):
         raise Blocked("не страница: " + ctype.split(";")[0])
     text = decode(raw, ctype)
     if "text/plain" in ctype:
-        return "", text[:limit]
+        return "", focus(text, query, limit)
     title, body = page_text(text)
-    return title, body[:limit]
+    return title, focus(body, query, limit)
 
 
 # ---------- search pages ----------
@@ -353,16 +528,16 @@ def search(query, n=6, budget=12.0):
         pool.shutdown(wait=False, cancel_futures=True)
 
 
-def gather(query, n_pages=3, page_chars=3500, budget=20.0):
-    """Search, then read the first pages that read well (in parallel). The search results' snippets stay as well,
-    so even pages that did not open still give something."""
+def gather(query, n_pages=4, page_chars=3500, budget=20.0):
+    """Search, then read the first pages that read well (in parallel), each page's part about the query. The search
+    results' snippets stay as well, so even pages that did not open still give something."""
     start = time.time()
     results, engine = search(query, budget=min(12.0, budget))
     pages = []
     if results:
-        pool = concurrent.futures.ThreadPoolExecutor(min(5, len(results)))
-        wanted = [r for r in results if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][: n_pages + 2]
-        futures = [(r, pool.submit(read_page, r["url"], page_chars)) for r in wanted]
+        wanted = [r for r in results if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][: n_pages + 3]
+        pool = concurrent.futures.ThreadPoolExecutor(max(1, min(7, len(wanted))))
+        futures = [(r, pool.submit(read_page, r["url"], page_chars, query)) for r in wanted]
         try:
             for r, f in futures:
                 left = budget - (time.time() - start)

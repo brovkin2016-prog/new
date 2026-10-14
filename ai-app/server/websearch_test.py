@@ -1,5 +1,6 @@
 """Tests of websearch.py. Without arguments: offline (the pages' shapes, the guard against internal addresses).
 With --live: the real search pages from this machine (the CI does that; the family server's network is alike)."""
+import re
 import sys
 import unittest
 
@@ -30,6 +31,15 @@ PAGE = """<html><head><title> Курс доллара  </title><script>var x = "
 <p>Курс евро составит 94,10 рубля.</p><div>Поделиться</div>""" + "<p>Подробный разбор причин изменения курса и мнения аналитиков о дальнейшей динамике рубля.</p>" * 12 + """
 </article><footer>© 2026 Сайт. Все права защищены.</footer></body></html>"""
 
+MATCH = """<html><head><title>Родина — Спартак</title>
+<meta name="description" content="Кубок России. Родина и Спартак сыграют 15 октября в 20:45 по московскому времени.">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"SportsEvent","name":"Родина — Спартак",
+"startDate":"2026-10-15T20:45:00+03:00","homeTeam":{"@type":"SportsTeam","name":"Родина"},"awayTeam":{"name":"Спартак"},
+"location":{"@type":"Place","name":"Арена Химки"}},{"@type":"SportsEvent","name":"Спартак — Родина","startDate":"2026-09-01T16:30:00Z",
+"eventStatus":"https://schema.org/EventPostponed"}]}</script>
+<script>window.__DATA__ = {"time": "20:45"}</script></head>
+<body><div id="app">Загрузка…</div></body></html>"""
+
 
 class Parsers(unittest.TestCase):
     def test_duckduckgo(self):
@@ -57,6 +67,37 @@ class Parsers(unittest.TestCase):
         self.assertIn("94,10", text)  # a short line with a number stays
         for junk in ("не текст", "Главная", "Шапка", "© 2026", "Поделиться"):
             self.assertNotIn(junk, text)
+
+    def test_event_data(self):
+        # a sports page that draws the match with scripts: its time is only in JSON-LD and the description
+        title, text = ws.page_text(MATCH)
+        lines = text.split("\n")
+        self.assertEqual(lines[0], "Событие: Родина — Спартак · начало: 15.10.2026 20:45 МСК · место: Арена Химки")
+        self.assertIn("Событие: Спартак — Родина · начало: 01.09.2026 19:30 МСК · перенесено", lines)  # UTC → МСК
+        self.assertIn("Кубок России. Родина и Спартак сыграют 15 октября в 20:45 по московскому времени.", lines)
+        self.assertNotIn("window.__DATA__", text)
+        self.assertEqual(ws.msk_time("2026-10-15"), "15.10.2026")
+        self.assertEqual(ws.msk_time("2026-10-15T23:30:00-0200"), "16.10.2026 04:30 МСК")
+        self.assertEqual(ws.msk_time("2026-10-15T20:45"), "15.10.2026 20:45 (по времени сайта)")
+        self.assertEqual(ws.ld_facts(["{не json", '{"@type":"NewsArticle","datePublished":"2026-10-14T09:00:00Z"}']),
+                         ["Опубликовано: 14.10.2026 12:00 МСК"])
+
+    def test_focus(self):
+        # a long page: the lines about the question (with their time) come through, not only the page's beginning
+        menu = "\n".join(f"Раздел сайта номер {i}: новости, видео, фото и статистика всех турниров" for i in range(120))
+        page = ("Футбол — главная страница\n" + menu + "\nКубок России, 1/8 финала\nРодина — Спартак\n15 октября, 20:45\n"
+                + menu + "\nЗенит — Ростов, 16 октября 19:00\n" + "\n".join("Длинный текст про другое " * 3 for _ in range(50)))
+        got = ws.focus(page, "Кубок России Спартак Родина дата и время", 1500)
+        self.assertLessEqual(len(got), 1500)
+        self.assertTrue(got.startswith("Футбол — главная страница"))
+        self.assertIn("Родина — Спартак\n15 октября, 20:45", got)
+        self.assertIn("Кубок России, 1/8 финала", got)
+        self.assertIn("…", got)
+        self.assertEqual(ws.focus(page, None, 300), page[:300])  # no question: the beginning, as before
+        self.assertEqual(ws.focus("коротко", "Спартак", 300), "коротко")
+        one_line = "Начало. " * 200 + "Матч Спартака с Родиной начнётся в 20:45. " + "Конец. " * 200
+        self.assertIn("20:45", ws.focus(one_line, "Спартак Родина", 600))
+        self.assertEqual(ws.stems("Во сколько Спартак — Родина, 2026?"), {"спарт", "роди", "2026"})
 
 
 class Guard(unittest.TestCase):
@@ -91,6 +132,15 @@ class Live(unittest.TestCase):
         self.assertTrue(got["results"])
         self.assertTrue(got["pages"], "no page could be read")
         self.assertTrue(any("Канберр" in p["text"] or "Canberra" in p["text"] for p in got["pages"]))
+
+    def test_match_time(self):
+        # «во сколько матч»: the pages read must carry a start time beside the teams, not only their menus
+        got = ws.gather("Кубок России Спартак Родина дата и время")
+        print("match:", got["engine"], [p["url"] for p in got["pages"]])
+        for p in got["pages"]:
+            print("\n==", p["url"], "\n" + "\n".join(ln for ln in p["text"].split("\n") if ws.WHEN.search(ln))[:800])
+        self.assertTrue(got["pages"], "no page could be read")
+        self.assertTrue(any(re.search(r"\b\d{1,2}:\d{2}\b", p["text"]) for p in got["pages"]), "no start time on the pages read")
 
 
 if __name__ == "__main__":
