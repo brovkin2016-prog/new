@@ -917,7 +917,15 @@
           status.lastChild.textContent = said + " · " + (sec < 60 ? sec + " с" : "прошло " + Math.floor(sec / 60) + " мин");
         }
       }, 1000);
-      const paint = () => { timer = null; content.innerHTML = md(text); content.lastElementChild && content.lastElementChild.classList.add("typing"); api2.down(); };
+      // the words so far: a bold or code mark not closed yet is left out for now («**Отв» shows as «Отв»)
+      const unfinished = (t) => {
+        for (const mark of ["**", "`"]) {
+          const n = t.split(mark).length - 1 - (mark === "`" ? 3 * (t.split("```").length - 1) : 0);
+          if (n % 2) { const i = t.lastIndexOf(mark); t = t.slice(0, i) + t.slice(i + mark.length); }
+        }
+        return t;
+      };
+      const paint = () => { timer = null; content.innerHTML = md(unfinished(text)); content.lastElementChild && content.lastElementChild.classList.add("typing"); api2.down(); };
       const say = (t) => {
         said = t;
         t0 = Date.now();

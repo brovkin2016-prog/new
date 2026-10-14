@@ -366,6 +366,10 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .tpl-grid > .trend-head span { color: var(--muted); }
 .trend-note { margin: 2px 0 6px; font-size: 14px; }
 @media (max-width: 380px) { .tpl .name { font-size: 12px; } }
+/* a long Russian word on a narrow tile is split with a hyphen («Танцеваль-ный»), not cut bare */
+.tpl .name { -webkit-hyphens: auto; hyphens: auto; overflow-wrap: break-word; }
+/* «Управление»'s parts on a narrow phone: smaller, so «🛠 Claude» is not cut at the edge (the row still scrolls) */
+@media (max-width: 380px) { .seg button { padding: 8px 6px; font-size: 13px; } }
 .tpl-big { display: block; height: 140px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 12px; margin: 0 auto 6px; }
 .tpl-big.photo { aspect-ratio: 3 / 4; }
 .tpl-big.small { height: 84px; margin-bottom: 4px; }  /* once the faces are found: the rows are the task */
