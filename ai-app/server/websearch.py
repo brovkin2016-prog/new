@@ -10,6 +10,7 @@ import calendar
 import concurrent.futures
 import http.client
 import ipaddress
+import itertools
 import json
 import re
 import socket
@@ -465,10 +466,15 @@ def ddg_lite(html):
     return _clean(p.results)
 
 
-def bing_html(html):
-    p = _Results(None, ("p", None), block=("li", "b_algo"), title_in="h2")
-    p.feed(html)
-    return _clean(p.results)
+def bing_rss(xml):
+    """Bing's results as RSS: from a datacenter its search page gives results for some other question, its RSS
+    (with the Russian market) the real ones."""
+    out = []
+    for item in re.findall(r"<item>(.*?)</item>", xml, re.S)[:20]:
+        get = lambda tag: (re.search(rf"<{tag}>(.*?)</{tag}>", item, re.S) or [None, ""])[1]
+        text = lambda s: re.sub(r"<[^>]+>", "", unescape(re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", s, flags=re.S)))
+        out.append({"title": text(get("title")), "url": unescape(get("link")).strip(), "snippet": text(get("description"))})
+    return _clean(out)
 
 
 def duckduckgo(query):
@@ -481,8 +487,8 @@ def duckduckgo(query):
 
 
 def bing(query):
-    _, ctype, raw = fetch("https://www.bing.com/search?" + urlencode({"q": query, "setlang": "ru", "cc": "RU", "count": "10"}))
-    return bing_html(decode(raw, ctype))
+    _, ctype, raw = fetch("https://www.bing.com/search?" + urlencode({"q": query, "format": "rss", "mkt": "ru-RU"}))
+    return bing_rss(decode(raw, ctype))
 
 
 def wikipedia(query):
@@ -502,30 +508,54 @@ def wikipedia(query):
 ENGINES = [("duckduckgo", duckduckgo), ("bing", bing), ("wikipedia", wikipedia)]
 
 
-def search(query, n=6, budget=12.0):
-    """The first engine (in this order) that finds at least two pages; all are asked at once, so a slow one costs
-    nothing. ([], None) when none found anything."""
+# words that say little about which pages are the right ones: a page about the Falkland Islands has «время» too
+GENERIC = stems("дата время сегодня завтра вчера сейчас начало новости матч игра год цена")
+
+
+def relevant(results, query):
+    """The results about the question. A search page that takes the server for a robot may answer some other question
+    instead (Bing's page gave the Falkland Islands for «Спартак Родина»): a result whose title and snippet have none of
+    the query's words (two of them, for a query of three words or more) is left out."""
+    keys = {k for k in stems(query) if k not in GENERIC and not k.isdigit()}
+    if not keys:
+        return results
+    need = 1 if len(keys) <= 2 else 2
+    out = []
+    for r in results:
+        words = WORD.findall((r["title"] + " " + r["snippet"]).lower().replace("ё", "е"))
+        if sum(any(w.startswith(k) for w in words) for k in keys) >= need:
+            out.append(r)
+    return out
+
+
+def search(query, n=8, budget=12.0):
+    """The results of the web engines, all asked at once, taken in turns (the first of each, then the second…), only
+    those about the question; Wikipedia's after them when the web gave fewer than three. ([], None): nothing found."""
     query = query.strip()[:300]
     if not query:
         return [], None
     pool = concurrent.futures.ThreadPoolExecutor(len(ENGINES))
     futures = [(name, pool.submit(fn, query)) for name, fn in ENGINES]
     end = time.time() + budget
-    best = ([], None)
+    got = {}
     try:
         for name, f in futures:
+            if name == "wikipedia" and sum(map(len, got.values())) >= 3:
+                break
             try:
-                found = f.result(timeout=max(0.1, end - time.time()))
+                got[name] = relevant(f.result(timeout=max(0.1, end - time.time())), query)
             except Exception:
                 continue
-            found = [r for r in found if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][:n] or found[:n]
-            if len(found) >= 2:
-                return found, name
-            if found and not best[0]:
-                best = (found, name)
-        return best
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+    merged, seen = [], set()
+    for row in itertools.zip_longest(*[got.get(name, []) for name, _ in ENGINES]):
+        for r in row:
+            if r and r["url"] not in seen:
+                seen.add(r["url"])
+                merged.append(r)
+    found = [r for r in merged if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][:n] or merged[:n]
+    return found, "+".join(name for name, _ in ENGINES if got.get(name)) or None
 
 
 def gather(query, n_pages=4, page_chars=3500, budget=20.0):

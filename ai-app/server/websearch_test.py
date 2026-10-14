@@ -18,11 +18,11 @@ LITE = """<table><tr><td><a rel="nofollow" href="https://example.org/a" class='r
 <tr><td><a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fb" class='result-link'>Пример Б</a></td></tr>
 <tr><td class='result-snippet'>Второй</td></tr></table>"""
 
-BING = """<ol id="b_results"><li class="b_algo"><div class="b_tpcn"><a href="https://site.ru/">site.ru</a></div>
-<h2><a href="https://www.bing.com/ck/a?!&amp;&amp;p=1&amp;u=a1aHR0cHM6Ly9zaXRlLnJ1L25ld3M&amp;ntb=1">Новости сайта</a></h2>
-<div class="b_caption"><p class="b_lineclamp2">Свежие <strong>новости</strong> дня</p></div></li>
-<li class="b_algo"><h2><a href="https://other.ru/page">Другая страница</a></h2><p>Описание другой</p></li>
-<li class="b_ad"><h2><a href="https://ads.example/">Реклама</a></h2></li></ol>"""
+BING = """<?xml version="1.0" encoding="utf-8" ?><rss version="2.0"><channel><title>Bing: курс</title>
+<link>http://www.bing.com:80/search?q=x</link><item><title>Новости сайта &amp; курс</title><link>https://site.ru/news</link>
+<description>Свежие новости дня: курс доллара</description><pubDate>ср, 14 окт. 2026 00:50:00 GMT</pubDate></item>
+<item><title><![CDATA[Другая страница]]></title><link>https://other.ru/page</link><description>Описание другой</description></item>
+<item><title>Без адреса</title><link>javascript:alert(1)</link><description>x</description></item></channel></rss>"""
 
 PAGE = """<html><head><title> Курс доллара  </title><script>var x = "не текст";</script><style>p{}</style></head>
 <body><nav><a href="/">Главная</a> <a href="/n">Новости</a></nav><header>Шапка сайта</header>
@@ -55,10 +55,42 @@ class Parsers(unittest.TestCase):
         self.assertEqual(r[0]["snippet"], "Первый сниппет")
 
     def test_bing(self):
-        r = ws.bing_html(BING)
-        self.assertEqual([(x["title"], x["url"]) for x in r], [("Новости сайта", "https://site.ru/news"), ("Другая страница", "https://other.ru/page")])
-        self.assertEqual(r[0]["snippet"], "Свежие новости дня")
+        r = ws.bing_rss(BING)
+        self.assertEqual([(x["title"], x["url"]) for x in r], [("Новости сайта & курс", "https://site.ru/news"), ("Другая страница", "https://other.ru/page")])
+        self.assertEqual(r[0]["snippet"], "Свежие новости дня: курс доллара")
         self.assertEqual(r[1]["snippet"], "Описание другой")
+
+    def test_relevant(self):
+        # a search page that took the server for a robot answers another question: such results are left out
+        found = [{"title": "Фолклендские острова — Википедия", "url": "https://a.ru", "snippet": "Местное время и дата"},
+                 {"title": "Спартак — Родина, 15 октября", "url": "https://b.ru", "snippet": "Кубок России, начало в 20:45"},
+                 {"title": "Родина Спартака", "url": "https://c.ru", "snippet": "история клуба"},
+                 {"title": "Спартак", "url": "https://d.ru", "snippet": "новости клуба"}]
+        self.assertEqual([r["url"] for r in ws.relevant(found, "Кубок России Спартак Родина дата и время")], ["https://b.ru", "https://c.ru"])
+        self.assertEqual([r["url"] for r in ws.relevant(found, "Спартак сегодня")], ["https://b.ru", "https://c.ru", "https://d.ru"])
+        self.assertEqual(ws.relevant(found, "дата и время 2026"), found)  # nothing but common words: all stay
+
+    def test_search_merges_engines(self):
+        old = ws.ENGINES
+        try:
+            a = [{"title": f"Спартак {i}", "url": f"https://a.ru/{i}", "snippet": ""} for i in range(3)]
+            b = [{"title": "Франция", "url": "https://fr.ru", "snippet": ""}, {"title": "Спартак 0", "url": "https://a.ru/0", "snippet": ""},
+                 {"title": "Спартак Б", "url": "https://b.ru", "snippet": ""}]
+            asked = []
+            wiki = lambda q: asked.append(q) or [{"title": "Спартак (клуб)", "url": "https://w.ru", "snippet": ""}]
+            ws.ENGINES = [("duckduckgo", lambda q: a), ("bing", lambda q: b), ("wikipedia", wiki)]
+            found, name = ws.search("Спартак")
+            self.assertEqual([r["url"] for r in found], ["https://a.ru/0", "https://a.ru/1", "https://b.ru", "https://a.ru/2"])
+            self.assertEqual(name, "duckduckgo+bing")
+            def down(q):
+                raise OSError("blocked")
+            ws.ENGINES = [("duckduckgo", down), ("bing", lambda q: b), ("wikipedia", wiki)]
+            found, name = ws.search("Спартак")
+            self.assertEqual(([r["url"] for r in found], name), (["https://a.ru/0", "https://w.ru", "https://b.ru"], "bing+wikipedia"))
+            ws.ENGINES = [("duckduckgo", down), ("bing", lambda q: b[:1]), ("wikipedia", lambda q: [])]
+            self.assertEqual(ws.search("Спартак"), ([], None))
+        finally:
+            ws.ENGINES = old
 
     def test_page_text(self):
         title, text = ws.page_text(PAGE)
@@ -120,11 +152,12 @@ class Live(unittest.TestCase):
         works = {}
         for name, fn in ws.ENGINES:
             try:
-                works[name] = len(fn("курс доллара ЦБ"))
+                found = fn("курс доллара ЦБ")
+                works[name] = (len(found), len(ws.relevant(found, "курс доллара ЦБ")), [r["title"][:60] for r in found[:2]])
             except Exception as e:  # one engine down is not a failure, all of them is
                 works[name] = repr(e)[:120]
-        print("engines:", works)
-        self.assertTrue(any(isinstance(v, int) and v >= 2 for v in works.values()), works)
+        print("engines (found, about the question, first titles):", works)
+        self.assertTrue(any(isinstance(v, tuple) and v[1] >= 2 for v in works.values()), works)
 
     def test_gather_reads_pages(self):
         got = ws.gather("столица Австралии")
@@ -140,6 +173,8 @@ class Live(unittest.TestCase):
         for p in got["pages"]:
             print("\n==", p["url"], "\n" + "\n".join(ln for ln in p["text"].split("\n") if ws.WHEN.search(ln))[:800])
         self.assertTrue(got["pages"], "no page could be read")
+        about = [r for r in got["results"] if re.search(r"Спартак|Родин", r["title"] + r["snippet"])]
+        self.assertGreaterEqual(len(about) * 2, len(got["results"]), got["results"])  # not some other question's pages
         self.assertTrue(any(re.search(r"\b\d{1,2}:\d{2}\b", p["text"]) for p in got["pages"]), "no start time on the pages read")
 
 
