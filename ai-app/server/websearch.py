@@ -645,6 +645,141 @@ def gather(query, n_pages=4, page_chars=3500, budget=20.0):
     return {"engine": engine, "results": results, "pages": pages}
 
 
+# ---------- straight from the source: the weather, a league's table ----------
+# Questions a search page answers badly (a forecast, a standings table), answered from the source itself: Open-Meteo
+# (free, no key) for the weather; Sports.ru's table page (ESPN's data when it does not open) for a league.
+
+WEATHER_ASK = re.compile(r"погод|дожд|\bснег|осадк|\bветер\b|\bветр[аеуы]?\b|\bгроз[аыу]?\b|заморозк", re.I)
+WEATHER_WORDS = re.compile(r"^(?:погод\w*|прогноз\w*|температур\w*|градус\w*|дожд\w*|снег\w*|осадк\w*|ветр\w*|ветер|"
+                           r"гроз\w*|завтра|сегодня|послезавтра|сейчас|выходн\w*|недел\w*|утр\w*|вечер\w*|ночь\w*|днем|"
+                           r"какая|какой|будет|будут|ли|в|во|на|по|для|и|а|что|там|за|через|дня|дней|дни|часов|часам|"
+                           r"\d+)$", re.I)
+WMO = {0: "ясно", 1: "в основном ясно", 2: "переменная облачность", 3: "пасмурно", 45: "туман", 48: "туман с изморозью",
+       51: "слабая морось", 53: "морось", 55: "сильная морось", 56: "ледяная морось", 57: "ледяная морось",
+       61: "небольшой дождь", 63: "дождь", 65: "сильный дождь", 66: "ледяной дождь", 67: "ледяной дождь",
+       71: "небольшой снег", 73: "снег", 75: "сильный снег", 77: "снежная крупа", 80: "ливень", 81: "ливни",
+       82: "сильные ливни", 85: "снегопад", 86: "сильный снегопад", 95: "гроза", 96: "гроза с градом", 99: "гроза с градом"}
+DAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+
+
+def _json(url):
+    _, _, raw = fetch(url, limit=600_000)
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
+def place(words):
+    """The place a question names, as Open-Meteo knows it ({"name", "admin1", "country", "latitude", …}): two words
+    together («Нижний Новгород»), then each word as it is and without its ending («Казани» → «Казан» → Казань); of the
+    places a name gives, the most populous. At most 8 look-ups."""
+    tries = [" ".join(words[i:i + 2]) for i in range(len(words) - 1)]
+    for w in words:
+        tries += [w] + ([w[:-1]] if len(w) >= 5 else []) + ([w[:-2]] if len(w) >= 7 else [])
+    for name in list(dict.fromkeys(tries))[:8]:
+        found = _json("https://geocoding-api.open-meteo.com/v1/search?" +
+                      urlencode({"name": name, "count": 5, "language": "ru"})).get("results") or []
+        found = [r for r in found if r.get("name", "").lower().startswith(name.lower()[:4])]
+        if found:
+            return max(found, key=lambda r: r.get("population") or 0)
+    return None
+
+
+def weather_page(text):
+    """The forecast for the place the question names: now, by hours for today and tomorrow, by days for a week.
+    None: not a question about the weather; {"ask": …} when it names no place (the person is asked which)."""
+    if not WEATHER_ASK.search(text):
+        return None
+    words = [w for w in re.findall(r"[A-Za-zА-Яа-яЁё-]+", text) if not WEATHER_WORDS.match(w) and len(w) >= 3]
+    where = place(list(dict.fromkeys(words))[:6]) if words else None
+    if not where:  # «погода» and no place: the person is asked; only «дождь» or «снег»: an ordinary search
+        return {"ask": "Человек спрашивает о погоде, но город не назван (или такого не нашлось): спроси коротко, "
+                       "для какого города."} if re.search(r"погод", text, re.I) else None
+    data = _json("https://api.open-meteo.com/v1/forecast?" + urlencode({
+        "latitude": where["latitude"], "longitude": where["longitude"], "timezone": "auto", "forecast_days": 7,
+        "wind_speed_unit": "ms",
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m",
+        "hourly": "temperature_2m,precipitation_probability,weather_code",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,"
+                 "wind_speed_10m_max"}))
+    cur, hourly, daily = data.get("current") or {}, data.get("hourly") or {}, data.get("daily") or {}
+    name = ", ".join(x for x in (where.get("name"), where.get("admin1"), where.get("country")) if x)
+    lines = [f"Погода: {name}. Местное время сейчас: {str(cur.get('time', '')).replace('T', ' ')}.",
+             f"Сейчас: {cur.get('temperature_2m')}°C (ощущается как {cur.get('apparent_temperature')}°C), "
+             f"{WMO.get(cur.get('weather_code'), '—')}, ветер {cur.get('wind_speed_10m')} м/с (порывы {cur.get('wind_gusts_10m')}), "
+             f"влажность {cur.get('relative_humidity_2m')}%.", "", "По часам:", "Время | °C | Осадки, % | Погода"]
+    now = str(cur.get("time", ""))[:13]
+    for i, at in enumerate(hourly.get("time") or []):
+        if at[:13] >= now and int(at[11:13]) % 3 == 0 and len(lines) < 22:
+            lines.append(f"{at[8:10]}.{at[5:7]} {at[11:16]} | {hourly['temperature_2m'][i]} | "
+                         f"{hourly['precipitation_probability'][i]} | {WMO.get(hourly['weather_code'][i], '—')}")
+    lines += ["", "По дням:", "День | Ночью °C | Днём °C | Осадки, мм (вероятность, %) | Ветер, м/с | Погода"]
+    for i, day in enumerate(daily.get("time") or []):
+        wd = DAYS[time.strptime(day, "%Y-%m-%d").tm_wday]
+        lines.append(f"{wd} {day[8:10]}.{day[5:7]} | {daily['temperature_2m_min'][i]} | {daily['temperature_2m_max'][i]} | "
+                     f"{daily['precipitation_sum'][i]} ({daily['precipitation_probability_max'][i]}) | "
+                     f"{daily['wind_speed_10m_max'][i]} | {WMO.get(daily['weather_code'][i], '—')}")
+    return {"title": f"Прогноз погоды: {where.get('name')} (Open-Meteo)", "url": "https://open-meteo.com/", "text": "\n".join(lines)}
+
+
+TABLE_ASK = re.compile(r"таблиц|турнирн|положени\w*\s+команд|кто\s+(?:лидир|первы|на\s+первом)|сколько\s+очков|"
+                       r"какое\s+место|на\s+каком\s+месте", re.I)
+LEAGUES = [  # (the words that name it, Sports.ru's table page, ESPN's league, its name)
+    (r"рпл|рфпл|премьер[- ]?лиг\w*\s+росс|чемпионат\w*\s+росс|российск\w+\s+премьер", "football/tournament/rfpl", "rus.1", "РПЛ"),
+    (r"\bапл\b|англи|премьер[- ]?лиг\w*\s+англ", "football/tournament/epl", "eng.1", "АПЛ"),
+    (r"испан|ла\s*лиг|laliga", "football/tournament/la-liga", "esp.1", "Ла Лига"),
+    (r"германи|бундеслиг", "football/tournament/bundesliga", "ger.1", "Бундеслига"),
+    (r"итали|сери[яи]\s+а\b", "football/tournament/seria-a", "ita.1", "Серия А"),
+    (r"франци|лиг[аеи]\s+1\b", "football/tournament/ligue-1", "fra.1", "Лига 1"),
+    (r"\bкхл\b", "hockey/tournament/khl", None, "КХЛ"),
+]
+
+
+def table_page(text):
+    """The standings table of the league the question asks about (the Russian one when it says just «чемпионат» or
+    «футбол»), as rows «1 | Динамо | 10 | … | 22». None: not such a question, or no table could be had."""
+    if not TABLE_ASK.search(text):
+        return None
+    league = next((lg for lg in LEAGUES if re.search(lg[0], text, re.I)), None)
+    if league is None and re.search(r"чемпионат|футбол|премьер[- ]?лиг", text, re.I):
+        league = LEAGUES[0]
+    if league is None:
+        return None
+    _, path, espn, name = league
+    url = f"https://www.sports.ru/{path}/table/"
+    try:
+        title, body = read_page(url, 100_000)
+        rows = [ln for ln in body.split("\n") if ln.count(" | ") >= 3]
+        if len(rows) >= 6:
+            rows = [re.sub(r"\s*\|(?:\s*\|)*\s*", " | ", r).strip(" |") for r in rows]  # (empty cells: the crests)
+            return {"title": title or f"Турнирная таблица: {name}", "url": url, "text": f"Турнирная таблица {name}:\n" + "\n".join(rows[:45])}
+    except Exception:
+        pass
+    if not espn:
+        return None
+    data = _json(f"https://site.api.espn.com/apis/v2/sports/soccer/{espn}/standings")
+    entries = ((data.get("children") or [{}])[0].get("standings") or {}).get("entries") or []
+    stat = lambda e, k: next((s.get("displayValue") for s in e.get("stats", []) if s.get("abbreviation") == k), "")
+    rows = ["# | Команда | И | В | Н | П | Мячи | Разница | Очки"]
+    for i, e in enumerate(entries):  # (in the table's order)
+        rows.append(f"{i + 1} | {e['team']['displayName']} | {stat(e, 'GP')} | {stat(e, 'W')} | {stat(e, 'D')} | {stat(e, 'L')} | "
+                    f"{stat(e, 'F')}:{stat(e, 'A')} | {stat(e, 'GD')} | {stat(e, 'P')}")
+    if len(rows) < 6:
+        return None
+    return {"title": f"Турнирная таблица: {name} (ESPN)", "url": f"https://www.espn.com/soccer/standings/_/league/{espn}",
+            "text": f"Турнирная таблица {name} (названия команд по-английски — переведи):\n" + "\n".join(rows)}
+
+
+def direct(text):
+    """The weather or a league's table straight from its source (None: the question is about something else)."""
+    for fn in (weather_page, table_page):
+        try:
+            got = fn(text)
+        except Exception:
+            got = None
+        if got:
+            return got
+    return None
+
+
 if __name__ == "__main__":  # python3 websearch.py "вопрос": what the helper would read
     import sys
     got = gather(" ".join(sys.argv[1:]) or "курс доллара ЦБ сегодня")

@@ -128,6 +128,76 @@ class Parsers(unittest.TestCase):
         finally:
             ws.search, ws.read_page = old
 
+    def test_direct_weather(self):
+        # the weather from Open-Meteo: the place found by its name's beginning («Казани» → Казань), now, hours, days
+        import json as js
+        asked = []
+
+        def fake(url):
+            asked.append(url)
+            if "geocoding" in url:
+                name = ws.parse_qs(ws.urlsplit(url).query)["name"][0]
+                ok = "Казань".startswith(name) and len(name) >= 4
+                return {"results": [{"name": "Казань", "admin1": "Татарстан", "country": "Россия", "latitude": 55.79,
+                                     "longitude": 49.12, "population": 1243500}] if ok else []}
+            hours = [f"2026-10-14T{h:02d}:00" for h in range(24)] + [f"2026-10-15T{h:02d}:00" for h in range(24)]
+            return {"current": {"time": "2026-10-14T21:00", "temperature_2m": 15.9, "apparent_temperature": 14.2,
+                                "relative_humidity_2m": 80, "weather_code": 3, "wind_speed_10m": 3.1, "wind_gusts_10m": 7.0},
+                    "hourly": {"time": hours, "temperature_2m": [10] * 48, "precipitation_probability": [20] * 48,
+                               "weather_code": [61] * 48},
+                    "daily": {"time": ["2026-10-14", "2026-10-15"], "weather_code": [3, 61], "temperature_2m_max": [16, 12],
+                              "temperature_2m_min": [8, 6], "precipitation_sum": [0, 4.2], "precipitation_probability_max": [10, 80],
+                              "wind_speed_10m_max": [4, 6]}}
+        old = ws._json
+        try:
+            ws._json = fake
+            pg = ws.direct("погода Казань завтра Какая погода будет завтра в Казани?")
+            self.assertEqual(pg["url"], "https://open-meteo.com/")
+            self.assertIn("Погода: Казань, Татарстан, Россия", pg["text"])
+            self.assertIn("Сейчас: 15.9°C (ощущается как 14.2°C), пасмурно, ветер 3.1 м/с", pg["text"])
+            self.assertIn("14.10 21:00 | 10 | 20 | небольшой дождь", pg["text"])
+            self.assertIn("чт 15.10 | 6 | 12 | 4.2 (80) | 6 | небольшой дождь", pg["text"])
+            del asked[:]
+            pg = ws.direct("Какая погода будет завтра в Казани?")  # as asked: «Казани» → «Казан» → Казань
+            self.assertIn("Погода: Казань", pg["text"])
+            self.assertLessEqual(sum("geocoding" in u for u in asked), 8)
+            self.assertIn("ask", ws.direct("какая погода завтра?"))
+            self.assertIsNone(ws.direct("будет ли дождь завтра"))  # no «погода», no place: an ordinary search
+            for q in ("температура у ребёнка 38", "ветрянка у сына", "угроза взлома", "таблица умножения на 7"):
+                self.assertIsNone(ws.direct(q), q)
+        finally:
+            ws._json = old
+
+    def test_direct_table(self):
+        # a league's table: Sports.ru's page, its rows without the crests' empty cells; ESPN's when it does not open
+        page = "<h1>Турнирная таблица РПЛ</h1><table><tr><th>#</th><th>Команда</th><th></th><th>И</th><th>О</th></tr>" + "".join(
+            f"<tr><td>{i}</td><td>Команда {i}</td><td><img></td><td>10</td><td>{30 - i}</td></tr>" for i in range(1, 17)) + "</table>"
+        old = ws.read_page, ws._json
+        try:
+            got = []
+            ws.read_page = lambda url, limit=4000, query=None: got.append(url) or ws.page_text(page)
+            pg = ws.direct("таблица чемпионата России по футболу")
+            self.assertEqual(got, ["https://www.sports.ru/football/tournament/rfpl/table/"])
+            self.assertIn("# | Команда | И | О\n1 | Команда 1 | 10 | 29\n", pg["text"])
+            ws.direct("турнирная таблица АПЛ")
+            self.assertEqual(got[-1], "https://www.sports.ru/football/tournament/epl/table/")
+            ws.direct("кто лидирует в РПЛ")
+            self.assertEqual(got[-1], "https://www.sports.ru/football/tournament/rfpl/table/")
+
+            def down(url, limit=4000, query=None):
+                raise ws.Blocked("403")
+            ws.read_page = down
+            stats = lambda p, w: [{"abbreviation": k, "displayValue": v} for k, v in
+                                  (("GP", "10"), ("W", w), ("D", "1"), ("L", "2"), ("F", "15"), ("A", "8"), ("GD", "+7"), ("P", p))]
+            ws._json = lambda url: {"children": [{"standings": {"entries": [
+                {"team": {"displayName": f"Team {i}"}, "stats": stats(str(30 - i), "7")} for i in range(1, 17)]}}]}
+            pg = ws.direct("таблица РПЛ")
+            self.assertIn("1 | Team 1 | 10 | 7 | 1 | 2 | 15:8 | +7 | 29", pg["text"])
+            self.assertIn("по-английски", pg["text"])
+            self.assertIsNone(ws.direct("таблица КХЛ"))  # (no ESPN for it)
+        finally:
+            ws.read_page, ws._json = old
+
     def test_page_text(self):
         title, text = ws.page_text(PAGE)
         self.assertEqual(title, "Курс доллара")
@@ -197,6 +267,18 @@ class Guard(unittest.TestCase):
 
 class Live(unittest.TestCase):
     """The real search pages (needs the internet)."""
+
+    def test_b_weather(self):  # Open-Meteo, as asked («в Казани»)
+        pg = ws.direct("Какая погода будет завтра в Казани?")
+        print("weather:\n" + pg["text"][:900])
+        self.assertIn("Погода: Казань, Татарстан", pg["text"])
+        self.assertGreaterEqual(pg["text"].count("\n"), 12)
+
+    def test_c_tables(self):  # Sports.ru's tables (or ESPN's)
+        for q, team in (("таблица РПЛ", "Зенит"), ("турнирная таблица АПЛ", "Арсенал"), ("таблица КХЛ", "СКА")):
+            pg = ws.direct(q)
+            print(f"table «{q}»:", pg and pg["url"], "\n" + (pg["text"][:700] if pg else ""))
+            self.assertTrue(pg and team in pg["text"] and pg["text"].count("\n") >= 12, q)
 
     def test_engines(self):
         works = {}
