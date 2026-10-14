@@ -13,7 +13,7 @@
   }
   function ago(ts) {
     const s = Math.max(0, Date.now() / 1000 - ts);
-    return s < 3600 ? Math.max(1, Math.round(s / 60)) + " мин" : s < 86400 ? Math.round(s / 3600) + " ч" : Math.round(s / 86400) + " дн.";
+    return s < 3600 ? Math.max(1, Math.round(s / 60)) + "\u00a0мин" : s < 86400 ? Math.round(s / 3600) + "\u00a0ч" : Math.round(s / 86400) + "\u00a0дн.";
   }
   function when(ts) {  // "сегодня 14:05", "вчера 09:12", "3 окт 18:40"
     const d = new Date(ts * 1000), now = new Date();
@@ -800,7 +800,8 @@
     }
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      scroll.append(diskRow(), videoCard(), trendsCard(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
+      // the main job first (people), then the services the helper uses
+      scroll.append(el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
         el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Приложение помощника — ссылка",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
       const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется помощником" }));
@@ -814,7 +815,7 @@
           u.id === d.me ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delPerson(u); } }),
           "›"));
       }
-      scroll.append(list);
+      scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), diskRow(), videoCard(), trendsCard());
     }
     async function delPerson(u) {
       if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
@@ -839,42 +840,57 @@
     }
     // ---- video from a photo on Hugging Face: the owner's free minutes; the owner has it, others when allowed ----
     let video = null;
+    const busyBtn = (b, text) => { b.disabled = true; b.dataset.was = b.textContent; b.textContent = text; };
+    const freeBtn = (b) => { b.disabled = false; b.textContent = b.dataset.was || b.textContent; };
     function videoCard() {
       const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🎬 Видео из фото: проверяю…" }));
       const fill = (v) => {
         video = v;
         card.innerHTML = "";
+        const n = (v.people || []).length;
+        const sp = v.on ? spaceState(v) : null;
         card.append(el("div", { class: "row" },
           el("div", { class: "grow" }, "🎬 Видео из фото" + (v.on ? " ✓" : ""),
-            el("small", { text: v.on ? `Hugging Face${v.name ? " «" + v.name + "»" : ""}. Вам — сразу; другим — «🎬 Видео из фото» в их карточке ниже`
-              + (v.people.length ? ` (включено: ${v.people.join(", ")})` : "") + ". " + spaceLine(v)
-              : "Короткое видео из фото («оживи») и замена лиц в роликах в HD на бесплатных минутах Hugging Face." })),
+            el("small", { text: v.on ? `Hugging Face${v.name ? " «" + v.name + "»" : ""}. Вам — сразу; другим — переключатель «🎬 Видео» в карточке человека (список ниже)`
+              + (n ? `: включено у ${n}` : "") + "."
+              : "Короткое видео из фото («оживи») и «Я в ролике» в HD на бесплатных минутах Hugging Face." }),
+            sp ? el("small", { style: "display:block;margin-top:4px;color:" + sp.color, text: sp.short }) : null),
           v.env ? null : el("button", { class: "btn" + (v.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: v.on ? "Настроить" : "Подключить",
             onclick: () => videoSetup(v, fill) })));
       };
       panel({ op: "hf_get" }).then((v) => (v.t === "done" ? fill(v) : card.remove())).catch(() => card.remove());
       return card;
     }
-    // the own face-swap Space on Hugging Face's GPUs (made by the server with a Write token)
-    function spaceLine(v) {
+    // «Я в ролике» в HD: the own face-swap service on Hugging Face's GPUs (the server makes it with a Write token).
+    // short: for the card (Russian, one line); long: for the sheet (the server's own words too)
+    function spaceState(v) {
       const sp = v.space || {};
-      if (!v.write) return "⚡ HD-замена лиц в роликах: нужен токен типа Write (сейчас — Read).";
-      if (sp.ready) return "⚡ Свой сервис замены лиц на видеокарте готов — ролики в HD.";
-      if (sp.error) return "⚡ Свой сервис замены лиц: " + sp.error + ".";
-      return "⚡ Свой сервис замены лиц создаётся — пара минут.";
+      const kind = { read: "Read", fineGrained: "Fine-grained" }[v.role] || v.role || "Read";
+      if (!v.write) return { color: "var(--muted)", short: `⚡ «Я в ролике» в HD: нужен токен типа Write (сейчас — ${kind}).`,
+        long: `⚡ Для «Я в ролике» в HD нужен токен типа Write — сейчас у вас ${kind}. Сделайте новый токен по шагам ниже и вставьте его.` };
+      if (sp.ready) return { color: "var(--ok, #1a7f37)", short: "⚡ «Я в ролике» в HD: готов.", long: "⚡ «Я в ролике» в HD готов: ролики делаются на видеокарте за 1–3 минуты." };
+      if (sp.error) {
+        const plain = /^[А-Яа-яЁё«]/.test(sp.error) && sp.error.length < 140;
+        return { color: "var(--danger-ink)", short: "⚡ «Я в ролике» в HD: " + (plain ? sp.error : "не создался — подробности в «Настроить»") + ".",
+          long: "⚡ «Я в ролике» в HD не работает: " + sp.error + "." };
+      }
+      return { color: "var(--muted)", short: "⚡ «Я в ролике» в HD: готовится — пара минут.", long: "⚡ «Я в ролике» в HD готовится в вашем аккаунте — пара минут." };
     }
     function videoSetup(v, fill) {
       sheet("🎬 Видео из фото", (box, close) => {
         const inp = el("input", { class: "input", placeholder: "hf_…", autocomplete: "off", spellcheck: "false" });
+        const sp = v.on ? spaceState(v) : null;
         box.append(
-          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Видео делают модели на видеокартах Hugging Face "
-            + "(Wan 2.2, запасная — LTX-2.3). С токеном типа Write сервер ещё и сам создаст в вашем аккаунте свой закрытый сервис "
-            + "замены лиц: «Я в ролике» будет в HD за 1–3 минуты. Бесплатные минуты (5 в день) — вашего аккаунта, общие на всех, кому вы включите." }),
+          sp ? el("div", { style: "font-size:15px;margin:-6px 0 10px;color:" + sp.color, text: sp.long }) : "",
+          el("div", { style: "font-size:14px;color:var(--muted);margin:" + (sp ? "0" : "-6px") + " 0 10px", text: "Видео делают нейросети на видеокартах "
+            + "Hugging Face. С токеном типа Write сервер сам создаст в вашем аккаунте закрытый сервис — и «Я в ролике» будет в HD за 1–3 минуты. "
+            + "Бесплатно 5 минут видеокарты в день — на всех, кому вы включите." }),
+          el("div", { style: "font-size:14px;margin:0 0 10px", text: "Новый аккаунт: «Я в ролике» в HD заработает через 30 дней после регистрации (и после подтверждения почты), остальное — сразу." }),
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-            el("li", { text: "Войдите на huggingface.co (нужна только почта; для своего сервиса почта должна быть подтверждена, аккаунту — больше 30 дней)." }),
-            el("li", { text: "«🔑 Получить токен» → «Create new token» → тип «Write» → «Create token» → скопируйте (начинается с hf_)." }),
-            el("li", { text: "Вставьте сюда и нажмите «✅ Подключить». В чаты токен не присылайте." })),
-          el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens",
+            el("li", { text: "Войдите на huggingface.co (нужна только почта)." }),
+            el("li", { text: "«🔑 Получить токен» → вверху выберите «Write» → в «Token name» впишите любое имя, например family → «Create token» → скопируйте (начинается с hf_)." }),
+            el("li", { text: "Вставьте сюда и нажмите «✅ " + (v.on ? "Заменить токен" : "Подключить") + "». В чаты токен не присылайте." })),
+          el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens/new?tokenType=write",
             style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Получить токен" }),
           inp,
           el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
@@ -882,19 +898,22 @@
             try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
             if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
           } }),
-          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить", onclick: async () => {
+          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ " + (v.on ? "Заменить токен" : "Подключить"), onclick: async (e) => {
+            const b = e.currentTarget;
+            if (!inp.value.trim()) { toast("Сначала вставьте токен"); return; }
+            busyBtn(b, "⏳ Проверяю токен…");
             try {
               const end = await panel({ op: "hf_set", token: inp.value.trim() });
-              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
               close(); fill(end);
-              toast(`✅ Подключено${end.name ? ": " + end.name : ""}. Пишите в «🖼 Фото»: «оживи»`, 5000);
-            } catch (e) { toast(problem(e)); }
+              toast(`✅ Подключено${end.name ? ": " + end.name : ""}. Видео из фото — во вкладке «🎬 Видео»: «🖼️ Оживить фото»`, 5000);
+            } catch (x) { toast(problem(x)); freeBtn(b); }
           } }),
-          v.on && v.write ? el("button", { class: "btn line wide", style: "margin-top:14px", text: "🔄 Проверить свой сервис замены лиц", onclick: async (e) => {
+          v.on && v.write ? el("button", { class: "btn line wide", style: "margin-top:14px", text: "🔄 Проверить HD-сервис", onclick: async (e) => {
             const b = e.currentTarget;
-            b.disabled = true; b.textContent = "Проверяю… до минуты";
-            try { const end = await panel({ op: "hf_space" }); close(); fill(end); toast(spaceLine(end), 6000); }
-            catch (x) { toast(problem(x)); b.disabled = false; b.textContent = "🔄 Проверить свой сервис замены лиц"; }
+            busyBtn(b, "Проверяю… до минуты");
+            try { const end = await panel({ op: "hf_space" }); close(); fill(end); toast(spaceState(end).short, 6000); }
+            catch (x) { toast(problem(x)); freeBtn(b); }
           } }) : "",
           v.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "Отключить видео из фото", onclick: async () => {
             if (!(await confirmBox("Отключить видео из фото? У всех пропадёт «🎬 Оживить», токен удалится с сервера.", "Отключить"))) return;
@@ -903,16 +922,22 @@
       });
     }
     // ---- «🔥 Тренды»: the formats people film most on Instagram now (the server looks once a day), with their proof ----
+    const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+    const dayRu = (iso) => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || ""); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]}` : iso || ""; };
+    const daysRu = (n) => n + " " + (n % 10 === 1 && n % 100 !== 11 ? "день" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "дня" : "дней");
+    const coverrBad = (c) => !!(c.on && c.last && /ключ/.test(c.last.error || ""));  // the key refused: a new one is needed
     function trendsCard() {
       const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🔥 Тренды: проверяю…" }));
       const fill = (v) => {
         card.innerHTML = "";
         const top = v.top || [];
-        const when = v.at ? "проверено " + ago(v.at) + " назад" : "ещё не проверялось";
+        const when = v.at ? "Проверено " + ago(v.at) + " назад" : "Ещё не проверялось";
+        const c = v.coverr || {};
         card.append(el("div", { class: "row" },
           el("div", { class: "grow" }, "🔥 Тренды Instagram" + (top.length ? " · " + top.length : ""),
-            el("small", { text: (top.length ? top.map((t) => t.title).join(", ") + ". " : "Пока нет подтверждённых трендов. ")
-              + when + (v.error ? " — " + v.error : "") + (v.coverr.on ? " · ролики с Coverr" : "") })),
+            el("small", { text: (top.length ? top.map((t) => t.title).join(", ") + ". " : "Пока нет подтверждённых трендов. ") + when + "."
+              + (coverrBad(c) ? " ⚠️ Coverr: нужен новый ключ." : c.on ? " Новые ролики — с Coverr." : "") }),
+            v.error ? el("small", { style: "display:block;margin-top:4px;color:var(--danger-ink)", text: "⚠️ Последняя проверка: " + v.error }) : null),
           el("button", { class: "btn line", style: "flex:none;padding:8px 14px", text: "Подробнее", onclick: () => trendsSheet(v, fill) })));
       };
       panel({ op: "trends_get" }).then((v) => (v.t === "done" ? fill(v) : card.remove())).catch(() => card.remove());
@@ -920,59 +945,71 @@
     }
     function trendsSheet(v, fill) {
       sheet("🔥 Тренды Instagram", (box, close) => {
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Сервер раз в день ищет, какие форматы роликов "
-          + "сейчас в топе Instagram. Тренд попадает сюда, только если на странице есть слова, что он в тренде; не подтверждается 3 дня — уходит. "
-          + `В галерее «Я в ролике» / «Я на фото» он первый: роликов ${v.video}, фото ${v.photo}.` }));
-        for (const t of v.top || []) {
+        const top = v.top || [];
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Сервер раз в день ищет, какие ролики сейчас "
+          + "в топе Instagram. Тренд попадает сюда, только если на странице прямо написано, что он в тренде; 3 дня без подтверждения — уходит. "
+          + (v.video || v.photo ? `Ролики под эти тренды стоят первыми в галерее «Я в ролике» (сейчас ${v.video})` + (v.photo ? ` и «Я на фото» (${v.photo}).` : ".") : "") }));
+        if (v.error) box.append(el("div", { class: "card", style: "margin:0 0 8px;color:var(--danger-ink)", text: "⚠️ Последняя проверка не удалась: "
+          + v.error + (top.length ? ". Ниже — тренды прошлой проверки." : ".") }));
+        for (const t of top) {
           const src = el("div", { style: "font-size:13px;color:var(--muted);margin-top:4px" });
-          for (const s of t.sources || []) {
-            src.append(el("div", { style: "margin-top:4px" }, el("a", { href: s.url, target: "_blank", rel: "noopener", text: s.site }), " — «" + s.quote + "»"));
+          const s = (t.sources || [])[0];
+          if (s) {
+            src.append(el("div", { style: "margin-top:4px" }, el("a", { href: s.url, target: "_blank", rel: "noopener", text: s.site,
+              style: "display:inline-block;padding:6px 0" }), " — «" + s.quote + "»"));
+            if (t.sources.length > 1) src.append(el("div", { text: "и ещё " + (t.sources.length - 1) + (t.sources.length - 1 === 1 ? " сайт" : " сайта") }));
           }
           box.append(el("div", { class: "card", style: "margin:0 0 8px" },
-            el("b", { text: t.title + (t.people > 1 ? " · 👥 " + t.people : "") }),
+            el("b", { text: t.title + (t.people === 2 ? " · вдвоём" : t.people > 2 ? " · втроём" : "") }),
             t.why ? el("div", { style: "font-size:14px;margin-top:2px", text: t.why }) : "",
-            el("div", { style: "font-size:12px;color:var(--muted);margin-top:2px", text: `в топе с ${t.first} · подтверждён дней: ${t.days}` }), src));
+            el("div", { style: "font-size:12px;color:var(--muted);margin-top:2px", text: `В топе с ${dayRu(t.first)} · подтверждён ${daysRu(t.days)}` }), src));
         }
-        if (!(v.top || []).length) box.append(el("p", { class: "muted", text: v.error ? "⚠️ " + v.error : "Пока нет подтверждённых трендов." }));
-        box.append(el("button", { class: "btn wide", style: "margin-top:6px", text: "🔄 Пересмотреть сейчас", onclick: async (e) => {
+        if (!top.length && !v.error) box.append(el("p", { class: "muted", text: "Пока нет подтверждённых трендов." }));
+        box.append(el("button", { class: "btn line wide", style: "margin-top:6px", text: "🔄 Пересмотреть сейчас", onclick: async (e) => {
           const b = e.currentTarget;
-          b.disabled = true; b.textContent = "Ищу… до 3 минут";
+          busyBtn(b, "Ищу… до 3 минут");
           try {
             const end = await panel({ op: "trends_now" });
-            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); b.disabled = false; b.textContent = "🔄 Пересмотреть сейчас"; return; }
-            close(); fill(end); toast("🔥 Тренды пересмотрены", 4000);
-          } catch (x) { toast(problem(x)); b.disabled = false; b.textContent = "🔄 Пересмотреть сейчас"; }
+            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
+            close(); fill(end);
+            toast(end.error ? "⚠️ Не удалось пересмотреть: " + end.error + ". Показаны тренды прошлой проверки." : "🔥 Тренды пересмотрены", 6000);
+          } catch (x) { toast(problem(x)); freeBtn(b); }
         } }));
         // Coverr: new vertical clips for each trend through its free API (the owner's key)
         const c = v.coverr || {};
-        box.append(el("h3", { style: "margin:18px 0 4px", text: "🎬 Новые ролики под тренды — Coverr" + (c.on ? " ✓" : "") }),
+        box.append(el("h3", { style: "margin:18px 0 4px", text: "🎬 Новые ролики под тренды — Coverr" + (c.on && !coverrBad(c) ? " ✓" : "") }),
+          coverrBad(c) ? el("div", { style: "font-size:14px;margin:0 0 8px;color:var(--danger-ink)", text: "⚠️ " + c.last.error + ". Вставьте новый ключ и нажмите «✅ Заменить ключ»." }) : "",
           el("div", { style: "font-size:14px;color:var(--muted);margin:0 0 8px", text: c.on
-            ? "Каждый день сервер берёт с Coverr до 3 новых вертикальных роликов на каждый тренд; лицо проверяется как у всех шаблонов."
-              + (c.last && c.last.error ? " Последний раз: " + c.last.error : c.last && c.last.kept != null ? ` Сейчас роликов: ${c.last.kept}.` : "")
-            : "Бесплатный ключ Coverr: сервер сам будет брать новые вертикальные ролики под каждый тренд (до 50 запросов в час бесплатно)." }));
+            ? "Каждый день сервер берёт с Coverr до 3 новых вертикальных роликов на каждый тренд; лица проверяются, как у всех шаблонов."
+              + (!coverrBad(c) && c.last && c.last.error ? ` Последний раз ${c.last.error} — завтра снова.` : "")
+              + (!coverrBad(c) && c.last && c.last.kept != null ? ` Сейчас роликов: ${c.last.kept}.` : "")
+            : "С бесплатным ключом Coverr сервер сам будет брать новые вертикальные ролики под каждый тренд." }));
         if (!c.env) {
           const inp = el("input", { class: "input", placeholder: "ключ API Coverr", autocomplete: "off", spellcheck: "false" });
           box.append(
-            c.on ? "" : el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
+            c.on && !coverrBad(c) ? "" : el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
               el("li", { text: "Откройте «🔑 Кабинет Coverr» и войдите (почта или Google)." }),
               el("li", { text: "Создайте приложение (App) — ключ API бесплатный (статус Demo)." }),
-              el("li", { text: "Скопируйте ключ, вставьте сюда и нажмите «✅ Подключить». В чаты ключ не присылайте." })),
-            c.on ? "" : el("a", { class: "btn line wide", href: "https://coverr.co/developers", target: "_blank", rel: "noopener",
+              el("li", { text: "Скопируйте ключ, вставьте сюда и нажмите «✅ " + (c.on ? "Заменить ключ" : "Подключить") + "». В чаты ключ не присылайте." })),
+            c.on && !coverrBad(c) ? "" : el("a", { class: "btn line wide", href: "https://coverr.co/developers", target: "_blank", rel: "noopener",
               style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Кабинет Coverr" }),
-            c.on ? "" : inp,
-            c.on ? "" : el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
+            inp,
+            el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
               let t = "";
               try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
               if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
             } }),
-            c.on ? "" : el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить", onclick: async () => {
+            el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ " + (c.on ? "Заменить ключ" : "Подключить"), onclick: async (e) => {
+              const b = e.currentTarget;
+              if (!inp.value.trim()) { toast("Сначала вставьте ключ"); return; }
+              busyBtn(b, "⏳ Проверяю ключ…");
               try {
                 const end = await panel({ op: "coverr_set", key: inp.value.trim() });
-                if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+                if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
                 close(); fill(end); toast("✅ Coverr подключён — новые ролики появятся в галерее к утру", 5000);
-              } catch (e) { toast(problem(e)); }
+              } catch (x) { toast(problem(x)); freeBtn(b); }
             } }),
-            c.on ? el("button", { class: "btn line wide", style: "margin-top:8px;color:var(--danger-ink)", text: "Отключить Coverr", onclick: async () => {
+            c.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "Отключить Coverr", onclick: async () => {
               if (!(await confirmBox("Отключить Coverr? Его ролики уйдут из галереи, ключ удалится с сервера.", "Отключить"))) return;
               try { const end = await panel({ op: "coverr_off" }); close(); fill(end); toast("Coverr отключён"); } catch (e) { toast(problem(e)); }
             } }) : "");
