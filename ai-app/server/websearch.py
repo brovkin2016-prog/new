@@ -122,7 +122,7 @@ def decode(raw, ctype):
 SKIP_TAGS = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form", "iframe", "template",
              "button", "select", "option", "head"}
 BLOCK_TAGS = {"p", "div", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "br", "tr", "table", "section",
-              "article", "main", "blockquote", "pre", "dd", "dt", "hr", "figcaption", "td", "th"}
+              "article", "main", "blockquote", "pre", "dd", "dt", "hr", "figcaption"}
 VOID = {"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"}
 
 
@@ -132,20 +132,27 @@ class _Text(HTMLParser):
         self.parts, self.skip, self.title, self.in_title = [], 0, "", False
         self.main_start = None  # where <article> or <main> began in parts
         self.about = ""  # the page's description
+        self.cells, self.in_cell = 0, 0  # a table's row is one line: «1 | Зенит | 12 | 27»
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIP_TAGS:
             self.skip += 1
         elif tag == "title":
             self.in_title = True
-        if tag in BLOCK_TAGS:
-            self.parts.append("\n")
+        if tag == "tr":
+            self.cells, self.in_cell = 0, 0
+        if tag in ("td", "th"):
+            self.parts.append(" | " if self.cells else "\n")
+            self.cells += 1
+            self.in_cell += 1
+        elif tag in BLOCK_TAGS and not self.in_cell:
+            self.parts.append("\n\x01" if tag in ("h1", "h2", "h3", "h4") else "\n")  # (a heading stays, short or not)
         if tag in ("article", "main") and self.main_start is None:
             self.main_start = len(self.parts)
         self._meta(tag, attrs)
 
     def handle_startendtag(self, tag, attrs):
-        if tag in BLOCK_TAGS:
+        if tag in BLOCK_TAGS and not self.in_cell:
             self.parts.append("\n")
         self._meta(tag, attrs)
 
@@ -160,7 +167,9 @@ class _Text(HTMLParser):
             self.skip -= 1
         elif tag == "title":
             self.in_title = False
-        if tag in BLOCK_TAGS:
+        if tag in ("td", "th"):
+            self.in_cell = max(0, self.in_cell - 1)
+        elif tag in BLOCK_TAGS and not self.in_cell:
             self.parts.append("\n")
 
     def handle_data(self, data):
@@ -265,10 +274,11 @@ def page_text(html):
     text = main if len(main.strip()) > 800 else whole
     lines = []
     for line in text.split("\n"):
-        line = re.sub(r"\s+", " ", line).strip()
+        heading = line.startswith("\x01")
+        line = re.sub(r"\s+", " ", line.replace("\x01", "")).strip()
         # menus and buttons are short; numbers (prices, dates, scores) and «A — B» (a match, a route) keep a short line
         if len(line) >= 40 or (len(line) >= 3 and re.search(r"\d", line)) or len(line.split()) >= 5 \
-                or re.search(r"\w\s[—–-]\s\w", line):
+                or re.search(r"\w\s[—–-]\s\w", line) or (heading and len(line) >= 3):
             if not lines or lines[-1] != line:
                 lines.append(line)
     bare = [bool(re.fullmatch(r"[\d:.,/ -]+", ln)) for ln in lines]  # a news feed's times: «20:35», «20:34», …

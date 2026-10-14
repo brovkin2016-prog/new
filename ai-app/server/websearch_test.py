@@ -136,6 +136,16 @@ class Parsers(unittest.TestCase):
         for junk in ("не текст", "Главная", "Шапка", "© 2026", "Поделиться"):
             self.assertNotIn(junk, text)
 
+    def test_tables(self):
+        # a standings table: each row one line, cells apart — the team names stay (alone they looked like a menu)
+        html = """<article><h2>Турнирная таблица РПЛ</h2><table><thead><tr><th>М</th><th>Команда</th><th>И</th><th>О</th></tr></thead>
+        <tbody><tr><td>1</td><td><a href="/z"><div>Зенит</div></a></td><td>12</td><td>27</td></tr>
+        <tr><td>2</td><td><span>Спартак</span></td><td>12</td><td>25</td></tr></tbody></table>
+        <p>Текст после таблицы, довольно длинный, чтобы остаться в тексте страницы.</p></article>"""
+        _, text = ws.page_text(html)
+        self.assertEqual(text.split("\n"), ["Турнирная таблица РПЛ", "М | Команда | И | О", "1 | Зенит | 12 | 27", "2 | Спартак | 12 | 25",
+                                            "Текст после таблицы, довольно длинный, чтобы остаться в тексте страницы."])
+
     def test_event_data(self):
         # a sports page that draws the match with scripts: its time is only in JSON-LD and the description
         title, text = ws.page_text(MATCH)
