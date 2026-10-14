@@ -64,8 +64,9 @@ final class BridgeSync {
 
     /**
      * Now, on this thread and past the VPN: asks the family server, by its name, for this phone's own current link — when
-     * the server got a new address, the saved one is renewed in place. The renewed connection, or null when nothing
-     * changed (or the server could not be asked).
+     * the server got a new address, the saved one is renewed in place (the salamander door too, which the server gives
+     * beside it and Winger keeps as one more connection). The renewed connection, or null when nothing changed (or the
+     * server could not be asked).
      */
     static Profile renewNow(Context ctx, Profile current) {
         Context c = ctx.getApplicationContext();
@@ -92,8 +93,7 @@ final class BridgeSync {
             if (code == 200) {
                 JSONObject js = new JSONObject(read(h.getInputStream()));
                 Profile main = Profile.parse(js.optString("link")), hop = Profile.parse(js.optString("hop"));
-                changed = main != null && Profile.renew(c, login, main, hop);
-                if (changed) Diag.i(c, "the family server moved: its link renewed");
+                changed = main != null && take(c, login, main, hop, Profile.parse(js.optString("obfs")));
             }
             h.disconnect();
             return changed;
@@ -101,6 +101,20 @@ final class BridgeSync {
             Diag.i(c, "server link check: " + e);
             return false;
         }
+    }
+
+    /**
+     * What the server gave for this login: its links renewed in place when the server moved (true then), and its
+     * salamander door («маскировка»: Hysteria with salamander on its own port) kept as one more connection — after the
+     * renewal, so a door already there (at the server's old address too) is renewed in place, not added again.
+     */
+    static boolean take(Context c, String login, Profile main, Profile hop, Profile door) {
+        if (door != null && (door.bridge || !"salamander".equalsIgnoreCase(door.obfs) || !login.equals(door.auth))) door = null;
+        boolean changed = Profile.renew(c, login, main, hop, door);
+        if (changed) Diag.i(c, "the family server moved: its link renewed");
+        boolean kept = door != null && Profile.keep(c, door);
+        if (kept) Diag.i(c, "the server's salamander door kept as a connection");
+        return changed;
     }
 
     /** The number of bridge links that were new or changed; -1 when the server could not be asked. */

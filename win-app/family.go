@@ -120,28 +120,47 @@ func (f *Family) Preparing() bool {
 	return f.preparing
 }
 
-// RenewNow: the family server, asked by its name, gives this computer's own current link; when it moved to a new
-// address the saved server is renewed in place. The renewed connection, or nil when nothing changed.
-func (f *Family) RenewNow(p *Profile) *Profile {
-	if p == nil || p.Bridge || p.Auth == "" {
-		return nil
+// SyncServer: the family server, asked by its name, gives this computer's own current links for this login: when it
+// moved to a new address the saved ones are renewed in place, and its salamander door («маскировка»: Hysteria with
+// salamander on its own port) is kept as one more connection — after the renewal, so a door already there (at the old
+// address too) is renewed in place, not added again. Whether the saved links were renewed.
+func (f *Family) SyncServer(auth string) bool {
+	if auth == "" {
+		return false
 	}
 	var out struct {
 		Link string `json:"link"`
 		Hop  string `json:"hop"`
+		Obfs string `json:"obfs"`
 	}
-	if !f.post("/api/winger_profile", map[string]string{"auth": p.Auth}, &out) {
-		return nil
+	if !f.post("/api/winger_profile", map[string]string{"auth": auth}, &out) {
+		return false
 	}
 	main, err := ParseLink(out.Link)
 	if err != nil {
-		return nil
+		return false
 	}
 	hop, _ := ParseLink(out.Hop)
-	if !f.st.Renew(p.Auth, main, hop) {
+	door, _ := ParseLink(out.Obfs)
+	if door != nil && (door.Bridge || door.Obfs != "salamander" || door.Auth != auth) {
+		door = nil
+	}
+	changed := f.st.Renew(auth, main, hop, door)
+	if changed {
+		Logf("the family server moved: its link renewed")
+	}
+	if door != nil && f.st.Keep(door) {
+		Logf("the server's salamander door kept as a connection")
+	}
+	return changed
+}
+
+// RenewNow: this connection's own current link from the family server (see SyncServer). The renewed connection, or nil
+// when nothing changed.
+func (f *Family) RenewNow(p *Profile) *Profile {
+	if p == nil || p.Bridge || p.Auth == "" || !f.SyncServer(p.Auth) {
 		return nil
 	}
-	Logf("the family server moved: its link renewed")
 	for _, x := range f.st.Profiles() {
 		if !x.Bridge && x.Auth == p.Auth && x.Ports == p.Ports {
 			return x
@@ -249,8 +268,8 @@ func (f *Family) Loop() {
 		case last.IsZero() || time.Since(last) >= time.Hour:
 			last, lastBridges = time.Now(), time.Now()
 			f.SyncBridges(0)
-			if p := f.st.Chosen(); p != nil && !p.Bridge {
-				f.RenewNow(p)
+			if _, auth := f.st.HomeHost(); auth != "" { // the family server's own login (a bridge may be the chosen one)
+				f.SyncServer(auth)
 			}
 			f.CheckUpdate()
 		case f.Preparing() || !f.hasBridge() && time.Since(lastBridges) >= 20*time.Minute:

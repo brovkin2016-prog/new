@@ -315,14 +315,14 @@ final class Profile {
     /**
      * The family server moved to a new address (its domain follows it): the saved server with this login gets the link
      * the server gives now, in place — its name, its place in the list and whether it is the chosen one stay. The main
-     * link and the port-hopping one are kept apart. True when something changed.
+     * link, the port-hopping one and the salamander door are kept apart. True when something changed.
      */
-    static synchronized boolean renew(Context c, String auth, Profile main, Profile hop) {
+    static synchronized boolean renew(Context c, String auth, Profile main, Profile hop, Profile door) {
         List<Profile> list = all(c);
         boolean changed = false;
         for (int i = 0; i < list.size(); i++) {
             Profile o = list.get(i);
-            Profile fresh = o.ports.contains("-") ? hop : main;
+            Profile fresh = o.obfs != null && !o.obfs.isEmpty() ? door : o.ports.contains("-") ? hop : main;
             if (o.bridge || fresh == null || fresh.bridge || !auth.equals(o.auth) || !auth.equals(fresh.auth) || o.link.equals(fresh.link)) continue;
             Profile p = parse(fresh.link);
             if (p == null) continue;

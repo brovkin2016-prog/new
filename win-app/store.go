@@ -191,8 +191,9 @@ func same(list []Saved, p *Profile) int {
 }
 
 // Renew: the family server moved to a new address — the saved server with this login takes the link the server gives
-// now, in place (its name, place and choice stay; the main link and the port-hopping one are kept apart).
-func (st *Store) Renew(auth string, main, hop *Profile) bool {
+// now, in place (its name, place and choice stay; the main link, the port-hopping one and the salamander door are kept
+// apart).
+func (st *Store) Renew(auth string, main, hop, door *Profile) bool {
 	changed := false
 	st.Update(func(s *Settings) {
 		for i, sv := range s.Profiles {
@@ -201,7 +202,10 @@ func (st *Store) Renew(auth string, main, hop *Profile) bool {
 				continue
 			}
 			fresh := main
-			if strings.Contains(o.Ports, "-") {
+			switch {
+			case o.Obfs != "":
+				fresh = door
+			case strings.Contains(o.Ports, "-"):
 				fresh = hop
 			}
 			if fresh == nil || fresh.Bridge || fresh.Auth != auth || fresh.Link == sv.Link {

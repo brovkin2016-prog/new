@@ -469,6 +469,7 @@
     function drawServer(d) {
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
+      if (d.obfs && !d.obfs.ok) bad.push("Hysteria с маскировкой не работает");
       if (d.vless && !d.vless.ok) bad.push("запасной VLESS не работает");
       if (d.tgproxy && !d.tgproxy.ok) bad.push("Telegram без VPN не работает");
       const brBad = d.bridges.filter((b) => !b.ok);
@@ -1221,7 +1222,9 @@
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
           text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)} с перезапуска VPN`
             + (u.until ? ` · ⏰ гость до ${when(u.until)}, потом выключится сам` : "") }));
-        const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"], ["vless", "VLESS", "запасной, когда режут UDP"],
+        const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"],
+          ["obfs", "Маскировка", "Hysteria с маскировкой salamander: если обычный режут, пакеты выглядят как шум. Winger берёт его сам"],
+          ["vless", "VLESS", "запасной, когда режут UDP"],
           ["tg", "Telegram", "Telegram без VPN: iPhone, компьютер, любой телефон (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
         const chips = el("div", { class: "chips", style: "margin-bottom:10px" });

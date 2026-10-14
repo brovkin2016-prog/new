@@ -90,6 +90,8 @@ jobs:
           # the release carries the phone ABIs only; the emulator's x86_64 client stays out of it
           mv app/src/main/jniLibs/x86_64 /tmp/hy-x86_64
           gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }}
+          # phones with 16 KB memory pages (a later Android may refuse code that is not aligned to them)
+          python3 ../tools/elf_16k.py app/build/outputs/apk/release/app-release-unsigned.apk
           mv /tmp/hy-x86_64 app/src/main/jniLibs/x86_64
           # the server's icon swap (tools/owner_icon.py) on this very build, with a test picture and a throwaway key:
           # the emulator test installs the result, so a swapped and re-aligned APK is known to install
@@ -131,8 +133,25 @@ jobs:
             listen: 127.0.0.1:7653
           EOT
           HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
+          # the family server's second door: the same login, salamander on its own port («маскировка»)
+          cat > hy-obfs.yaml <<'EOT'
+          listen: :4444
+          tls:
+            cert: /tmp/t/cert.pem
+            key: /tmp/t/key.pem
+          obfs:
+            type: salamander
+            salamander:
+              password: "Salam-test-0123456789"
+          auth:
+            type: userpass
+            userpass:
+              family: "test-pass-123"
+          EOT
+          HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy-obfs.yaml > hy-obfs.log 2>&1 &
           sleep 3
           grep -q "server up and running" hy.log
+          grep -q "server up and running" hy-obfs.log
 
       - name: Enable KVM
         run: |

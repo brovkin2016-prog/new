@@ -239,3 +239,33 @@ func TestLaptopBridgeTakesThePhonesPlace(t *testing.T) {
 		t.Fatal("ownCall does not tell the laptop's own call from the phone's")
 	}
 }
+
+// the family server's salamander door («маскировка»): kept as one more connection without taking the choice, once;
+// when the server moves, each saved link takes its own new one in place (the door is never given the main link)
+func TestSalamanderDoorKeptAndRenewedApart(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"))
+	door := mustParse(t, "hysteria2://u:k@1.1.1.1:8443/?sni=vpn.example.ru&obfs=salamander&obfs-password=Salam-0123456789abc#Маскировка")
+	if !st.Keep(door) || st.Keep(door) {
+		t.Fatal("the door: kept once, not twice")
+	}
+	if all := st.Profiles(); len(all) != 2 || st.Get().Current != 0 || all[1].Obfs != "salamander" || all[1].Name != "Маскировка" {
+		t.Fatalf("the door beside the chosen server, not chosen: %+v", all)
+	}
+	if st.Renew("u:k", mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"), nil, nil) {
+		t.Fatal("nothing new, yet renewed")
+	}
+	if all := st.Profiles(); all[1].Obfs != "salamander" || all[1].Ports != "8443" {
+		t.Fatalf("the door was given the main link: %+v", all[1])
+	}
+	main := mustParse(t, "hysteria2://u:k@3.3.3.3:443/?sni=vpn.example.ru#x")
+	moved := mustParse(t, "hysteria2://u:k@3.3.3.3:8443/?sni=vpn.example.ru&obfs=salamander&obfs-password=Salam-0123456789abc#Маскировка")
+	if !st.Renew("u:k", main, nil, moved) || st.Keep(moved) {
+		t.Fatal("the server moved: renewed in place, the door not added again")
+	}
+	all := st.Profiles()
+	if len(all) != 2 || all[0].Host != "3.3.3.3" || all[0].Obfs != "" || all[0].Name != "Дом" ||
+		all[1].Host != "3.3.3.3" || all[1].Ports != "8443" || all[1].Obfs != "salamander" || all[1].Name != "Маскировка" {
+		t.Fatalf("each took its own new link, names kept: %+v %+v", all[0], all[1])
+	}
+}

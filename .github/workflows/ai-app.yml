@@ -49,7 +49,10 @@ jobs:
 
       - name: Release APK (unsigned)
         working-directory: ai-app/android
-        run: gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
+        run: |
+          gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
+          # phones with 16 KB memory pages (a later Android may refuse code that is not aligned to them)
+          python3 ../../vpn-app/tools/elf_16k.py app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Test server (stand-in assistant behind a real hysteria)
         env:
