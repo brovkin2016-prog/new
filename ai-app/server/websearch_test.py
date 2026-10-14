@@ -103,6 +103,31 @@ class Parsers(unittest.TestCase):
         finally:
             ws.ENGINES = old
 
+    def test_gather_slow_page(self):
+        # a slow first page holds nobody up: the others are read meanwhile, and they keep the search's order
+        import time
+        old = ws.search, ws.read_page
+        try:
+            res = [{"title": f"Т{i}", "url": f"https://p{i}.ru", "snippet": ""} for i in range(4)]
+            ws.search = lambda q, budget=12.0: (res, "duckduckgo")
+
+            def read(url, limit, query):
+                time.sleep(3 if "p0" in url else 0.1 if "p2" in url else 0)
+                return url, ("текст страницы " * 20) + url
+            ws.read_page = read
+            t0 = time.time()
+            got = ws.gather("вопрос", n_pages=2, budget=10)  # p1 and p3 at once, p2 soon after: p1, p2; p0 not waited for
+            self.assertLess(time.time() - t0, ws.GRACE + 0.5)
+            self.assertEqual([p["url"] for p in got["pages"]], ["https://p1.ru", "https://p2.ru"])
+            t0 = time.time()
+            got = ws.gather("вопрос", n_pages=3, budget=10)  # p1, p2, p3 read, p0 the first and the slow: not waited for
+            self.assertLess(time.time() - t0, ws.GRACE + 0.5)
+            self.assertEqual([p["url"] for p in got["pages"]], ["https://p1.ru", "https://p2.ru", "https://p3.ru"])
+            got = ws.gather("вопрос", n_pages=4, budget=1.0)  # not all in time: those read by then
+            self.assertEqual([p["url"] for p in got["pages"]], ["https://p1.ru", "https://p2.ru", "https://p3.ru"])
+        finally:
+            ws.search, ws.read_page = old
+
     def test_page_text(self):
         title, text = ws.page_text(PAGE)
         self.assertEqual(title, "Курс доллара")

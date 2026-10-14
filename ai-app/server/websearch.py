@@ -131,7 +131,7 @@ class _Text(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts, self.skip, self.title, self.in_title = [], 0, "", False
         self.main_start = None  # where <article> or <main> began in parts
-        self.ld, self.in_ld, self.about = [], False, ""  # the page's own data (JSON-LD) and its description
+        self.about = ""  # the page's description
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIP_TAGS:
@@ -143,9 +143,6 @@ class _Text(HTMLParser):
         if tag in ("article", "main") and self.main_start is None:
             self.main_start = len(self.parts)
         self._meta(tag, attrs)
-        if tag == "script" and "ld+json" in (dict(attrs).get("type") or "").lower() and len(self.ld) < 20:
-            self.in_ld = True
-            self.ld.append("")
 
     def handle_startendtag(self, tag, attrs):
         if tag in BLOCK_TAGS:
@@ -165,14 +162,9 @@ class _Text(HTMLParser):
             self.in_title = False
         if tag in BLOCK_TAGS:
             self.parts.append("\n")
-        if tag == "script":
-            self.in_ld = False
 
     def handle_data(self, data):
-        if self.in_ld:
-            if len(self.ld[-1]) < 200_000:
-                self.ld[-1] += data
-        elif self.in_title:
+        if self.in_title:
             self.title += data
         elif not self.skip:
             self.parts.append(data)
@@ -252,9 +244,16 @@ def ld_facts(blobs):
     return out
 
 
+LD_JSON = re.compile(r"<script\b[^>]*ld\+json[^>]*>(.*?)</script\s*>", re.S | re.I)
+NOISE = re.compile(r"<(script|style|svg|noscript|template)\b.*?</\1\s*>", re.S | re.I)
+
+
 def page_text(html):
     """(title, readable text): the article's or main part when the page has a real one, short menu lines dropped; the
-    page's own data on its events and its description go first."""
+    page's own data on its events and its description go first. Scripts and styles are cut out before the page is
+    read (the parser is slow on the megabytes of them a sports page has)."""
+    ld = [b for b in LD_JSON.findall(html)[:20] if len(b) < 200_000]
+    html = NOISE.sub(" ", html)
     p = _Text()
     try:
         p.feed(html)
@@ -275,7 +274,7 @@ def page_text(html):
     bare = [bool(re.fullmatch(r"[\d:.,/ -]+", ln)) for ln in lines]  # a news feed's times: «20:35», «20:34», …
     lines = [ln for i, ln in enumerate(lines) if not (bare[i] and sum(bare[max(0, i - 2):i + 3]) >= 3)]
     about = unescape(p.about)
-    head = ld_facts(p.ld) + ([about] if len(about) >= 40 and about not in "\n".join(lines[:5]) else [])
+    head = ld_facts(ld) + ([about] if len(about) >= 40 and about not in "\n".join(lines[:5]) else [])
     return re.sub(r"\s+", " ", p.title).strip(), "\n".join(head + lines)
 
 
@@ -586,6 +585,9 @@ def _search(query, end):
     return web, got.get("wikipedia", []), [name for name, _ in ENGINES if got.get(name)]
 
 
+GRACE = 1.5  # seconds
+
+
 def gather(query, n_pages=4, page_chars=3500, budget=20.0):
     """Search, then read the first pages that read well (in parallel), each page's part about the query. The search
     results' snippets stay as well, so even pages that did not open still give something."""
@@ -595,20 +597,40 @@ def gather(query, n_pages=4, page_chars=3500, budget=20.0):
     if results:
         wanted = [r for r in results if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][: n_pages + 3]
         pool = concurrent.futures.ThreadPoolExecutor(max(1, min(7, len(wanted))))
-        futures = [(r, pool.submit(read_page, r["url"], page_chars, query)) for r in wanted]
-        try:
-            for r, f in futures:
-                left = budget - (time.time() - start)
-                if left <= 0 or len(pages) >= n_pages:
+        futures = {pool.submit(read_page, r["url"], page_chars, query): i for i, r in enumerate(wanted)}
+        read, tried, pending, grace = {}, {}, set(futures), None
+        try:  # the pages as they come; once there are enough, the better-placed ones still reading get GRACE more
+            while pending:
+                end = start + budget if grace is None else min(start + budget, grace)
+                if time.time() >= end:
                     break
-                try:
-                    title, text = f.result(timeout=left)
-                except Exception:
-                    continue
-                if len(text) >= 200 and all(p["text"] != text for p in pages):  # (the same article on two addresses: once)
-                    pages.append({"title": title or r["title"], "url": r["url"], "text": text})
+                done, pending = concurrent.futures.wait(pending, timeout=end - time.time(),
+                                                        return_when=concurrent.futures.FIRST_COMPLETED)
+                for f in done:
+                    try:
+                        title, text = f.result()
+                    except Exception:
+                        title, text = "", ""
+                    tried[futures[f]] = len(text) >= 200
+                    if tried[futures[f]]:
+                        read[futures[f]] = (title, text)
+                ok = 0
+                for j in range(len(wanted)):  # the first n_pages that read well, with none before them unread
+                    if j not in tried:
+                        break
+                    ok += tried[j]
+                    if ok >= n_pages:
+                        break
+                if ok >= n_pages:
+                    break
+                if grace is None and len(read) >= n_pages:
+                    grace = time.time() + GRACE
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
+        for i in sorted(read):
+            title, text = read[i]
+            if len(pages) < n_pages and all(p["text"] != text for p in pages):  # (one article on two addresses: once)
+                pages.append({"title": title or wanted[i]["title"], "url": wanted[i]["url"], "text": text})
     return {"engine": engine, "results": results, "pages": pages}
 
 
