@@ -179,16 +179,10 @@ class Live(unittest.TestCase):
         self.assertTrue(got["pages"], "no page could be read")
         self.assertTrue(any("Канберр" in p["text"] or "Canberra" in p["text"] for p in got["pages"]))
 
-    def test_match_time(self):
+    def test_a_match_time(self):  # first: the way the family server asks, one question now and then
         # «во сколько матч»: the pages read must carry a start time beside the teams, not only their menus
-        for q in ("Спартак Родина Кубок России 2026 дата и время матча", "Спартак Родина Кубок России"):
-            try:
-                found = ws.bing(q)
-                print("bing:", q, len(found), len(ws.relevant(found, q)), [r["title"][:50] for r in found[:5]])
-            except Exception as e:  # noqa: BLE001
-                print("bing:", q, repr(e)[:200])
         got = ws.gather("Во сколько кубок России Спартак Родина?")  # as asked: the search makes do with it
-        print("match:", got["engine"], [p["url"] for p in got["pages"]])
+        print("match:", got["engine"], [r["title"][:60] for r in got["results"]], [p["url"] for p in got["pages"]])
         for p in got["pages"]:
             print("\n==", p["url"], "\n" + "\n".join(ln for ln in p["text"].split("\n") if ws.WHEN.search(ln))[:800])
         self.assertTrue(got["pages"], "no page could be read")
