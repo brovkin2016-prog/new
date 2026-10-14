@@ -267,10 +267,13 @@ def page_text(html):
     lines = []
     for line in text.split("\n"):
         line = re.sub(r"\s+", " ", line).strip()
-        # menus and buttons are short; numbers (prices, dates, scores) keep a short line
-        if len(line) >= 40 or (len(line) >= 3 and re.search(r"\d", line)) or len(line.split()) >= 5:
+        # menus and buttons are short; numbers (prices, dates, scores) and «A — B» (a match, a route) keep a short line
+        if len(line) >= 40 or (len(line) >= 3 and re.search(r"\d", line)) or len(line.split()) >= 5 \
+                or re.search(r"\w\s[—–-]\s\w", line):
             if not lines or lines[-1] != line:
                 lines.append(line)
+    bare = [bool(re.fullmatch(r"[\d:.,/ -]+", ln)) for ln in lines]  # a news feed's times: «20:35», «20:34», …
+    lines = [ln for i, ln in enumerate(lines) if not (bare[i] and sum(bare[max(0, i - 2):i + 3]) >= 3)]
     about = unescape(p.about)
     head = ld_facts(p.ld) + ([about] if len(about) >= 40 and about not in "\n".join(lines[:5]) else [])
     return re.sub(r"\s+", " ", p.title).strip(), "\n".join(head + lines)
@@ -602,7 +605,7 @@ def gather(query, n_pages=4, page_chars=3500, budget=20.0):
                     title, text = f.result(timeout=left)
                 except Exception:
                     continue
-                if len(text) >= 200:
+                if len(text) >= 200 and all(p["text"] != text for p in pages):  # (the same article on two addresses: once)
                     pages.append({"title": title or r["title"], "url": r["url"], "text": text})
         finally:
             pool.shutdown(wait=False, cancel_futures=True)

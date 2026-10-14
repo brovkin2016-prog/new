@@ -119,6 +119,8 @@ class Parsers(unittest.TestCase):
         self.assertIn("Событие: Спартак — Родина · начало: 01.09.2026 19:30 МСК · перенесено", lines)  # UTC → МСК
         self.assertIn("Кубок России. Родина и Спартак сыграют 15 октября в 20:45 по московскому времени.", lines)
         self.assertNotIn("window.__DATA__", text)
+        _, feed = ws.page_text("<p>Начало: 20:45</p><p>20:35</p><p>20:34</p><p>20:30</p><p>Родина — Спартак</p><p>15.10</p>")
+        self.assertEqual(feed, "Начало: 20:45\nРодина — Спартак\n15.10")  # a feed's column of times goes, a lone date stays
         self.assertEqual(ws.msk_time("2026-10-15"), "15.10.2026")
         self.assertEqual(ws.msk_time("2026-10-15T23:30:00-0200"), "16.10.2026 04:30 МСК")
         self.assertEqual(ws.msk_time("2026-10-15T20:45"), "15.10.2026 20:45 (по времени сайта)")
