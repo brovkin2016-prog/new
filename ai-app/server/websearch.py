@@ -724,7 +724,7 @@ TABLE_ASK = re.compile(r"таблиц|турнирн|положени\w*\s+ко�
                        r"какое\s+место|на\s+каком\s+месте", re.I)
 LEAGUES = [  # (the words that name it, Sports.ru's table page, ESPN's league, its name)
     (r"рпл|рфпл|премьер[- ]?лиг\w*\s+росс|чемпионат\w*\s+росс|российск\w+\s+премьер", "football/tournament/rfpl", "rus.1", "РПЛ"),
-    (r"\bапл\b|англи|премьер[- ]?лиг\w*\s+англ", "football/tournament/epl", "eng.1", "АПЛ"),
+    (r"\bапл\b|англи|премьер[- ]?лиг\w*\s+англ", "football/tournament/premier-league", "eng.1", "АПЛ"),
     (r"испан|ла\s*лиг|laliga", "football/tournament/la-liga", "esp.1", "Ла Лига"),
     (r"германи|бундеслиг", "football/tournament/bundesliga", "ger.1", "Бундеслига"),
     (r"итали|сери[яи]\s+а\b", "football/tournament/seria-a", "ita.1", "Серия А"),

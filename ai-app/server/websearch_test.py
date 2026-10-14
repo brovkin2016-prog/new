@@ -180,7 +180,7 @@ class Parsers(unittest.TestCase):
             self.assertEqual(got, ["https://www.sports.ru/football/tournament/rfpl/table/"])
             self.assertIn("# | Команда | И | О\n1 | Команда 1 | 10 | 29\n", pg["text"])
             ws.direct("турнирная таблица АПЛ")
-            self.assertEqual(got[-1], "https://www.sports.ru/football/tournament/epl/table/")
+            self.assertEqual(got[-1], "https://www.sports.ru/football/tournament/premier-league/table/")
             ws.direct("кто лидирует в РПЛ")
             self.assertEqual(got[-1], "https://www.sports.ru/football/tournament/rfpl/table/")
 
@@ -275,7 +275,7 @@ class Live(unittest.TestCase):
         self.assertGreaterEqual(pg["text"].count("\n"), 12)
 
     def test_c_tables(self):  # Sports.ru's tables (or ESPN's)
-        for q, team in (("таблица РПЛ", "Зенит"), ("турнирная таблица АПЛ", "Арсенал"), ("таблица КХЛ", "СКА")):
+        for q, team in (("таблица РПЛ", "Зенит"), ("турнирная таблица АПЛ", "Арсенал"), ("таблица КХЛ", "СКА"), ("таблица Ла Лиги", "Барселона")):
             pg = ws.direct(q)
             print(f"table «{q}»:", pg and pg["url"], "\n" + (pg["text"][:700] if pg else ""))
             self.assertTrue(pg and team in pg["text"] and pg["text"].count("\n") >= 12, q)
