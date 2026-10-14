@@ -227,6 +227,55 @@ class Parsers(unittest.TestCase):
             ws.ENGINES, ws.read_page = old, old_read
             ws.cache.clear()
 
+    def test_exa(self):
+        # the owner's Exa key: Exa asked first, its pages' text used as it came (nothing opened), a refused key said so
+        import json as js
+        sent = []
+
+        class Resp:
+            def __init__(self, status, body):
+                self.status, self.body = status, body
+
+            def read(self, n):
+                return self.body
+
+            def getheader(self, k, default=None):
+                return default
+
+        class Conn:
+            def close(self):
+                pass
+        page = "Матч «Родина» — «Спартак» пройдёт в четверг, 15 октября 2026 года, в 20:45 по Москве. " * 4
+        answers = {"status": 200}
+
+        def fake_request(url, method="GET", body=None, headers=None):
+            sent.append((url, method, js.loads(body), dict(headers)))
+            return Conn(), Resp(answers["status"], js.dumps({"results": [
+                {"title": "Родина — Спартак 15 октября", "url": "https://www.sports.ru/m/1", "text": page},
+                {"title": "Без адреса", "url": "javascript:1", "text": "x"}]}).encode())
+        old = ws._request, ws.EXA_KEY, ws.ENGINES, ws.read_page
+        try:
+            ws._request, ws.EXA_KEY = fake_request, "exa-key-1"
+            ws.ENGINES = [("duckduckgo", lambda q: []), ("bing", lambda q: []), ("wikipedia", lambda q: [])]
+            ws.read_page = lambda *a, **k: self.fail("a page with Exa's text was opened")
+            ws.cache.clear()
+            got = ws.gather("Спартак Родина Кубок России")
+            self.assertEqual(sent[0][0], "https://api.exa.ai/search")
+            self.assertEqual(sent[0][3]["x-api-key"], "exa-key-1")
+            self.assertEqual(sent[0][2]["contents"], {"text": True})
+            self.assertEqual(got["engine"], "exa")
+            self.assertEqual([r["url"] for r in got["results"]], ["https://www.sports.ru/m/1"])
+            self.assertIn("20:45 по Москве", got["pages"][0]["text"])
+            answers["status"] = 401
+            with self.assertRaises(ws.Blocked) as e:
+                ws.exa("x")
+            self.assertEqual(str(e.exception), "ключ не принят")
+            ws.EXA_KEY = ""
+            self.assertNotIn("exa", [n for n, _ in ws.engines()])
+        finally:
+            ws._request, ws.EXA_KEY, ws.ENGINES, ws.read_page = old
+            ws.cache.clear()
+
     def test_page_text(self):
         title, text = ws.page_text(PAGE)
         self.assertEqual(title, "Курс доллара")

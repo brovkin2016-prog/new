@@ -485,7 +485,24 @@
       const u = d.update;
       if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
       if (u) scroll.append(updateCard(u, "all"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить», the night switch
+      if ("vpn_soft" in d) scroll.append(vpnSoftCard(d.vpn_soft));
       scroll.append(storageCard(), bridgesCard(d), remoteCard());
+    }
+    // ---- the VPN's programs: Hysteria and Xray as installed, the latest, the last nightly update's word (vpn-update) ----
+    function vpnSoftCard(v) {
+      const card = el("div", { class: "card", style: "margin:0 0 12px" });
+      if (!v) return card.append(el("small", { text: "🛡 Программы VPN: версии ещё не проверялись — появятся здесь в течение часа." })), card;
+      const n = (s) => String(s || "").replace(/^app\//, "").replace(/^v/, "");
+      const one = (name, cur, latest, bad) => !cur ? "" : `${name} ${cur}` + (!latest || n(latest) === n(cur) ? " ✓ последняя"
+        : n(bad) === n(latest) ? ` — новая ${latest} не прошла проверку, оставлена рабочая` : ` — вышла ${latest}, обновится сама ночью`);
+      const parts = [one("Hysteria", v.hysteria, v.hysteria_latest, v.hysteria_bad), one("Xray", v.xray, v.xray_latest, v.xray_bad)].filter(Boolean);
+      const recent = v.note && v.note_at && Date.now() / 1000 - v.note_at < 7 * 86400;
+      const warn = recent && /^(↩️|⚠️)/.test(v.note);
+      card.append(el("div", { class: "grow" }, "🛡 Программы VPN",
+        el("small", { text: (parts.join(" · ") || "версии не прочитались") + (v.at ? `. Проверено ${ago(v.at)} назад.` : "") }),
+        recent ? el("small", { style: "display:block;margin-top:4px" + (warn ? ";color:var(--danger-ink)" : ""),
+          text: `Последнее обновление (${ago(v.note_at)} назад): ` + v.note.replace(/^\S+\s*VPN:\s*/, "") }) : ""));
+      return card;
     }
     // ---- the disk: how full it is, what the templates take, how fast it is (the last test), what the last cleanup freed ----
     function storageCard() {
@@ -940,9 +957,9 @@
           el("div", { class: "grow" }, "🌐 Поиск в интернете",
             el("small", { text: (parts.length ? "Последние ответы: " + parts.join(" · ") + ". " : "С последнего перезапуска сервера в интернете ещё не искали. ") }),
             el("small", { style: "display:block;margin-top:4px" + (bad ? ";color:var(--danger-ink)" : ""), text: checked }),
-            g.env ? "" : el("a", { href: "#", style: "display:inline-block;padding:8px 0 0;font-size:14px",
-              text: g.key ? "🔑 Groq подключён · изменить" : "🔑 Подключить Groq (по желанию)",
-              onclick: (e) => { e.preventDefault(); groqSheet(v, fill); } })),
+            ...["exa", "groq"].filter((k) => !(v[k] || {}).env).map((k) => el("a", { href: "#",
+              style: "display:block;padding:8px 0 0;font-size:14px", text: (v[k] || {}).key ? `🔑 ${KEYS[k].name} подключён · изменить`
+                : `🔑 Подключить ${KEYS[k].name} (${KEYS[k].hint})`, onclick: (e) => { e.preventDefault(); keySheet(k, v, fill); } }))),
           el("button", { class: "btn line", style: "flex:none;padding:8px 14px", text: "Проверить", onclick: async (e) => {
             const b = e.currentTarget;
             busyBtn(b, "⏳ До минуты");
@@ -960,19 +977,29 @@
       return card;
     }
 
-    function groqSheet(v, fill) {  // the owner's Groq key: its web search answers beside the search pages
-      const on = !!(v.groq || {}).key;
-      sheet("🔑 Groq — ещё один поиск", (box, close) => {
-        const inp = el("input", { class: "input", placeholder: "ключ Groq (gsk_…)", autocomplete: "off", spellcheck: "false" });
+    // the search's own keys: Exa (a search made for AI: the pages' text with the results), Groq (its web search beside)
+    const KEYS = {
+      exa: { name: "Exa", hint: "бесплатно, лучше поиск", site: "dashboard.exa.ai", url: "https://dashboard.exa.ai/api-keys", ph: "ключ Exa",
+        about: "С ключом Exa помощник ищет ещё и в Exa — поиске, сделанном для ИИ: он сразу отдаёт текст страниц, поэтому ответы "
+          + "точнее и быстрее. Бесплатно: $10 в месяц (это больше тысячи поисков), карта не нужна.",
+        steps: ["Нажмите «🔑 Кабинет Exa» ниже — в браузере откроется сайт Exa (dashboard.exa.ai). Войдите через Google или почту.",
+          "На сайте Exa откроется раздел «API Keys». Ключ там уже есть — нажмите значок копирования рядом с ним. Если ключа нет — нажмите «Create Key», затем скопируйте его."] },
+      groq: { name: "Groq", hint: "по желанию", site: "console.groq.com", url: "https://console.groq.com/keys", ph: "ключ Groq (gsk_…)",
+        about: "С ключом Groq к каждому поиску добавляется ещё и его поиск — ответы полнее. Бесплатно. По правилам Groq им пользуются не из России.",
+        steps: ["Нажмите «🔑 Кабинет Groq» ниже — в браузере откроется сайт Groq (console.groq.com). Войдите через Google или почту.",
+          "На сайте Groq: слева «API Keys» → кнопка «Create API Key» → любое имя → «Submit». Нажмите «Copy» — ключ начинается с gsk_."] },
+    };
+    function keySheet(kind, v, fill) {
+      const k = KEYS[kind], on = !!(v[kind] || {}).key;
+      sheet(`🔑 ${k.name} — ещё один поиск`, (box, close) => {
+        const inp = el("input", { class: "input", placeholder: k.ph, autocomplete: "off", spellcheck: "false" });
         box.append(
-          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Помощник и без Groq ищет в интернете сам. С ключом Groq "
-            + "к каждому поиску добавляется ещё и его поиск — ответы полнее. Бесплатно. По правилам Groq им пользуются не из России." }),
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Помощник и без этого ищет в интернете сам. " + k.about }),
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-            el("li", { text: "Нажмите «🔑 Кабинет Groq» ниже — в браузере откроется сайт Groq (console.groq.com). Войдите через Google или почту." }),
-            el("li", { text: "На сайте Groq: слева «API Keys» → кнопка «Create API Key» → любое имя → «Submit». Нажмите «Copy» — ключ начинается с gsk_." }),
+            ...k.steps.map((s) => el("li", { text: s })),
             el("li", { text: "Вернитесь в это приложение, вставьте ключ сюда и нажмите «✅ " + (on ? "Заменить ключ" : "Подключить") + "». В чаты ключ не присылайте." })),
-          el("a", { class: "btn line wide", href: "https://console.groq.com/keys", target: "_blank", rel: "noopener",
-            style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Кабинет Groq" }),
+          el("a", { class: "btn line wide", href: k.url, target: "_blank", rel: "noopener",
+            style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: `🔑 Кабинет ${k.name}` }),
           inp,
           el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
             let t = "";
@@ -984,18 +1011,18 @@
             if (!inp.value.trim()) { toast("Сначала вставьте ключ"); return; }
             busyBtn(b, "⏳ Проверяю ключ…");
             try {
-              const end = await panel({ op: "groq_set", key: inp.value.trim() });
+              const end = await panel({ op: kind + "_set", key: inp.value.trim() });
               if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
-              close(); fill(end); toast("✅ Groq подключён — помощник ищет и через него", 5000);
+              close(); fill(end); toast(`✅ ${k.name} подключён — помощник ищет и через него`, 5000);
             } catch (x) { toast(problem(x)); freeBtn(b); }
           } }),
-          on ? el("button", { class: "btn line wide", style: "margin-top:8px", text: "Отключить Groq", onclick: async (e) => {
+          on ? el("button", { class: "btn line wide", style: "margin-top:8px", text: `Отключить ${k.name}`, onclick: async (e) => {
             const b = e.currentTarget;
             busyBtn(b, "⏳ Отключаю…");
             try {
-              const end = await panel({ op: "groq_off" });
+              const end = await panel({ op: kind + "_off" });
               if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
-              close(); fill(end); toast("Groq отключён — поиск идёт без него");
+              close(); fill(end); toast(`${k.name} отключён — поиск идёт без него`);
             } catch (x) { toast(problem(x)); freeBtn(b); }
           } }) : "");
       });

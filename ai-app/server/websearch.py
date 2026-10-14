@@ -521,7 +521,47 @@ def wikipedia(query):
     return out
 
 
+EXA_KEY = ""  # the owner's Exa key (set by the server): a search made for AI, the pages' text in the answer
+EXA_TEXT = 20000  # characters of each page's text Exa gives
+
+
+def exa(query, key=None, n=8):
+    """Exa's results with their pages' text («text»): none of the pages need opening then. key: another than EXA_KEY
+    (the owner's new one, checked before it is kept)."""
+    body = json.dumps({"query": query, "type": "auto", "numResults": n, "contents": {"text": True}}).encode()
+    try:
+        conn, r = _request("https://api.exa.ai/search", "POST", body, {"x-api-key": key or EXA_KEY, "Content-Type": "application/json",
+                                                                        "Accept": "application/json"})
+        try:
+            raw = r.read(4_000_000)
+            status = r.status
+            if (r.getheader("Content-Encoding") or "").lower() == "gzip":
+                raw = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(raw)
+        finally:
+            conn.close()
+    except (OSError, http.client.HTTPException) as e:
+        raise Blocked("нет связи") from e
+    if status in (401, 403):
+        raise Blocked("ключ не принят")
+    if status in (402, 429):
+        raise Blocked("лимит исчерпан")
+    if status >= 400:
+        raise Blocked(f"ответ {status}")
+    out = []
+    for it in json.loads(raw.decode("utf-8", "replace")).get("results") or []:
+        text = re.sub(r"[ \t]+", " ", str(it.get("text") or "")).strip()[:EXA_TEXT]
+        out.append({"title": str(it.get("title") or it.get("url") or ""), "url": str(it.get("url") or ""),
+                    "snippet": re.sub(r"\s+", " ", text)[:400], "text": text})
+    return [dict(r, title=re.sub(r"\s+", " ", r["title"]).strip()[:200]) for r in out
+            if r["url"].startswith(("http://", "https://")) and r["title"]]
+
+
 ENGINES = [("duckduckgo", duckduckgo), ("bing", bing), ("wikipedia", wikipedia)]
+
+
+def engines():
+    """The engines asked, in their order: Exa first when the owner gave its key."""
+    return ([("exa", exa)] if EXA_KEY else []) + ENGINES
 STATS = {}  # engine -> how it answered last: {"at", "ok", "n" (results about the question), "why" (when not)}
 
 
@@ -582,8 +622,9 @@ def search(query, n=8, budget=12.0):
 def _search(query, end):
     """(the web engines' results in turns, Wikipedia's — waited for only when the web gave fewer than three, the
     engines that gave something)"""
-    pool = concurrent.futures.ThreadPoolExecutor(len(ENGINES))
-    futures = [(name, pool.submit(fn, query)) for name, fn in ENGINES]
+    asked = engines()
+    pool = concurrent.futures.ThreadPoolExecutor(len(asked))
+    futures = [(name, pool.submit(fn, query)) for name, fn in asked]
     got = {}
     try:
         for name, f in futures:
@@ -601,9 +642,9 @@ def _search(query, end):
                            "why": "" if got[name] else "выдал чужое" if found else "ничего не нашёл"}
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    web = [r for row in itertools.zip_longest(*[got.get(name, []) for name, _ in ENGINES if name != "wikipedia"])
+    web = [r for row in itertools.zip_longest(*[got.get(name, []) for name, _ in asked if name != "wikipedia"])
            for r in row if r]
-    return web, got.get("wikipedia", []), [name for name, _ in ENGINES if got.get(name)]
+    return web, got.get("wikipedia", []), [name for name, _ in asked if got.get(name)]
 
 
 GRACE = 1.5  # seconds
@@ -632,11 +673,28 @@ def _gather(query, n_pages, page_chars, budget, start):
     pages = []
     if results:
         wanted = [r for r in results if not SKIP_HOSTS.search(urlsplit(r["url"]).hostname or "")][: n_pages + 3]
+        read, tried = {}, {}
+        for i, r in enumerate(wanted):  # pages whose text came with the results (Exa's): nothing to open
+            if len(r.get("text") or "") >= 200:
+                read[i], tried[i] = (r["title"], focus(r["text"], query, page_chars)), True
         pool = concurrent.futures.ThreadPoolExecutor(max(1, min(7, len(wanted))))
-        futures = {pool.submit(read_page, r["url"], page_chars, query): i for i, r in enumerate(wanted)}
-        read, tried, pending, grace = {}, {}, set(futures), None
+        futures = {pool.submit(read_page, r["url"], page_chars, query): i for i, r in enumerate(wanted) if i not in tried}
+        pending, grace = set(futures), None
+
+        def enough():  # the first n_pages that read well, with none before them unread
+            ok = 0
+            for j in range(len(wanted)):
+                if j not in tried:
+                    return False
+                ok += tried[j]
+                if ok >= n_pages:
+                    return True
+            return False
+
         try:  # the pages as they come; once there are enough, the better-placed ones still reading get GRACE more
-            while pending:
+            while pending and not enough():
+                if grace is None and len(read) >= n_pages:
+                    grace = time.time() + GRACE
                 end = start + budget if grace is None else min(start + budget, grace)
                 if time.time() >= end:
                     break
@@ -650,17 +708,6 @@ def _gather(query, n_pages, page_chars, budget, start):
                     tried[futures[f]] = len(text) >= 200
                     if tried[futures[f]]:
                         read[futures[f]] = (title, text)
-                ok = 0
-                for j in range(len(wanted)):  # the first n_pages that read well, with none before them unread
-                    if j not in tried:
-                        break
-                    ok += tried[j]
-                    if ok >= n_pages:
-                        break
-                if ok >= n_pages:
-                    break
-                if grace is None and len(read) >= n_pages:
-                    grace = time.time() + GRACE
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
         for i in sorted(read):
