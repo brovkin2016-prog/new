@@ -8,6 +8,20 @@ ACT=$PKG/app.aihelper.vpn.MainActivity
 LINK='hysteria2://family:test-pass-123@10.0.2.2:4443/?sni=vpn.test.local&insecure=1#Тест'
 step() { echo "$(date +%T) $*" >> "$OUT/progress.txt"; }  # what the test was doing, kept with the release
 fail() { echo "FAIL: $*"; echo "::error::$*"; adb logcat -d -s AIVPN:V > "$OUT/logcat.txt"; adb exec-out screencap -p > "$OUT/fail.png"; exit 1; }
+# the screen's tree into the file; a system «… isn't responding» window over it (now and then the emulator's own
+# launcher) is answered «Wait» first, so the check looks at Winger, not at it
+dump() {
+  local t xy
+  for _ in 1 2 3; do
+    adb shell uiautomator dump "$1" >/dev/null 2>&1
+    t=$(adb shell cat "$1")
+    echo "$t" | grep -qE "isn't responding|не отвечает" || return 0
+    xy=$(echo "$t" | grep -oE 'text="(Wait|Подождать)"[^>]*bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | grep -oE '\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]' \
+      | head -1 | sed -E 's/\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]/\1 \2 \3 \4/' | awk '{print int(($1+$3)/2), int(($2+$4)/2)}')
+    [ -n "$xy" ] && adb shell input tap $xy
+    sleep 2
+  done
+}
 wait_log() {  # text, seconds
   for _ in $(seq 1 "$2"); do adb logcat -d -s AIVPN:V | grep -q "$1" && return 0; sleep 1; done
   return 1
@@ -129,7 +143,7 @@ adb shell am start -n $ACT --es test_pick sett
 wait_log "apps to pick: .*shown [1-9]" 20 || fail "the picker did not list the phone's apps"
 adb logcat -d -s AIVPN:I | grep "apps to pick"
 sleep 2
-adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+dump /sdcard/ui.xml
 adb shell cat /sdcard/ui.xml | grep -qE 'text="(Settings|Настройки)"' || fail "the picker does not show Settings"
 adb exec-out screencap -p > "$OUT/4a-pick.png"
 adb shell input keyevent KEYCODE_BACK
@@ -258,7 +272,7 @@ if [ -n "${NEXT_APK:-}" ]; then
     NEW=$(vcode)
     [ "${NEW:-0}" -gt "${OLD:-0}" ] && break
     adb logcat -d -s AIVPN:V | grep -E "install: |install status [1-7] " && fail "the update did not install"
-    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    dump /sdcard/ui.xml
     B=$(adb shell cat /sdcard/ui.xml | tr '>' '\n' | grep -E 'resource-id="android:id/button1"|text="(Update|Install|UPDATE|INSTALL|Обновить|Установить)"' \
       | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 | tr -c '0-9' ' ')
     if [ -n "$B" ]; then
@@ -295,7 +309,7 @@ step "a button for each connection: the server's and the bridge's are on the scr
 adb logcat -c
 adb shell am start -n $ACT >/dev/null
 sleep 3
-adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+dump /sdcard/ui.xml
 adb shell cat /sdcard/ui.xml > "$OUT/conns.xml"
 grep -q 'text="Тест"' "$OUT/conns.xml" || fail "no button for the server"
 grep -q 'text="Мост' "$OUT/conns.xml" || fail "no button for the bridge"
@@ -402,7 +416,7 @@ if adb logcat -d -s AIVPN:V | grep -q "bridge: CAPTCHA:"; then
   wait_log "VK's check page shown in Winger" 40 || fail "VK's check page did not load inside Winger"
   sleep 4
   adb exec-out screencap -p > "$OUT/8-captcha.png"
-  adb shell uiautomator dump /sdcard/cap.xml >/dev/null 2>&1
+  dump /sdcard/cap.xml
   adb shell cat /sdcard/cap.xml > "$OUT/captcha-ui.xml"
   B=$(grep -o '<node [^>]*checkable="true"[^>]*>' "$OUT/captcha-ui.xml" | grep -o 'bounds="[^"]*"' | head -1)
   [ -n "$B" ] || B=$(grep -o '<node [^>]*[Рр]обот[^>]*>' "$OUT/captcha-ui.xml" | grep -o 'bounds="[^"]*"' | head -1)
@@ -441,7 +455,7 @@ if [ -n "${ICON_APK:-}" ]; then
   for _ in $(seq 1 20); do adb logcat -d -s AIVPN:I | grep -q "profile from the package" && break; sleep 1; done
   adb logcat -d -s AIVPN:I | grep "profile from the package: CI Test" || fail "the connection inside the APK was not taken"
   sleep 2
-  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+  dump /sdcard/ui.xml
   adb shell cat /sdcard/ui.xml | grep -q 'text="CI Test"' || fail "the server from the APK is not shown"
   adb exec-out screencap -p > "$OUT/5-packaged.png"
   adb shell am force-stop app.aihelper.vpn
