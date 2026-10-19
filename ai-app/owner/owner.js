@@ -333,15 +333,33 @@
         + "после — проверит себя и при поломке вернёт как было." }),
         el("div", { class: "hints", style: "margin-top:8px" }, ...hints.map((t) => el("button", { class: "hint", text: t, onclick: () => send(t) }))));
     }
+    // the rescue console: Claude Code on the owner's Anthropic key and the repairs, in a browser, apart from this app
+    function rescueCard() {
+      const box = el("div", { class: "card", style: "padding:10px 12px" });
+      const go = el("button", { class: "btn line wide", text: "🛟 Открыть спасательную консоль", onclick: async () => {
+        go.disabled = true;
+        try {
+          const end = await panel({ op: "rescue_link" });
+          if (end.t !== "done") { toast("⚠️ " + end.text, 9000); go.disabled = false; return; }
+          go.replaceWith(el("a", { class: "btn wide", href: end.url, style: "display:block;text-align:center;text-decoration:none",
+            text: "👉 Открыть в браузере (ссылка на 3 минуты)" }));
+        } catch (e) { toast(problem(e)); go.disabled = false; }
+      } });
+      box.append(el("small", { style: "display:block;color:var(--muted);margin-bottom:6px",
+        text: "Claude Code по вашему ключу Anthropic (сам выбирает Haiku, Sonnet или Opus 5.5) и откат правок — в браузере, отдельно от приложения. "
+          + "Если «Управление» или этот чат сломаются, консоль откроется и из Winger: «🛟 Спасение сервера»." }), go);
+      return box;
+    }
     function drawClaude(d) {
       if (!d.installed) {
-        scroll.append(el("div", { class: "card" }, el("h3", { text: "🛠 Claude на сервере" }),
+        scroll.append(rescueCard(), el("div", { class: "card" }, el("h3", { text: "🛠 Claude на сервере" }),
           el("p", { text: d.why || "Claude Code ещё не установлен." }),
           el("small", { style: "color:var(--muted)", text: "Он ставится вместе с новой версией сервера: «🖥 Сервер» → «⬆️ Версия сервера» → «⬆️ Обновить»." })));
         return;
       }
       claude.chat = d.chat;
       store.set("claudeChat", d.chat);
+      scroll.append(rescueCard());
       claude.head = el("b", { text: d.title });
       scroll.append(el("div", { class: "card", style: "padding:8px 12px" },
         el("div", { class: "row", style: "min-height:40px;cursor:pointer", onclick: () => chatsSheet(d) },
