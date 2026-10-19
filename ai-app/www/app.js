@@ -2048,6 +2048,12 @@
           el("span", { style: "font-size:24px", text: "🗣️" }),
           el("div", { class: "grow" }, "Переводчик", el("small", { text: "Скажите фразу — переведу и прочитаю вслух" })),
           el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
+      // the owner's keys: the same list as in «Управление» (its code comes from the server; without it — that tab)
+      if (me.panel) scroll.append(el("div", { class: "card" },
+        el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => (S.views.vpn && S.views.vpn.keys ? S.views.vpn.keys() : show("vpn")) },
+          el("span", { style: "font-size:24px", text: "🔑" }),
+          el("div", { class: "grow" }, "Ключи", el("small", { text: "Все ключи помощника и Claude: какие подключены, каких нет" })),
+          el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
       if (Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
       for (const [k, v] of Object.entries(me.modes).filter(([k]) => me.panel || k !== "coder" || k === me.mode)) {

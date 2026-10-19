@@ -382,7 +382,17 @@
       if (acts.childNodes.length) scroll.append(acts);
       scroll.append(el("div", { style: "font-size:12px;color:var(--muted);margin:0 4px 12px" },
         "Модели: " + (d.engines.length ? d.engines.join(" → ") : "нет ключей") + " · ",
-        el("a", { href: "#", text: "🔑 Запасной ключ OpenRouter", onclick: (e) => { e.preventDefault(); keySheet(d); } })));
+        el("a", { href: "#", text: "🔑 Ключи", onclick: (e) => { e.preventDefault(); allKeys(); } }),
+        // when the free models' day is used up: Claude itself on the owner's key from the rescue console
+        el("br"), d.paid_key
+          ? el("a", { href: "#", text: (d.paid ? "💳 Кончились бесплатные — дальше Claude по вашему ключу: вкл" : "💳 Claude по вашему ключу, когда кончились бесплатные: выкл")
+              + ` · $${(d.spent || 0).toFixed(2)} из $${d.cap || 5} в месяц`, onclick: async (e) => {
+              e.preventDefault();
+              const end = await panel({ op: "agent_paid", on: !d.paid });
+              if (end.t === "done") { cache.claude = end; draw(); } else toast("⚠️ " + end.text);
+            } })
+          : el("a", { href: "#", text: "💳 Когда бесплатные модели кончатся за день, ответит Claude по вашему ключу — добавьте ключ Anthropic в «🔑 Ключи»",
+              onclick: (e) => { e.preventDefault(); allKeys(); } })));
       const ta = el("textarea", { rows: 1, placeholder: d.busy ? "Claude работает… можно написать следующее" : "Что проверить или сделать?" });
       ta.value = claude.draft;
       ta.addEventListener("input", () => { claude.draft = ta.value; ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
@@ -469,22 +479,6 @@
         }
       });
     }
-    function keySheet(d) {
-      sheet("🔑 Ключ OpenRouter", (box, close) => {
-        const inp = el("input", { class: "input", type: "password", placeholder: "sk-or-v1-…", autocomplete: "off" });
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: (d.own_key ? "Сейчас стоит ваш ключ. " : "Сейчас — ключ сервера. ")
-          + "Свой ключ (openrouter.ai → Keys) хранится только на сервере и идёт запасным после GLM. В чат его не присылайте." }),
-          inp, el("div", { style: "height:10px" }),
-          el("button", { class: "btn wide", text: "Сохранить", onclick: async () => {
-            const key = inp.value.trim();
-            if (!key) return;
-            try { const r = await panel({ op: "agent_key", key }); if (r.t !== "done") return toast("⚠️ " + r.text, 6000); close(); toast("✅ Ключ сохранён"); reloadClaude(); } catch (e) { toast(problem(e)); }
-          } }));
-        if (d.own_key) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "Убрать свой ключ", onclick: async () => {
-          try { await panel({ op: "agent_key", key: "" }); close(); toast("Свой ключ убран"); reloadClaude(); } catch (e) { toast(problem(e)); }
-        } }));
-      });
-    }
     function drawServer(d) {
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
@@ -503,6 +497,7 @@
           el("small", { text: bad.length ? bad.join(" · ") : `${d.host} · ${d.ip}` + (d.online !== null ? ` · в сети: ${d.online}` : "") }))));
       // what the owner needs: the hosting's days left and the server's version (always), the bridges, remote desktop
       const u = d.update;
+      scroll.append(keysRow());  // every key of the helper and Claude: which are in
       if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
       if (u) scroll.append(updateCard(u, "all"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить», the night switch
       if ("vpn_soft" in d) scroll.append(vpnSoftCard(d.vpn_soft));
@@ -852,7 +847,7 @@
           u.id === d.me ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delPerson(u); } }),
           "›"));
       }
-      scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), diskRow(), videoCard(), trendsCard(), searchCard());
+      scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), keysRow(), diskRow(), videoCard(), trendsCard(), searchCard());
     }
     async function delPerson(u) {
       if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
@@ -995,6 +990,112 @@
       };
       panel({ op: "search_get" }).then((v) => (v.t === "done" && v.on ? fill(v) : card.remove())).catch(() => card.remove());
       return card;
+    }
+
+    // ---- «🔑 Ключи»: every key of the helper and Claude in one place — which are in, which are not, what each is for ----
+    const KEY_SITE = {  // where each key is made
+      dahl: "https://inference.dahl.global", orca: "https://orcarouter.ai", nvidia: "https://build.nvidia.com",
+      zhipu: "https://open.bigmodel.cn", gemini: "https://aistudio.google.com/apikey", openrouter: "https://openrouter.ai/keys",
+      groq: "https://console.groq.com/keys", exa: "https://dashboard.exa.ai/api-keys", giga: "https://developers.sber.ru/studio",
+      salute: "https://developers.sber.ru/studio", cf: "https://dash.cloudflare.com", ovh: "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/",
+      hf: "https://huggingface.co/settings/tokens/new?tokenType=write", coverr: "https://coverr.co/developers",
+      anthropic: "https://console.anthropic.com/settings/keys",
+    };
+    // the keys the helper's own cards check and keep (search, video, trends): [set, off, the field the key goes in]
+    const APP_KEY_OP = { groq: ["groq_set", "groq_off", "key"], exa: ["exa_set", "exa_off", "key"], hf: ["hf_set", "hf_off", "token"],
+      coverr: ["coverr_set", "coverr_off", "key"] };
+    let keysNow = null;  // the list as the server last said it
+    function keysRow() {
+      const sub = el("small", { text: keysNow ? `подключено ${keysNow.filter((k) => k.on).length} из ${keysNow.length}` : "все ключи помощника и Claude" });
+      const card = el("div", { class: "card", style: "margin:0 0 12px;padding:8px 12px" },
+        el("div", { class: "row", style: "min-height:44px;cursor:pointer", onclick: () => allKeys() },
+          el("span", { style: "font-size:22px", text: "🔑" }), el("div", { class: "grow" }, "Ключи", sub),
+          el("span", { class: "muted", style: "font-size:22px", text: "›" })));
+      panel({ op: "agent_keys" }).then((r) => {
+        if (r.t !== "done") return;
+        keysNow = r.keys;
+        const off = r.keys.filter((k) => !k.on).length;
+        sub.textContent = `подключено ${r.keys.length - off} из ${r.keys.length}` + (off ? " · нажмите, чтобы увидеть, каких нет" : "");
+      }).catch(() => {});
+      return card;
+    }
+    function allKeys() {
+      sheet("🔑 Ключи", (box) => {
+        const list = el("div", {}, el("div", { class: "status", style: "padding:12px" }, el("span", { class: "spin" }), "Загружаю…"));
+        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text:
+          "Все ключи помощника и Claude в одном месте: ✅ — подключён, ➖ — нет. Нажмите строку — там написано, для чего ключ "
+          + "и где его взять; там же его подключают, меняют и убирают. Ключи хранятся только на сервере — в чаты их не присылайте." }), list);
+        const fill = (keys) => {
+          keysNow = keys;
+          list.innerHTML = "";
+          list.append(el("div", { style: "font-size:14px;margin:0 2px 6px", text: `Подключено ${keys.filter((k) => k.on).length} из ${keys.length}` }));
+          for (const k of keys) {
+            list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => keyOne(k, fill) },
+              el("span", { style: "font-size:18px;width:26px;flex:none;text-align:center", text: k.on ? "✅" : "➖" }),
+              el("div", { class: "grow" }, k.name, el("small", { text: k.use })),
+              el("span", { class: "muted", style: "font-size:22px", text: "›" })));
+          }
+        };
+        panel({ op: "agent_keys" }).then((r) => {
+          if (r.t === "done") return fill(r.keys);
+          list.innerHTML = "";
+          list.append(el("p", { class: "status", style: "padding:8px 0", text: "⚠️ " + (r.text || "Список ключей не открылся.")
+            + " Список ведёт служба «🛠 Claude» — если она не отвечает, ключи поиска, видео и трендов есть в их карточках («🤖 Помощник»)." }));
+        }).catch((e) => { list.innerHTML = ""; list.append(el("p", { class: "status", style: "padding:8px 0", text: problem(e) })); });
+      });
+    }
+    async function keySave(k, key) {  // checked where it is used and kept; "" takes it away. The list as it is after
+      const op = APP_KEY_OP[k.id];
+      if (op && (key || !k.fixed)) {  // the helper's own card checks and keeps it
+        const end = await panel(key ? { op: op[0], [op[2]]: key } : { op: op[1] });
+        if (end.t !== "done") return end;
+        if (!k.fixed) {  // (the list's service away: the key is kept all the same, the list shows it as it now is)
+          const r = await panel({ op: "agent_keys" }).catch(() => null);
+          return r && r.t === "done" ? r : { t: "done", keys: (keysNow || [k]).map((x) => (x.id === k.id ? Object.assign({}, x, { on: !!key }) : x)) };
+        }
+      }
+      return panel({ op: "agent_setkey", id: k.id, key });  // (a key given to the installer: its copy in the settings follows)
+    }
+    function keyOne(k, fill) {
+      sheet("🔑 " + k.name, (box, close) => {
+        const inp = el("input", { class: "input", placeholder: k.two ? "токен Workers AI" : "вставьте ключ", autocomplete: "off", spellcheck: "false" });
+        const acct = k.two ? el("input", { class: "input", style: "margin-bottom:8px", placeholder: "ID аккаунта (32 знака)", autocomplete: "off", spellcheck: "false" }) : null;
+        box.append(
+          el("div", { style: "font-size:15px;margin:-6px 0 8px", text: k.on ? "✅ Подключён" + (k.fixed ? " (задан при установке сервера)" : "")
+            + (k.own ? " · у чата с Claude свой ключ" : "") : "➖ Не подключён" }),
+          el("div", { style: "font-size:14px;color:var(--muted);margin:0 0 6px", text: "Для чего: " + k.use }),
+          el("div", { style: "font-size:14px;color:var(--muted);margin:0 0 10px", text: "Где взять: " + k.get }),
+          KEY_SITE[k.id] ? el("a", { class: "btn line wide", href: KEY_SITE[k.id], target: "_blank", rel: "noopener",
+            style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🌐 Открыть сайт" }) : "",
+          acct || "", inp,
+          el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
+            let t = "";
+            try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
+            if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
+          } }),
+          el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ " + (k.on ? "Заменить ключ" : "Подключить"), onclick: async (e) => {
+            const b = e.currentTarget;
+            const key = (acct ? acct.value.trim() + ":" : "") + inp.value.trim();
+            if (!inp.value.trim() || (acct && !acct.value.trim())) { toast(acct ? "Вставьте и ID аккаунта, и токен" : "Сначала вставьте ключ"); return; }
+            busyBtn(b, "⏳ Проверяю ключ…");
+            try {
+              const end = await keySave(k, key);
+              if (end.t !== "done") { toast("⚠️ " + end.text, 7000); freeBtn(b); return; }
+              close(); fill(end.keys);
+              toast(`✅ ${k.name}: ключ подключён` + (k.app || ["nvidia", "anthropic"].includes(k.id) ? "" : " — помощник перезапустится и возьмёт его примерно через полминуты"), 6000);
+            } catch (x) { toast(problem(x)); freeBtn(b); }
+          } }),
+          k.on ? el("button", { class: "btn line wide", style: "margin-top:8px", text: "Убрать ключ", onclick: async (e) => {
+            const b = e.currentTarget;
+            if (!(await confirmBox(`Убрать ключ ${k.name}? Для чего он был: ${k.use}.`, "Убрать"))) return;
+            busyBtn(b, "⏳ Убираю…");
+            try {
+              const end = await keySave(k, "");
+              if (end.t !== "done") { toast("⚠️ " + end.text, 7000); freeBtn(b); return; }
+              close(); fill(end.keys); toast(`Ключ ${k.name} убран`);
+            } catch (x) { toast(problem(x)); freeBtn(b); }
+          } }) : "");
+      });
     }
 
     // the search's own keys: Exa (a search made for AI: the pages' text with the results), Groq (its web search beside)
@@ -1397,7 +1498,7 @@
     }
     // the tab has no count of its own any more: a count left from an older version goes
     function peek() { badge(0); }
-    return { root, peek, redraw: () => open && draw(),
+    return { root, peek, keys: allKeys, redraw: () => open && draw(),
       sub: () => ({ server: "состояние, мосты, удалённый доступ", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется помощником", claude: "Claude Code на вашем сервере" })[part],
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
       onShow: () => (open ? load() : enter()) };
