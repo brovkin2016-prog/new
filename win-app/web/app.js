@@ -1,6 +1,6 @@
 "use strict";
-// Winger for Windows: the same screen as Winger on the phone — the big button, the connections as buttons (a click: on
-// through it, or off when it is the one in use; ⚡: its speed; a right click: remove it), the programs, a link
+// Winger for Windows: the same screen as Winger on the phone — the big button and how it is; the connections in one list
+// (a click: on through it, or off when it is the one in use; ⚡: its speed; a right click: remove it); the settings below
 const $ = (s) => document.querySelector(s);
 const el = (tag, props, ...kids) => {
   const n = document.createElement(tag);
@@ -43,14 +43,14 @@ function rate(bps) {
   if (bps < 1024 * 1024) return Math.round(bps / 1024) + " КБ/с";
   return (bps / 1024 / 1024).toFixed(1).replace(".", ",") + " МБ/с";
 }
-let S = null, appsOpen = false;
+let S = null;
 function draw(s) {
   S = s;
   const st = s.status, has = s.conns.length > 0, on = st.phase !== "off";
   $("#power").className = "power" + (st.phase === "on" ? " on" : on ? " wait" : "") + (has ? "" : " none");
   let t, d;
   switch (st.phase) {
-    case "on": t = "Защищено"; d = "Включено " + since(st.since) + "\n↓ " + rate(s.down) + "   ↑ " + rate(s.up); break;
+    case "on": t = "Защищено"; d = "Включено " + since(st.since) + " · ↓ " + rate(s.down) + " · ↑ " + rate(s.up); break;
     case "connecting": t = "Подключаюсь…"; d = st.note || "Это занимает несколько секунд"; break;
     case "retrying": t = "Переподключаюсь…"; d = st.note; break;
     default:
@@ -65,7 +65,7 @@ function draw(s) {
   ping.hidden = !on;
   if (on && !ping.dataset.asking) {
     const ms = st.ping;
-    ping.textContent = "●  " + (ms < 0 ? "Отклик: проверяю…" : ms === 0 ? "Отклик: нет ответа" : "Отклик " + ms + " мс");
+    ping.textContent = "● " + (ms < 0 ? "Отклик: проверяю…" : ms === 0 ? "Отклик: нет ответа" : "Отклик " + ms + " мс");
     ping.className = "ping " + (ms < 0 ? "" : ms === 0 ? "bad" : ms < 150 ? "good" : ms < 400 ? "slow" : "bad");
   }
   // VK wants a person before it lets the bridge in: its check, a page of the bridge program on this computer
@@ -75,22 +75,27 @@ function draw(s) {
     capBox = el("div", { id: "captcha", class: "card" }, el("b", { text: "VK просит подтвердить, что вы не робот" }),
       el("small", { text: "Пройдите проверку — после неё мост VK подключится сам." }),
       el("button", { class: "btn wide", text: "✅ Я не робот — открыть проверку", onclick: () => window.open(capBox.dataset.url, "_blank") }));
-    $("#ping").after(capBox);
+    $(".hero").after(capBox);
   } else if (!cap && capBox) capBox.remove();
   if (cap) capBox.dataset.url = cap;  // a new check (the bridge started again) has its own page
   drawConns(s);
+  $("#add").hidden = has;  // nothing yet: adding is the one thing to do
+  $("#addRow").hidden = !has;  // (then the big button above does it)
+  $("#connsHead").hidden = !has;
   $("#prep").hidden = !s.preparing;  // the laptop's own bridges being made on the server
   $("#rescue").hidden = !s.owner;  // the server owner's only
-  $("#appsCard").hidden = !has;
-  document.querySelectorAll("#mode button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === (!!s.onlyApps || appsOpen)));
+  $("#appsRow").hidden = !has;
+  $("#appsVal").textContent = s.onlyApps ? "выбранные: " + (s.apps || []).length : "все программы";
   const u = s.update || {};
-  $("#verName").textContent = "Winger " + s.version + (u.state === "downloading" ? " · загружаю " + (u.name || "новую версию") + "…"
-    : u.state === "ready" ? " · ставлю " + (u.name || "новую версию") + ", окно закроется на минуту" : "");
-  if (!appsOpen) drawApps();
+  $("#verName").textContent = "Winger " + s.version + (u.state === "downloading" ? " · загружаю…" : u.state === "ready" ? " · ставлю…" : "");
+  $("#ver").title = u.state === "downloading" ? "Загружаю " + (u.name || "новую версию")
+    : u.state === "ready" ? "Ставлю " + (u.name || "новую версию") + ", окно закроется на минуту" : "";
 }
-// the connections as buttons, as on the phone: made again only when the list changes (a click is never lost to a
-// redraw), their lines follow the VPN — what a tap does now, and the last speed check
+// the connections in one list, as on the phone: made again only when the list changes (a click is never lost to a
+// redraw); each row: a mark (filled: in use), its name, one short line (its response time and speed, or what a bridge
+// goes through), what it is doing now on the right, and ⚡ for its speed
 let connsKey = "";
+const short = (line) => (line || "").replace(/^⏱\s*отклик\s*/, "").replace(/^⚡\s*/, "⚡ ");
 function drawConns(s) {
   const st = s.status, on = st.phase !== "off", list = $("#conns");
   const key = s.conns.map((c) => (c.bridge ? "b|" : "s|") + c.name).join("\n");
@@ -98,10 +103,14 @@ function drawConns(s) {
     connsKey = key;
     list.innerHTML = "";
     s.conns.forEach((c, i) => {
-      list.append(el("div", { class: "conn", onclick: () => use(i), oncontextmenu: (e) => { e.preventDefault(); remove(i, S.conns[i]); } },
+      list.append(el("div", { class: "conn", role: "button", tabindex: "0", onclick: () => use(i),
+        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); use(i); } },
+        oncontextmenu: (e) => { e.preventDefault(); remove(i, S.conns[i]); } },
+        el("span", { class: "dot" }),
         el("span", { class: "ic", text: c.bridge ? "🌉" : "🌐" }),
         el("div", { class: "grow" }, el("b", { class: "name", text: c.name }), el("small", { class: "cnote" })),
-        el("button", { class: "fast", title: "Проверить скорость (удалить — правый щелчок по строке)", text: "⚡",
+        el("span", { class: "chip" }),
+        el("button", { class: "fast", title: "Проверить скорость (удалить — правый щелчок по строке)", "aria-label": "Проверить скорость", text: "⚡",
           onclick: (e) => { e.stopPropagation(); speed(i, S.conns[i]); } })));
     });
   }
@@ -109,33 +118,33 @@ function drawConns(s) {
   let act = s.conns.findIndex((c) => c.active);
   if (act < 0) act = cur;
   s.conns.forEach((c, i) => {
-    let note, color = "", edge = "";
-    if (on && i === act && st.phase === "on") {
-      note = st.auto ? "● Включено само: выбранный не отвечает" : "● Включено — нажмите, чтобы выключить";
-      color = edge = "on";
-    } else if (on && i === act) {
-      note = st.phase === "connecting" ? "Подключаюсь…" : "Переподключаюсь…";
-      color = edge = "wait";
-    } else if (on && i === cur) {
-      note = "Не отвечает — нажмите, чтобы попробовать снова";
-      color = "wait"; edge = "chosen";
-    } else {
-      note = c.foreign ? "Мост телефона: включайте, только когда телефон не на нём — иначе они выбивают друг друга"
-        : c.bridge ? "Нажмите — через " + c.service + ", когда обычный не работает" : "Нажмите, чтобы включить через этот сервер";
-      if (i === cur) edge = "chosen";
-    }
-    // the response time: live for the one in use, else its last check (a bridge's: when it was last on)
-    const pg = on && i === act && st.phase === "on" && st.ping > 0 ? "⏱ отклик " + st.ping + " мс"
-      : c.ping || (c.bridge ? "⏱ отклик — когда мост включён" : "");
-    if (pg) note += "\n" + pg;
-    if (c.speed) note += "\n" + c.speed;
+    let chip = "", mark = "";
+    if (on && i === act && st.phase === "on") { chip = st.auto ? "Включено само" : "Включено"; mark = "on"; }
+    else if (on && i === act) { chip = st.phase === "connecting" ? "Подключаюсь…" : "Переподключаюсь…"; mark = "wait"; }
+    else if (on && i === cur) { chip = "Не отвечает"; mark = "chosen"; }
+    else if (i === cur) mark = "chosen";
+    // its line: the response time (live for the one in use) and the last speed; a bridge: what it goes through
+    const pg = on && i === act && st.phase === "on" && st.ping > 0 ? st.ping + " мс" : short(c.ping);
+    const parts = c.foreign ? ["мост телефона — когда телефон не на нём"] : c.bridge ? ["мост через " + c.service] : [];
+    if (pg) parts.push(pg);
+    if (c.speed) parts.push(short(c.speed));
+    const note = parts.join(" · ") || "сервер";
     const row = list.children[i];
     if (!row) return;
-    if (row.className !== "conn " + edge) row.className = "conn " + edge;
+    const cls = ("conn " + mark).trim();
+    if (row.className !== cls) row.className = cls;
     const n = row.querySelector(".cnote");
-    if (n.textContent !== note) n.textContent = note;
-    if (n.className !== "cnote " + color) n.className = "cnote " + color;
+    if (n.textContent !== note) { n.textContent = note; n.title = note; }
+    const ch = row.querySelector(".chip");
+    if (ch.textContent !== chip) ch.textContent = chip;
+    const chc = "chip " + (mark === "on" ? "on" : chip ? "wait" : "");
+    if (ch.className !== chc) ch.className = chc;
   });
+  // what a click does, said once under the list (and why another one is on by itself)
+  const hint = !s.conns.length ? "" : st.auto && st.phase === "on" ? "Выбранное подключение не отвечает — Winger включил другое сам."
+    : on ? "Нажмите на включённое, чтобы выключить, или на другое — чтобы перейти на него."
+    : s.conns.length > 1 ? "Нажмите на подключение — Winger включится через него." : "";
+  if ($("#hint").textContent !== hint) $("#hint").textContent = hint;
 }
 async function refresh() {
   try { draw(await call("state")); } catch (e) { $("#state").textContent = "Служба Winger не отвечает"; }
@@ -203,31 +212,45 @@ $("#ping").onclick = async () => {
   refresh();
 };
 $("#add").onclick = paste;
-async function drawApps() {
-  const box = $("#apps"); box.innerHTML = "";
-  if (!S || (!S.onlyApps && !appsOpen)) return;
-  let procs = [];
-  try { procs = (await call("processes")).processes || []; } catch (e) { /* nothing */ }
-  const chosen = new Set((S.apps || []).map((a) => a.toLowerCase()));
-  const names = [...new Set([...chosen, ...procs.map((p) => p.toLowerCase())])].sort();
-  box.innerHTML = "";
-  box.append(el("small", { class: "note", text: "Отметьте программы — через VPN пойдут только они. Список — запущенные сейчас программы." }));
-  for (const n of names) {
-    const cb = el("input", { type: "checkbox" }); cb.checked = chosen.has(n); cb.dataset.name = n;
-    box.append(el("label", {}, cb, el("span", { text: n })));
-  }
-  box.append(el("button", { class: "btn wide", text: "Сохранить", onclick: async () => {
-    const apps = [...box.querySelectorAll("input:checked")].map((c) => c.dataset.name);
-    try { await call("apps", { only: apps.length > 0, apps }); appsOpen = false; toast(apps.length ? "Через VPN: " + apps.length + " прогр." : "Через VPN — все программы"); refresh(); }
-    catch (e) { toast(e.message); }
-  } }));
+$("#addRow").onclick = paste;
+// «Через VPN»: all programs, or only the ticked ones (the list: the programs running now and those ticked before)
+function appsSheet() {
+  sheet("Какие программы через VPN", (box, close) => {
+    let only = !!S.onlyApps;
+    const seg = el("div", { class: "seg", id: "mode" },
+      el("button", { "data-only": "0", text: "Все программы" }), el("button", { "data-only": "1", text: "Только выбранные" }));
+    const list = el("div", { class: "apps", id: "apps" });
+    const mark = () => seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === only));
+    const fill = async () => {
+      list.innerHTML = "";
+      if (!only) { list.append(el("small", { class: "note", text: "Через VPN идут все программы этого компьютера." })); return; }
+      let procs = [];
+      try { procs = (await call("processes")).processes || []; } catch (e) { /* nothing */ }
+      if (!only) return;  // switched back while the list was coming
+      const chosen = new Set((S.apps || []).map((a) => a.toLowerCase()));
+      const names = [...new Set([...chosen, ...procs.map((p) => p.toLowerCase())])].sort();
+      list.innerHTML = "";
+      list.append(el("small", { class: "note", text: "Отметьте программы — через VPN пойдут только они. Список — запущенные сейчас программы." }));
+      for (const n of names) {
+        const cb = el("input", { type: "checkbox" }); cb.checked = chosen.has(n); cb.dataset.name = n;
+        list.append(el("label", {}, cb, el("span", { text: n })));
+      }
+    };
+    seg.onclick = (e) => { const b = e.target.closest("button"); if (!b) return; only = b.dataset.only === "1"; mark(); fill(); };
+    box.append(seg, list, el("div", { class: "pair" }, el("button", { class: "btn line", text: "Отмена", onclick: close }),
+      el("button", { class: "btn", text: "Сохранить", onclick: async () => {
+        const apps = only ? [...list.querySelectorAll("input:checked")].map((c) => c.dataset.name) : S.apps || [];
+        try {
+          await call("apps", { only: only && apps.length > 0, apps });
+          close();
+          toast(only && apps.length ? "Через VPN: " + apps.length + " прогр." : "Через VPN — все программы");
+          refresh();
+        } catch (e) { toast(e.message); }
+      } })));
+    mark(); fill();
+  });
 }
-$("#mode").onclick = async (e) => {
-  const b = e.target.closest("button"); if (!b) return;
-  if (b.dataset.only === "1") { appsOpen = true; draw(S); drawApps(); return; }
-  appsOpen = false;
-  try { await call("apps", { only: false, apps: S.apps || [] }); refresh(); } catch (err) { toast(err.message); }
-};
+$("#appsRow").onclick = appsSheet;
 // «Проверить обновление»: the family server is asked; what came of it is said (newest already, a new one coming, or why not)
 $("#ver").onclick = async () => {
   const b = $("#ver");

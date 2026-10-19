@@ -29,11 +29,15 @@ const fs = require("fs");
     await page.waitForSelector("#ping:has-text('Отклик')", { timeout: 10000 });
     await page.waitForSelector("#note:has-text('Включено')");
     await page.screenshot({ path: (process.env.OUT || ".") + "/win-on" + (process.env.DARK ? "-d" : "") + ".png" });
-    want((await page.innerText("#conns")).includes("● Включено — нажмите, чтобы выключить"), "the connection's button says it is on");
+    want((await page.innerText("#conns .conn.on")).includes("Включено") && (await page.innerText("#hint")).includes("чтобы выключить"),
+      "the connection's row says it is on, and what a click on it does");
+    want(await page.$("#add[hidden]") && !(await page.$("#addRow[hidden]")), "with a connection: «Добавить подключение» in the settings, no big button");
     want(await page.$("#conns .conn .fast") && !(await page.innerText("#conns")).includes("⋯"), "a ⚡ speed button on the row, no ⋯ menu");
+    await page.click("#appsRow");
     await page.click("#mode button[data-only='1']");
     await page.waitForSelector("#apps label");
     want((await page.$$("#apps label")).length > 0, "the running programs are listed");
+    await page.click(".sheet button:has-text('Отмена')");
     await page.click("#journal");
     await page.waitForSelector(".toast:has-text('Скопировано')", { timeout: 20000 });
     const clip = await page.evaluate(() => navigator.clipboard.readText());

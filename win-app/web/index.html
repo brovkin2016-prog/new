@@ -16,25 +16,21 @@
   <section class="hero">
     <button id="power" class="power" aria-label="Включить или выключить VPN"><span>⏻</span></button>
     <div id="state" class="state">Выключено</div>
-    <div id="note" class="note"></div>
-    <button id="ping" class="ping" hidden></button>
+    <div class="facts"><span id="note" class="note"></span><button id="ping" class="ping" hidden></button></div>
   </section>
-  <div id="conns"></div>
-  <div id="prep" class="note prep" hidden>🌉 Мосты для этого ноутбука готовятся на сервере — у него будут свои, не телефона. Появятся сами через несколько минут.</div>
-  <section class="card" id="appsCard" hidden>
-    <h2>Какие программы через VPN</h2>
-    <div class="seg" id="mode">
-      <button data-only="0">Все программы</button>
-      <button data-only="1">Только выбранные</button>
-    </div>
-    <div id="apps" class="apps"></div>
-  </section>
-  <button id="add" class="btn soft wide">📋 Вставить ссылку</button>
-  <footer>
-    <div class="verrow"><span id="verName">Winger</span><button id="ver" class="btn soft small">🔄 Проверить обновление</button></div>
-    <button id="journal" class="link">📋 Скопировать журнал и проверку связи</button>
-    <button id="rescue" class="link" hidden>🛟 Спасение сервера: консоль в браузере</button>
-  </footer>
+  <button id="add" class="btn wide" hidden>📋 Вставить ссылку</button>
+  <h2 class="sec" id="connsHead" hidden>Подключение</h2>
+  <div id="conns" class="list"></div>
+  <div id="hint" class="hint"></div>
+  <div id="prep" class="hint prep" hidden>🌉 Мосты для этого ноутбука готовятся на сервере — у него будут свои, не телефона. Появятся сами через несколько минут.</div>
+  <h2 class="sec">Настройки</h2>
+  <div class="list" id="settings">
+    <button class="item" id="appsRow" hidden><span class="ic">🧩</span><span class="grow">Через VPN</span><span class="val" id="appsVal"></span><span class="chev">›</span></button>
+    <button class="item" id="addRow"><span class="ic">➕</span><span class="grow">Добавить подключение</span><span class="chev">›</span></button>
+    <button class="item" id="ver"><span class="ic">🔄</span><span class="grow">Проверить обновление</span><span class="val" id="verName">Winger</span><span class="chev">›</span></button>
+    <button class="item" id="journal"><span class="ic">📋</span><span class="grow">Скопировать журнал и проверку связи</span><span class="chev">›</span></button>
+    <button class="item" id="rescue" hidden><span class="ic">🛟</span><span class="grow">Спасение сервера: консоль в браузере</span><span class="chev">›</span></button>
+  </div>
 </main>
 <div id="sheet" class="sheet-bg" hidden><div class="sheet" role="dialog"><div id="sheet-body"></div></div></div>
 <div id="toast" class="toast" hidden></div>
