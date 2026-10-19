@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,17 @@ type EngineOptions struct {
 	Tun       bool     // false: no virtual interface — the connection is only being looked at
 	Own       []string // this program's own files: always straight
 	LogFile   string
+}
+
+// procNames: programs by their file name, whatever the case of its letters. sing-box compares process_name exactly, and
+// Windows keeps a file's own case («Telegram.exe») while the list keeps names in lower case — «telegram.exe» never
+// matched, and Telegram went straight past the VPN. A path's last part, any case: «…\Telegram.exe» matches.
+func procNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, `(?i)(^|[\\/])`+regexp.QuoteMeta(n)+`$`)
+	}
+	return out
 }
 
 // Config is the sing-box configuration (the 1.14 format) for one connection.
@@ -95,13 +107,13 @@ func Config(o EngineOptions) map[string]any {
 	rules := []any{
 		map[string]any{"action": "sniff"},
 		map[string]any{"inbound": []string{"probe-in"}, "outbound": "proxy"},
-		map[string]any{"process_name": o.Own, "outbound": "direct"},
+		map[string]any{"process_path_regex": procNames(o.Own), "outbound": "direct"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{"ip_is_private": true, "outbound": "direct"},
 	}
 	final := "proxy"
 	if only {
-		rules = append(rules, map[string]any{"process_name": o.OnlyApps, "outbound": "proxy"})
+		rules = append(rules, map[string]any{"process_path_regex": procNames(o.OnlyApps), "outbound": "proxy"})
 		final = "direct"
 	}
 	if len(o.Own) == 0 {

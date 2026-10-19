@@ -161,6 +161,9 @@ func install() error {
 	}
 	if !strings.EqualFold(filepath.Clean(self), filepath.Clean(installedExe())) {
 		if err := copyFile(self, installedExe()); err != nil {
+			if s != nil {
+				_ = s.Start() // the VPN that was on stays on: the old program goes on
+			}
 			return fmt.Errorf("не скопировался: %w", err)
 		}
 	}
@@ -231,12 +234,13 @@ func uninstall() error {
 	}
 	_ = registry.DeleteKey(registry.LOCAL_MACHINE, uninstallKey)
 	_ = os.Remove(filepath.Join(os.Getenv("ProgramData"), `Microsoft\Windows\Start Menu\Programs\Winger.lnk`))
-	// the running file goes a moment later; the settings stay (a new install finds the connections)
-	cmd := exec.Command("cmd", "/c", "timeout /t 3 /nobreak >nul & taskkill /im winger.exe /f >nul 2>&1 & rmdir /s /q \""+installDir()+"\"")
+	message("Winger удалён.")
+	// the running file goes a moment later, once this one is gone too (said first: the words are not cut off); the
+	// settings stay (a new install finds the connections). A wait that works with no console: «timeout» does not.
+	cmd := exec.Command("cmd", "/c", "ping -n 4 127.0.0.1 >nul & taskkill /im winger.exe /f >nul 2>&1 & ping -n 2 127.0.0.1 >nul & rmdir /s /q \""+installDir()+"\"")
 	hideWindow(cmd)
 	cmd.SysProcAttr.CreationFlags |= windows.DETACHED_PROCESS
 	_ = cmd.Start()
-	message("Winger удалён.")
 	return nil
 }
 
@@ -298,6 +302,25 @@ func copyFile(from, to string) error {
 	if err := out.Close(); err != nil {
 		return err
 	}
-	_ = os.Remove(to)
-	return os.Rename(tmp, to)
+	// the program running now (the tray icon, the window) cannot be deleted or overwritten on Windows, but it can be moved
+	// aside: the new one takes its name, the old file goes when nothing runs it any more (cleanOld)
+	cleanOld(to)
+	old := fmt.Sprintf("%s.old-%d", to, time.Now().UnixNano())
+	moved := os.Rename(to, old) == nil
+	if err := os.Rename(tmp, to); err != nil {
+		if moved {
+			_ = os.Rename(old, to) // never left without the program
+		}
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// cleanOld: the program's earlier files moved aside at updates, gone once nothing runs them (one still running stays)
+func cleanOld(exe string) {
+	olds, _ := filepath.Glob(exe + ".old-*")
+	for _, f := range olds {
+		_ = os.Remove(f)
+	}
 }

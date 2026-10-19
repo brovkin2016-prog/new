@@ -96,7 +96,7 @@ final class AvatarView extends View {
                 if (lc == 200 || lc == 404) post(() -> {
                     stopLive();
                     moving = decodeLive();
-                    if (isAttachedToWindow()) startLive();
+                    if (isAttachedToWindow() && getWindowVisibility() == VISIBLE) startLive();
                     invalidate();
                 });
             }
@@ -170,6 +170,21 @@ final class AvatarView extends View {
         });
         anim.start();
         startLive();
+        if (getWindowVisibility() != VISIBLE) onWindowVisibilityChanged(getWindowVisibility());
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int v) {
+        super.onWindowVisibilityChanged(v);
+        // not drawn while Winger is behind other apps or the screen is off: the battery is not spent on it
+        if (anim == null) return;
+        if (v == VISIBLE) {
+            anim.resume();
+            startLive();
+        } else {
+            anim.pause();
+            stopLive();
+        }
     }
 
     @Override

@@ -201,6 +201,7 @@ video { width: 100%; border-radius: 12px; }
 .rec { display: flex; align-items: center; gap: 10px; padding: 4px 6px; }
 .rec .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: blink 1s steps(2) infinite; }
 .rec .time { flex: 1; font-variant-numeric: tabular-nums; }
+.rec .what { flex: 1; min-width: 0; color: var(--muted); }
 .vbar { display: flex; gap: 8px; }
 /* the words wrap inside the button when they do not fit one line (a large system font on 360), never past its edges */
 .vbar .btn { flex: 1 1 0; min-width: 0; padding: 12px 8px; font-size: 15px; white-space: normal; line-height: 1.15; text-align: center; }

@@ -297,7 +297,9 @@ func (f *Family) download(c *http.Client, url, want string) (string, error) {
 		return "", errStr("сервер ответил " + itoa(r.StatusCode))
 	}
 	dir := filepath.Join(f.dataDir, "update")
-	_ = os.MkdirAll(dir, 0o700)
+	if err := privateDir(dir); err != nil { // the service runs what is there: only its own folder will do
+		return "", err
+	}
 	path := filepath.Join(dir, "winger-new.exe")
 	out, err := os.Create(path)
 	if err != nil {

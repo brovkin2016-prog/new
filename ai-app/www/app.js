@@ -266,6 +266,10 @@
         r.onerror = () => res([]);
       });
     },
+    wipe() {  // everything of this phone's person
+      if (!this.db) { this.mem = []; return Promise.resolve(); }
+      return new Promise((res) => { const r = this.tx("readwrite").clear(); r.onsuccess = r.onerror = () => res(); });
+    },
     async clear(thread) {
       for (const m of await this.list(thread)) await this.del(m.id);
     },
@@ -432,8 +436,14 @@
 
   // voice: 16 kHz mono WAV, which the server's recogniser reads directly
   const Rec = {
+    on: false, starting: false, sid: 0,  // recording now; asking for the microphone now; which recording this is
     async start() {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      if (this.starting) throw new Error("busy");
+      if (this.on) this.stop(false);  // one before still on (a screen closed while it listened): ended, not mixed in
+      this.starting = true;
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      } finally { this.starting = false; }
       const Ctx = window.AudioContext || window.webkitAudioContext;
       this.ctx = new Ctx();
       this.src = this.ctx.createMediaStreamSource(this.stream);
@@ -443,18 +453,24 @@
       this.src.connect(this.node);
       this.node.connect(this.ctx.destination);
       this.t0 = Date.now();
+      this.on = true;
+      return ++this.sid;
     },
     stop(keep) {
+      if (!this.on) return null;
+      this.on = false;
       try { this.node.disconnect(); this.src.disconnect(); } catch (e) { /* already */ }
       this.stream.getTracks().forEach((t) => t.stop());
       const rate = this.ctx.sampleRate;
       this.ctx.close();
+      const chunks = this.chunks;
+      this.chunks = [];
       if (!keep) return null;
       let n = 0;
-      for (const c of this.chunks) n += c.length;
+      for (const c of chunks) n += c.length;
       const all = new Float32Array(n);
       let o = 0;
-      for (const c of this.chunks) { all.set(c, o); o += c.length; }
+      for (const c of chunks) { all.set(c, o); o += c.length; }
       const ratio = rate / 16000, len = Math.floor(n / ratio);
       const pcm = new Int16Array(len);
       for (let i = 0; i < len; i++) {
@@ -686,9 +702,15 @@
       el("p", { text: "Для входа нужен код — его присылает владелец помощника." }),
       inp, err, paste, go, mail));
   }
-  async function logout(message) {
+  async function logout(message, wipe) {
     try { await api("/api/logout", {}); } catch (e) { /* signed out anyway */ }
     store.set("token", "");
+    THREADS.clear();  // the next sign-in builds its screens anew: no thread of these is used again
+    if (wipe) {  // (an expired sign-in keeps them: the same person comes back with a new code)
+      await DB.wipe();
+      for (const k of Object.keys(localStorage)) if (/^(chats|chatCur|pend:)/.test(k) || k.startsWith("ai.pend:") || k.startsWith("ai.chat")) localStorage.removeItem(k);
+      S.msgs = {};
+    }
     if (Native && Native.setOwner) Native.setOwner("");  // no server notifications on a signed-out phone
     renderLogin(message || "");
   }
@@ -723,7 +745,8 @@
     try {
       S.me = await api("/api/me", {});
     } catch (e) {
-      if (e instanceof HttpError) { if (e.status !== 401) renderLogin(problem(e)); else renderLogin(e.message); return; }
+      if (e instanceof HttpError && e.status === 401) { renderLogin(e.message); return; }
+      if (e instanceof HttpError && e.status < 500) { renderLogin(problem(e)); return; }
       const app = $("#app");
       app.innerHTML = "";
       app.append(el("div", { class: "login" }, el("div", { class: "logo", text: "✦" }), el("p", { text: problem(e) }),
@@ -783,11 +806,24 @@
     if (!Native.remindAdd) return "\n\nЧтобы телефон напоминал сам, обновите приложение: «☰ Ещё» → «Проверить обновление».";
     const id = Native.remindAdd(JSON.stringify(r));
     if (!id) return "\n\n⚠️ Не получилось поставить напоминание на телефоне.";
-    if (Native.askNotify && !store.get("askedNotify", false)) { store.set("askedNotify", true); Native.askNotify(); }
+    if (Native.askNotify && !store.get("askedNotify", false)) {
+      store.set("askedNotify", true);
+      Native.askNotify();
+      return "\n\nТелефон напомнит сам, даже без интернета — разрешите приложению уведомления в появившемся окне.";
+    }
+    // the phone does not let it show notifications: said now, not found out when it never rings
+    if (Native.notifyOn && !Native.notifyOn()) {
+      if (Native.askNotify) Native.askNotify();
+      return "\n\n⚠️ Уведомления приложения выключены — напоминание не прозвенит. Включите: «☰ Ещё» → «⏰ Напоминания» → «🔔 Включить уведомления».";
+    }
     return "\n\nТелефон напомнит сам, даже без интернета. Отменить — «☰ Ещё» → «⏰ Напоминания».";
   }
   function remindersCard(redraw) {
     const card = el("div", { class: "card" }, el("h3", { text: "⏰ Напоминания" }));
+    if (Native.notifyOn && !Native.notifyOn()) {
+      card.append(el("div", { style: "font-size:14px;color:var(--danger-ink);margin:0 0 8px", text: "⚠️ Уведомления приложения выключены — напоминания не звенят." }),
+        el("button", { class: "btn soft wide", style: "margin-bottom:8px", text: "🔔 Включить уведомления", onclick: () => Native.notifySettings && Native.notifySettings() }));
+    }
     let list = [];
     try { list = JSON.parse(Native.reminders() || "[]"); } catch (e) { /* none */ }
     if (!list.length) {
@@ -1044,6 +1080,7 @@
       // to the newest message; an empty screen opens at its top. Pictures and clips from the phone's store get their
       // height only when loaded: for a few seconds the screen follows them down, unless the person scrolls by themselves.
       down() {
+        if (!box.isConnected) return;  // a chat not on the screen now: the open one is not scrolled for it
         const go = () => { scroll.scrollTop = box.querySelector(".msg") ? scroll.scrollHeight : 0; };
         requestAnimationFrame(go);
         const wait = [...box.querySelectorAll("img, video")].filter((x) => (x.tagName === "IMG" ? !x.complete : x.readyState < 1));
@@ -1150,7 +1187,9 @@
 
   // speech to text in place of the input row; onText gets what was said
   async function dictate(row, onText) {
-    try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
+    if (Rec.starting || Rec.on) return;  // a second tap while the first one starts: the one recording is enough
+    let sid;
+    try { sid = await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
     const time = el("span", { class: "time", text: "0:00" });
     const recRow = el("div", { class: "rec" }, el("span", { class: "dot" }), time,
       el("button", { class: "round ghost", text: "✕", "aria-label": "Отменить", onclick: () => finish(false) }),
@@ -1167,14 +1206,25 @@
       done = true;
       clearInterval(tick);
       recRow.replaceWith(row);
-      const r = Rec.stop(keep);
+      const r = Rec.sid === sid ? Rec.stop(keep) : null;  // (another recording since: this one is over already)
       if (!r || r.duration < 0.6) return;
-      toast("🎧 Слушаю…");
+      hear(r);
+    }
+    // what was said, the input row showing it is being made out meanwhile (it can take a while when the server is
+    // busy); a failure keeps the recording for another try instead of asking to say it all again
+    async function hear(r) {
+      const wait = el("div", { class: "rec" }, el("span", { class: "spin" }), el("span", { class: "what", text: "Распознаю речь…" }));
+      row.replaceWith(wait);
+      let ev = null, why = "";
       try {
-        const ev = await stream("/api/hear", { audio: await b64(r.blob), mime: "audio/wav", duration: r.duration }, () => {});
-        if (ev.t !== "done") { toast(ev.text); return; }
-        onText(ev.text);
-      } catch (e) { toast(problem(e)); }
+        ev = await stream("/api/hear", { audio: await b64(r.blob), mime: "audio/wav", duration: r.duration }, () => {});
+        if (ev.t !== "done") why = ev.text;
+      } catch (e) { why = problem(e); }
+      if (!why) { wait.replaceWith(row); onText(ev.text); return; }
+      const again = el("div", { class: "rec" }, el("span", { class: "what", text: why }),
+        el("button", { class: "round ghost", text: "✕", "aria-label": "Отменить", onclick: () => again.replaceWith(row) }),
+        el("button", { class: "round main", text: "↻", "aria-label": "Распознать ещё раз", onclick: () => { again.replaceWith(row); hear(r); } }));
+      wait.replaceWith(again);
     }
   }
 
@@ -1251,6 +1301,7 @@
         if (S.idea) { toast(S.me.ideas[S.idea][1].split(" Например")[0]); ta.focus(); }
         return;
       }
+      if (S.busy[chatName(cur)]) { toast("Подождите, ещё отвечаю… Сообщение осталось в поле — отправьте его после ответа."); return; }
       const req = Object.assign({ text }, extra || {});
       if (S.idea) req.idea = S.idea;
       const shown = (extra && extra.op ? S.me.ai_ops[extra.op] + (text ? ": " + text : "") : "") || (S.idea ? S.me.ideas[S.idea][0] + ": " + text : text);
@@ -1263,14 +1314,17 @@
       sync();
       th.ask(req, mine, im, d);
     }
-    function bind() {  // the thread of the chat that is open now, with its own asking
+    function bind() {  // the thread of the chat that is open now, with its own asking (made once for each chat)
       const name = chatName(cur);
       if (!S.msgs[name]) S.msgs[name] = [];
-      const t = thread(name, scroll, empty);
+      const t = THREADS.get(name) || thread(name, scroll, empty);
       t.ask = async (req, mine, im, d) => {
-        touch(mine && mine.text);
+        if (S.busy[name]) { toast("Подождите, ещё отвечаю…"); return; }
+        touch((mine && mine.text) || (im ? "📷 Фото" : d ? "📄 " + d.name : ""));  // a photo with no words: named too
         if (!im && !d && !req.op && !req.idea && !req.followup && req.text && REMIND_ASK.test(req.text)) {
-          await t.run("/api/remind", { text: req.text }, mine);  // «напомни …»: the phone rings by itself
+          let tz = "";
+          try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* Moscow then */ }
+          await t.run("/api/remind", { text: req.text, tz }, mine);  // «напомни …»: the phone rings by itself, in its own time
           return;
         }
         const body = Object.assign({ context: context(name) }, req);
@@ -1278,7 +1332,7 @@
         if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
         await t.run("/api/chat", body, mine);
       };
-      if (th) th.box.replaceWith(t.box); else scroll.append(t.box);
+      if (th && th !== t) th.box.replaceWith(t.box); else if (!th) scroll.append(t.box);
       th = t;
       th.redraw();
     }
@@ -1312,6 +1366,7 @@
       await openChat(id);
     }
     async function delChat(c) {
+      if (S.busy[chatName(c.id)]) { toast("Этот чат ещё отвечает — удалите его, когда ответ придёт"); return; }
       if (!(await confirmBox(`Удалить чат «${chatTitle(c)}»? Переписка удалится с телефона.`, "Удалить", true))) return;
       await DB.clear(chatName(c.id));
       delete S.msgs[chatName(c.id)];
@@ -1341,7 +1396,7 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); sendNow(); } });
 
     function record() {
-      dictate(row, (t) => (S.idea ? ((ta.value = t), sendNow({ voice: true }))
+      dictate(row, (t) => (S.idea || S.busy[chatName(cur)] ? ((ta.value = t), sync(), sendNow({ voice: true }))
         : th.ask({ text: t, voice: true }, { role: "me", text: "🎤 " + t, ctx: t })));
     }
     function attachMenu() {
@@ -1460,6 +1515,7 @@
     function submit() {
       const text = ta.value.trim();
       if (!text) return;
+      if (S.busy.study) { toast("Подождите, ещё отвечаю… Вопрос остался в поле."); return; }  // kept, not lost
       ta.value = "";
       ta.style.height = "auto";
       syncAct();
@@ -1656,10 +1712,19 @@
     }
     async function makePdf() {
       if (S.busy.photo || !S.scan.length) return;
-      const pages = await Promise.all(S.scan.map((b) => b64(b)));
+      // one request carries at most 24 MB: the pages that do not fit wait for the next PDF
+      let size = 0, k = 0;
+      for (const b of S.scan) { size += Math.ceil((b.size || 0) / 3) * 4; if (k && size > 22e6) break; k++; }
+      const pages = await Promise.all(S.scan.slice(0, k).map((b) => b64(b)));
       const n = pages.length;
       const out = await th.run("/api/pdf", { pages }, { role: "me", text: `📄 Собрать PDF: ${n} стр.` });
-      if (out && out.pdf) { out.name = out.name || "scan.pdf"; S.scan = []; sync(); th.redraw(); }
+      if (out && out.pdf) {
+        out.name = out.name || "scan.pdf";
+        S.scan = S.scan.slice(n);
+        if (S.scan.length) toast(`Не все страницы влезли в один файл. Остальные (${S.scan.length}) — нажмите «Собрать PDF» ещё раз`);
+        sync();
+        th.redraw();
+      }
     }
     sync();
     th.redraw();
@@ -2038,7 +2103,7 @@
     const scroll = el("div", { class: "scroll" });
     root.append(scroll);
     async function setPref(p) {
-      try { S.me = await api("/api/prefs", p); draw(); toast("Сохранено"); } catch (e) { toast(problem(e)); }
+      try { S.me = await api("/api/prefs", p); draw(); toast("Сохранено"); } catch (e) { draw(); toast(problem(e)); }
     }
     function draw() {
       const me = S.me;
@@ -2111,7 +2176,7 @@
             : "TCP 8443 — запасной путь (UDP не проходит)" }))));
       }
       appCard.append(el("button", { class: "btn line wide danger", style: "margin-top:10px", text: "Выйти", onclick: async () => {
-        if (await confirmBox("Выйти из приложения? Для входа снова понадобится код.", "Выйти", true)) logout("");
+        if (await confirmBox("Выйти из приложения? Переписка и фото удалятся с этого телефона, для входа снова понадобится код.", "Выйти", true)) logout("", true);
       } }));
       scroll.append(appCard);
     }
@@ -2128,7 +2193,7 @@
     // «…или на английском»
     const hintText = () => "Нажмите и говорите — по-русски или на " + me.langs[target][1].toLowerCase().replace(/ий$/, "ом");
     const scr = el("div", { class: "viewer", style: "background:var(--bg)" });
-    const top = el("div", { class: "top" }, el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => scr.remove() }), el("h1", { text: "Переводчик" }));
+    const top = el("div", { class: "top" }, el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => scr.close() }), el("h1", { text: "Переводчик" }));
     const langs = el("div", { class: "chips fade", style: "padding:10px 12px 0" });  // the fade shows there are more to the right
     // what to do, until the first phrase
     const list = el("div", { class: "scroll" }, el("div", { class: "empty tr-empty" },
@@ -2158,12 +2223,15 @@
     let recording = false;
     paintLangs();
     scr.append(top, langs, list, bottom);
+    scr.close = () => { if (recording) { recording = false; Rec.stop(false); } scr.remove(); };  // the microphone never left on
     document.body.append(scr);
     const on = langs.querySelector(".chip.on");  // the language chosen last time is in sight, not behind the fade
     if (on && on.offsetLeft + on.offsetWidth > langs.clientWidth * 0.85) langs.scrollLeft = on.offsetLeft - 12;
     mic.onclick = async () => {
       if (!recording) {
+        if (Rec.starting) return;
         try { await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
+        if (!scr.isConnected) { Rec.stop(false); return; }  // closed while the microphone was being asked for
         recording = true;
         mic.classList.add("on");
         mic.textContent = "⏹️";
@@ -2212,10 +2280,15 @@
   // the phone's Back button: close what is open on top, then go back to the chat; false lets the app go to the background
   window.__aiBack = function () {
     const top = [...document.querySelectorAll(".sheet-bg, .viewer")].pop();
-    if (top) { top.remove(); return true; }
+    if (top) { if (top.close) top.close(); else top.remove(); return true; }
     if (S.views.chat && S.tab !== "chat") { show("chat"); return true; }
     return false;
   };
+  // the Android app reloads the page for its newer screens only when nothing would be lost: nothing typed, picked,
+  // recorded or open, no answer on its way (else they are used from the next start)
+  window.__aiIdle = () => !Rec.on && !Rec.starting && !Object.values(S.busy).some(Boolean) && !S.scan.length && !S.idea
+    && ![...document.querySelectorAll("textarea, input")].some((t) => !["file", "checkbox", "radio", "hidden"].includes(t.type) && t.value.trim())
+    && !document.querySelector(".sheet-bg, .viewer, .rec, .attach-row:not(.hidden), .msg.ai .spin");
   window.__aiTest = { md, tidyMath, parseLogin };
 
   if (store.get("token", "")) start();

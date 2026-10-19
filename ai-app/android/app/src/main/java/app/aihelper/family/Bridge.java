@@ -199,6 +199,34 @@ final class Bridge {
         Reminders.remove(act, id);
     }
 
+    /** Whether a reminder can ring: the phone lets this app show notifications, and its reminders' channel is not off. */
+    @JavascriptInterface
+    public boolean notifyOn() {
+        android.app.NotificationManager nm = act.getSystemService(android.app.NotificationManager.class);
+        if (nm == null) return true;
+        if (!nm.areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT >= 26) {
+            android.app.NotificationChannel ch = nm.getNotificationChannel(Reminders.CHANNEL);
+            return ch == null || ch.getImportance() != android.app.NotificationManager.IMPORTANCE_NONE;
+        }
+        return true;
+    }
+
+    /** The phone's own settings of this app's notifications (to switch them on). */
+    @JavascriptInterface
+    public void notifySettings() {
+        Intent i = Build.VERSION.SDK_INT >= 26
+                ? new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, act.getPackageName())
+                : new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", act.getPackageName(), null));
+        act.runOnUiThread(() -> {
+            try {
+                act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException e) {
+                Toast.makeText(act, "Откройте Настройки → Приложения → ИИ-помощник → Уведомления", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
     @JavascriptInterface
     public void askNotify() {
         if (Build.VERSION.SDK_INT >= 33) {

@@ -39,6 +39,7 @@ public class MainActivity extends Activity {
     private Uri cameraUri;
     private PermissionRequest micRequest;
     private boolean tested;
+    private boolean away;  // gone to the camera, the files, the phone's lock or a permission: the page waits for what comes back
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -98,6 +99,7 @@ public class MainActivity extends Activity {
                         r.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
                     } else {
                         micRequest = r;
+                        away = true;
                         requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
                     }
                 });
@@ -107,6 +109,7 @@ public class MainActivity extends Activity {
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> cb, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = cb;
+                away = true;
                 boolean imagesOnly = true;
                 for (String t : params.getAcceptTypes()) imagesOnly &= t != null && t.startsWith("image");
                 try {
@@ -140,9 +143,15 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        if (saved != null) web.restoreState(saved);
-        else web.loadUrl(START);
+        if (saved != null) {
+            web.restoreState(saved);
+            String cam = saved.getString("camera");
+            if (cam != null) cameraUri = Uri.parse(cam);
+        } else {
+            web.loadUrl(START);
+        }
         assets.refresh();
+        new Thread(this::dropOldShots, "camera-clean").start();
     }
 
     @Override
@@ -155,7 +164,12 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         web.onResume();
-        if (assets.takeFresh()) web.reload();
+        // newer screens: the page is reloaded only when nothing on it would be lost (not right after the camera or the
+        // files, whose photo is just arriving, nor over typed text or a recording); else they wait for the next start
+        if (away) away = false;
+        else if (assets.hasFresh()) web.evaluateJavascript("window.__aiIdle ? window.__aiIdle() : true", v -> {
+            if ("true".equals(v) && assets.takeFresh()) web.reload();
+        });
         Intent i = getIntent();
         if (BuildConfig.DEBUG && i != null && i.getBooleanExtra("test_remind", false)) {  // the emulator test only
             i.removeExtra("test_remind");
@@ -195,6 +209,7 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         web.saveState(out);
+        if (cameraUri != null) out.putString("camera", cameraUri.toString());  // the camera is open: Android may close us
     }
 
     @Override
@@ -217,6 +232,7 @@ public class MainActivity extends Activity {
             return;
         }
         try {
+            away = true;
             startActivityForResult(i, REQ_UNLOCK);
         } catch (ActivityNotFoundException e) {
             unlocked("none");
@@ -234,7 +250,15 @@ public class MainActivity extends Activity {
             unlocked(res == RESULT_OK ? "ok" : "no");
             return;
         }
-        if (fileCallback == null) return;
+        if (fileCallback == null) {
+            // the phone closed the app while the camera was open (short of memory): the page that asked is a new one now
+            if (req == REQ_CAMERA && res == RESULT_OK) {
+                Toast.makeText(this, "Снимок не дошёл: телефон закрывал приложение, пока была открыта камера. Снимите ещё раз.",
+                        Toast.LENGTH_LONG).show();
+            }
+            cameraUri = null;
+            return;
+        }
         Uri[] out = null;
         if (res == RESULT_OK) {
             if (req == REQ_CAMERA && cameraUri != null) out = new Uri[]{cameraUri};
@@ -242,6 +266,16 @@ public class MainActivity extends Activity {
         }
         fileCallback.onReceiveValue(out);
         fileCallback = null;
+        if (req == REQ_CAMERA) cameraUri = null;
+    }
+
+    /** The camera's shots stay in the cache only while they are sent: those from yesterday and before go. */
+    private void dropOldShots() {
+        File[] old = new File(getCacheDir(), "camera").listFiles();
+        if (old == null) return;
+        long day = System.currentTimeMillis() - 24 * 3600_000L;
+        for (File f : old) if (f.lastModified() < day) //noinspection ResultOfMethodCallIgnored
+            f.delete();
     }
 
     @Override

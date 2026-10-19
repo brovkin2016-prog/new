@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 func TestConfigs(t *testing.T) {
 	srv, _ := ParseLink("hysteria2://me:pw@1.2.3.4:443/?sni=vpn.sites-s.ru#s")
@@ -32,7 +35,7 @@ func TestConfigs(t *testing.T) {
 		if in, ok := m["inbound"].([]string); ok && in[0] == "probe-in" {
 			probe = i
 		}
-		if _, ok := m["process_name"]; ok && ownAt < 0 {
+		if _, ok := m["process_path_regex"]; ok && ownAt < 0 {
 			ownAt = i
 		}
 	}
@@ -47,6 +50,22 @@ func TestConfigs(t *testing.T) {
 	for name, o := range cases {
 		if Config(o)["dns"].(map[string]any)["strategy"] != "ipv4_only" {
 			t.Errorf("%s: names must be IPv4 only", name)
+		}
+	}
+}
+
+// a program chosen in lower case («telegram.exe») is matched whatever case Windows keeps its file in, and by its whole name
+func TestProcNamesAnyCase(t *testing.T) {
+	re := regexp.MustCompile(procNames([]string{"telegram.exe"})[0])
+	for path, want := range map[string]bool{
+		`C:\Users\a\AppData\Roaming\Telegram Desktop\Telegram.exe`: true,
+		`C:\Program Files\TELEGRAM.EXE`:                            true,
+		`telegram.exe`:                                             true,
+		`C:\x\notTelegram.exe`:                                     false,
+		`C:\x\Telegram.exe.bak`:                                    false,
+	} {
+		if re.MatchString(path) != want {
+			t.Errorf("%s: want %v", path, want)
 		}
 	}
 }

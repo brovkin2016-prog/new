@@ -342,8 +342,10 @@
         try {
           const end = await panel({ op: "rescue_link" });
           if (end.t !== "done") { toast("⚠️ " + end.text, 9000); go.disabled = false; return; }
-          go.replaceWith(el("a", { class: "btn wide", href: end.url, style: "display:block;text-align:center;text-decoration:none",
-            text: "👉 Открыть в браузере (ссылка на 3 минуты)" }));
+          go.replaceWith(el("a", { class: "btn wide", href: end.url, target: "_blank", rel: "noopener", style: "display:block;text-align:center;text-decoration:none",
+            text: "👉 Открыть консоль в браузере" }),
+            el("small", { style: "display:block;color:var(--muted);margin-top:6px", text: "Там войдите своей ссылкой VPN (она в «🛡 VPN» → ваша карточка). "
+              + "Без ввода — из Winger: «🛟 Спасение сервера». Отсюда консоль сама не впускает: так её не откроет никто, кто проберётся в приложение." }));
         } catch (e) { toast(problem(e)); go.disabled = false; }
       } });
       box.append(el("small", { style: "display:block;color:var(--muted);margin-bottom:6px",

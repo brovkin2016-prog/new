@@ -21,6 +21,9 @@ type Status struct {
 
 var errBack = errors.New("back")
 
+// errNoData: the bridge got into the call, but nothing comes back through it
+var errNoData = errors.New("Звонок есть, но мост на сервере не отвечает.")
+
 const (
 	backFirst = 10 * time.Minute
 	backMax   = 2 * time.Hour
@@ -91,6 +94,18 @@ func failsAfterUp(fails int, held time.Duration) int {
 	return fails
 }
 
+// dcFaults: the quicker way's (the call's data channel) own failures in a row: in the call and nothing came back, or a
+// session that died soon — a lost network, a new call from the server or a slow captcha are not its fault.
+func dcFaults(n int, err error, held time.Duration) int {
+	switch {
+	case errors.Is(err, errNoData) || (held > 0 && held < 5*time.Minute):
+		return n + 1
+	case held >= 5*time.Minute:
+		return 0
+	}
+	return n
+}
+
 // retryWait: how long to wait before trying again after this many failures in a row (2 s, 4 s … 30 s).
 func retryWait(fails int) time.Duration {
 	return min(30*time.Second, time.Second<<min(fails, 5))
@@ -116,16 +131,20 @@ type Engine struct {
 	backAt    time.Time
 	box       Box
 	relay     *Relay
-	probePort int
+	probePort atomic.Int32  // the local port this program's own checks go by (a fresh one when it was taken meanwhile)
 	runDone   chan struct{} // closed when the latest run has ended
 	pinging   atomic.Bool   // PingAll at work
 	pingedAll atomic.Int64  // when it last finished (unix seconds)
 }
 
 func NewEngine(st *Store, dataDir, relayPath string, own []string, tun bool) *Engine {
-	return &Engine{st: st, dataDir: dataDir, relayPath: relayPath, own: own, tun: tun, status: Status{Phase: "off"},
-		probePort: FreePort(), backWait: backFirst}
+	e := &Engine{st: st, dataDir: dataDir, relayPath: relayPath, own: own, tun: tun, status: Status{Phase: "off"},
+		backWait: backFirst}
+	e.probePort.Store(int32(FreePort()))
+	return e
 }
+
+func (e *Engine) port() int { return int(e.probePort.Load()) }
 
 // Status is a copy of the current state.
 func (e *Engine) Status() Status {
@@ -139,7 +158,7 @@ func (e *Engine) ProbePort() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.status.Phase == "on" {
-		return e.probePort
+		return e.port()
 	}
 	return 0
 }
@@ -257,7 +276,7 @@ func (e *Engine) run(g int) {
 		e.set(g, "connecting", "Подключаюсь к серверу…")
 	}
 	e.quickChoice(g)
-	fails := 0
+	fails, dcFails := 0, 0
 	for e.mine(g) {
 		p, tunnel := e.cur()
 		err := e.start(g, p, tunnel)
@@ -295,13 +314,16 @@ func (e *Engine) run(g int) {
 			fails = 0
 			continue
 		}
-		if p.Bridge && tunnel == "dc" && fails >= 2 && p.TunnelMode != "" {
+		if p.Bridge && tunnel == "dc" && p.TunnelMode != "" {
+			dcFails = dcFaults(dcFails, err, held)
+		}
+		if p.Bridge && tunnel == "dc" && dcFails >= 2 && p.TunnelMode != "" {
 			e.mu.Lock()
 			if e.gen == g {
 				e.tunnel = "video" // the data channel does not carry here: the call's video does, a little slower
 			}
 			e.mu.Unlock()
-			fails = 0
+			fails, dcFails = 0, 0
 			if p.Platform == "dion" {
 				Logf("bridge: DION does not carry at the higher speed, back to its usual one")
 			} else {
@@ -316,7 +338,7 @@ func (e *Engine) run(g int) {
 					what = "включаю мост через " + next.Service()
 				}
 				e.switchTo(g, next, true, "«"+p.Name+"» не отвечает — "+what+"…")
-				fails = 0
+				fails, dcFails = 0, 0
 				continue
 			}
 		}
@@ -329,7 +351,7 @@ func (e *Engine) run(g int) {
 // start brings one connection up and checks a page really comes through it.
 func (e *Engine) start(g int, p *Profile, tunnel string) error {
 	s := e.st.Get()
-	opts := EngineOptions{Profile: p, ProbePort: e.probePort, Tun: e.tun, Own: e.own}
+	opts := EngineOptions{Profile: p, ProbePort: e.port(), Tun: e.tun, Own: e.own}
 	if s.OnlyApps && len(s.Apps) > 0 {
 		opts.OnlyApps = s.Apps
 	}
@@ -359,13 +381,21 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 		return nil
 	}
 	if err := e.box.Start(Config(opts)); err != nil {
-		Logf("start: %v", err)
-		return errors.New("Не получилось включить VPN на этом компьютере.")
+		// the local port taken since the service started (another program, or Windows reserved it since): a fresh one
+		Logf("start: %v — once more on another local port", err)
+		e.probePort.Store(int32(FreePort()))
+		opts.ProbePort = e.port()
+		if err := e.box.Start(Config(opts)); err != nil {
+			Logf("start: %v", err)
+			return errors.New("Не получилось включить VPN на этом компьютере.")
+		}
 	}
 	for i := 0; i < 4 && e.mine(g); i++ {
-		if ms := Ping(e.probePort, 10*time.Second); ms > 0 {
+		if ms := Ping(e.port(), 10*time.Second); ms > 0 {
 			e.mu.Lock()
-			e.status.PingMs = ms
+			if e.gen == g { // (another connection since: its own response time is not this one's)
+				e.status.PingMs = ms
+			}
 			e.mu.Unlock()
 			e.st.SetPing(p.Link, ms)
 			Logf("ping %d ms", ms)
@@ -392,7 +422,7 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 				}
 			}
 		}
-		return errors.New("Звонок есть, но мост на сервере не отвечает.")
+		return errNoData
 	}
 	return errors.New("Сервер не отвечает.")
 }
@@ -409,11 +439,15 @@ func (e *Engine) watch(g int, bridge bool) error {
 		if r != nil && !r.Alive() {
 			return errors.New("Мост остановился.")
 		}
-		ms := pageThrough(e.probePort, 10*time.Second)
+		ms := pageThrough(e.port(), 10*time.Second)
 		got := e.box.Received()
 		flowed := got > seen
 		seen = got
 		e.mu.Lock()
+		if e.gen != g { // switched over while it looked: the answer (likely «none», the old one being closed) is not the new one's
+			e.mu.Unlock()
+			return nil
+		}
 		e.status.PingMs = ms
 		p := e.profile
 		e.mu.Unlock()
@@ -632,7 +666,7 @@ const bridgeSpeedOff = "Скорость моста проверяется, ко
 // is on is not touched); kept with its time for the row. A bridge is measured while it is on.
 func (e *Engine) SpeedOf(p *Profile) (string, error) {
 	st := e.Status()
-	port := e.probePort
+	port := e.port()
 	if st.Phase != "on" || st.Active != p.Link {
 		if p.Bridge {
 			return "", errors.New(bridgeSpeedOff)
@@ -667,7 +701,7 @@ func (e *Engine) PingNow() {
 	if !on {
 		return
 	}
-	ms := Ping(e.probePort, 10*time.Second)
+	ms := Ping(e.port(), 10*time.Second)
 	e.mu.Lock()
 	p := e.profile
 	if e.gen == g && e.wanted {

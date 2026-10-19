@@ -67,3 +67,5 @@ func runCheck(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
+
+func privateDir(dir string) error { return os.MkdirAll(dir, 0o700) }

@@ -66,6 +66,11 @@ final class Files {
                 //noinspection ResultOfMethodCallIgnored
                 dir.mkdirs();
                 File f = new File(dir, safe);
+                if (f.exists()) {  // (Android 9 and older: a file of its own name, never over the one saved before)
+                    int dot = safe.lastIndexOf('.');
+                    String stamp = new java.text.SimpleDateFormat("-yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(new java.util.Date());
+                    f = new File(dir, dot > 0 ? safe.substring(0, dot) + stamp + safe.substring(dot) : safe + stamp);
+                }
                 try (FileOutputStream out = new FileOutputStream(f)) {
                     out.write(data);
                 }

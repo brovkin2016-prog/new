@@ -56,11 +56,22 @@ final class PowerButton extends View {
                 invalidate();
             });
             anim.start();
+            if (getWindowVisibility() != VISIBLE) anim.pause();  // Winger is behind other apps: it moves once seen
         } else if (!moving && anim != null) {
             anim.cancel();
             anim = null;
         }
         invalidate();
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int v) {
+        super.onWindowVisibilityChanged(v);
+        // not drawn while Winger is behind other apps or the screen is off: the battery is not spent on it
+        if (anim != null) {
+            if (v == VISIBLE) anim.resume();
+            else anim.pause();
+        }
     }
 
     @Override

@@ -33,6 +33,7 @@ final class State {
         phase = p;
         note = why == null ? "" : why;
         if (p == Phase.ON && since == 0) since = System.currentTimeMillis();
+        if (p == Phase.CONNECTING) pingMs = -1;  // a new connection: the old one's response time is not its
         if (p == Phase.OFF) {
             activeLink = "";
             auto = false;

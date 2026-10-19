@@ -27,7 +27,8 @@ import java.util.List;
  * storage and come back after the phone restarts; a repeating one moves on to its next time.
  */
 public final class Reminders extends BroadcastReceiver {
-    private static final String TAG = "AIREM", PREFS = "reminders", CHANNEL = "reminders";
+    private static final String TAG = "AIREM", PREFS = "reminders";
+    static final String CHANNEL = "reminders";
 
     @Override
     public void onReceive(Context c, Intent i) {  // an alarm of this app (not reachable from other apps)
@@ -56,9 +57,12 @@ public final class Reminders extends BroadcastReceiver {
             for (byte x : b) id.append(String.format("%02x", x));
             String repeat = in.optString("repeat", "none");
             if (!repeat.equals("daily") && !repeat.equals("weekly") && !repeat.equals("monthly")) repeat = "none";
-            while (at < System.currentTimeMillis() - 60_000 && !repeat.equals("none")) at = next(at, repeat);
+            Calendar first = Calendar.getInstance();
+            first.setTimeInMillis(at);
+            int dom = first.get(Calendar.DAY_OF_MONTH);  // a monthly one keeps its day (the 31st: the last day of short months)
+            while (at < System.currentTimeMillis() - 60_000 && !repeat.equals("none")) at = next(at, repeat, dom);
             JSONObject r = new JSONObject().put("id", id.toString()).put("at", at).put("text", text.length() > 300 ? text.substring(0, 300) : text)
-                    .put("repeat", repeat);
+                    .put("repeat", repeat).put("dom", dom);
             JSONArray all = load(c);
             all.put(r);
             save(c, all);
@@ -100,7 +104,7 @@ public final class Reminders extends BroadcastReceiver {
             try {
                 String repeat = r.optString("repeat", "none");
                 long at = r.optLong("at");
-                while (!repeat.equals("none") && at < now - 60_000) at = next(at, repeat);
+                while (!repeat.equals("none") && at < now - 60_000) at = next(at, repeat, r.optInt("dom", 0));
                 r.put("at", Math.max(at, now + 5_000));
             } catch (Exception ignored) {
                 // left as it was
@@ -122,7 +126,7 @@ public final class Reminders extends BroadcastReceiver {
                 if (!repeat.equals("none")) {
                     try {
                         long at = r.optLong("at");
-                        do at = next(at, repeat); while (at < System.currentTimeMillis());
+                        do at = next(at, repeat, r.optInt("dom", 0)); while (at < System.currentTimeMillis());
                         r.put("at", at);
                         keep.put(r);
                         schedule(c, r);
@@ -141,12 +145,19 @@ public final class Reminders extends BroadcastReceiver {
         }
     }
 
-    static long next(long at, String repeat) {
+    /** The next time; a monthly one on its own day of the month (dom; 0: the day it is on now), the last day of a month
+     *  too short for it — the 31st: 28 Feb, then 31 Mar again (not the 28th from then on). */
+    static long next(long at, String repeat, int dom) {
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(at);
         if (repeat.equals("daily")) cal.add(Calendar.DAY_OF_MONTH, 1);
         else if (repeat.equals("weekly")) cal.add(Calendar.DAY_OF_MONTH, 7);
-        else cal.add(Calendar.MONTH, 1);  // 31 Jan → the end of February, as a calendar does
+        else {
+            if (dom <= 0) dom = cal.get(Calendar.DAY_OF_MONTH);
+            cal.set(Calendar.DAY_OF_MONTH, 1);
+            cal.add(Calendar.MONTH, 1);
+            cal.set(Calendar.DAY_OF_MONTH, Math.min(dom, cal.getActualMaximum(Calendar.DAY_OF_MONTH)));
+        }
         return cal.getTimeInMillis();
     }
 

@@ -204,3 +204,20 @@ func message(text string) {
 }
 
 var errDeclined = errors.New("установка отменена")
+
+// privateDir: a folder only SYSTEM and Administrators can write to, made afresh (one that was there — perhaps made by an
+// ordinary user beforehand, with their own rights — goes first; if it cannot go, nothing is put there)
+func privateDir(dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+	if err != nil {
+		return err
+	}
+	p, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	return windows.CreateDirectory(p, &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd})
+}

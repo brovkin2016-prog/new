@@ -101,6 +101,10 @@ final class WebAssets {
     }
 
     /** True once after newer screens arrived: the page may be reloaded to show them. */
+    boolean hasFresh() {
+        return fresh;
+    }
+
     boolean takeFresh() {
         boolean f = fresh;
         fresh = false;

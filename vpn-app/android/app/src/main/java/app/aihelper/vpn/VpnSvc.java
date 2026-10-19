@@ -34,6 +34,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 
@@ -54,6 +56,9 @@ public final class VpnSvc extends VpnService {
     static volatile int socksPort;  // the client's local port while the VPN is on (the app's own update check uses it)
 
     private final Object lock = new Object();
+    // the old connection is closed and the new one opened here, one switch after another, not on the screen's thread
+    private final ExecutorService switcher = Executors.newSingleThreadExecutor();
+    private int asked;  // under lock: every start and stop counts it up; a switch that is no longer the newest does nothing
     private volatile boolean wanted;
     private Thread worker;
     private ParcelFileDescriptor tun;
@@ -98,13 +103,24 @@ public final class VpnSvc extends VpnService {
         Apps.setKeepOn(this, true);
         boolean again = intent != null && intent.getBooleanExtra("again", false);  // the list of apps changed
         Thread old;
+        int my;
         synchronized (lock) {
-            if (!again && wanted && profile != null && profile.link.equals(p.link)) return START_STICKY;  // already on with it
+            if (!again && wanted && profile != null && profile.link.equals(p.link)) {
+                update();  // already on with it: the notification says «Подключаюсь…» from foreground() above, put back how it is
+                return START_STICKY;
+            }
             old = worker;
             wanted = false;  // another server was chosen: the old connection goes first
             worker = null;   // the old worker sees it is no longer the one and leaves, touching nothing
+            my = ++asked;
         }
         if (old != null) old.interrupt();
+        switcher.execute(() -> open(p, old, my));
+        return START_STICKY;
+    }
+
+    /** Waits for the old connection to go (up to 3 s), then opens the chosen one, unless it was stopped or changed meanwhile. */
+    private void open(Profile p, Thread old, int my) {
         stopParts();  // its client and tunnel go now: a ping or a lookup it is blocked in ends at once
         if (old != null) {
             try {
@@ -114,6 +130,7 @@ public final class VpnSvc extends VpnService {
             }
         }
         synchronized (lock) {
+            if (asked != my) return;  // switched off, or another connection chosen, while the old one was going
             profile = p;
             preferred = p;
             tunnel = p.tunnelMode.isEmpty() ? "dc" : p.tunnelMode;
@@ -125,7 +142,6 @@ public final class VpnSvc extends VpnService {
             worker = new Thread(this::run, "vpn");
             worker.start();
         }
-        return START_STICKY;
     }
 
     @Override
@@ -185,9 +201,11 @@ public final class VpnSvc extends VpnService {
         boolean on;
         synchronized (lock) {
             on = wanted || worker != null;
+            asked++;  // a switch still waiting does not open anything on a closed service
         }
         if (on) stop(null);
         else stopParts();  // already stopped: the reason it stopped stays on the screen
+        switcher.shutdown();
         super.onDestroy();
     }
 
@@ -924,6 +942,7 @@ public final class VpnSvc extends VpnService {
 
     private void stop(String why) {
         synchronized (lock) {
+            asked++;  // a switch still waiting does not open anything after this
             wanted = false;
             if (worker != null) worker.interrupt();
             worker = null;

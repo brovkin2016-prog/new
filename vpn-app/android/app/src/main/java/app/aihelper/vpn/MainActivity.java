@@ -61,7 +61,7 @@ public class MainActivity extends Activity implements State.Listener {
     private AuroraView aurora;
     private AvatarView avatar;
     private TextView status, detail, ping, appsName, hint, connsHead;
-    private LinearLayout conns, appsCard, addRow, firstAdd;
+    private LinearLayout conns, appsCard, addRow, firstAdd, rescueRow;
     private String connsKey = "";
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
@@ -235,9 +235,9 @@ public class MainActivity extends Activity implements State.Listener {
         }));
         // when the family server is out of reach the journal cannot go to it: copied here, it goes into a chat
         addTo(settings, setting("📋", "Скопировать журнал и проверку связи", null, v -> copyJournal()));
-        if (Rescue.shown(this)) {  // the owner's only: the family server's rescue console in the browser
-            addTo(settings, setting("🛟", "Спасение сервера: консоль в браузере", null, v -> Rescue.open(this)));
-        }
+        // the owner's only: the family server's rescue console in the browser (shown once the server says it is the owner)
+        rescueRow = setting("🛟", "Спасение сервера: консоль в браузере", null, v -> Rescue.open(this));
+        addTo(settings, rescueRow);
         root.addView(settings, new LinearLayout.LayoutParams(-1, -2));
         setContentView(frame);
         // the screen comes in softly: each part rises into place, one after another
@@ -345,6 +345,7 @@ public class MainActivity extends Activity implements State.Listener {
         firstAdd.setVisibility(has ? View.GONE : View.VISIBLE);
         setRow(appsCard, has);
         setRow(addRow, has);
+        setRow(rescueRow, Rescue.shown(this));
         if (has) {
             showConns(all);
             appsName.setText(Apps.summary(this));

@@ -202,11 +202,17 @@ final class Updater {
     private static void askLater(Context c, Intent confirm) {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
-        if (nm.getNotificationChannel("update") == null) {
-            nm.createNotificationChannel(new NotificationChannel("update", "Обновления", NotificationManager.IMPORTANCE_DEFAULT));
+        Notification.Builder b;
+        if (Build.VERSION.SDK_INT >= 26) {  // Android 7 has no channels
+            if (nm.getNotificationChannel("update") == null) {
+                nm.createNotificationChannel(new NotificationChannel("update", "Обновления", NotificationManager.IMPORTANCE_DEFAULT));
+            }
+            b = new Notification.Builder(c, "update");
+        } else {
+            b = new Notification.Builder(c);
         }
         PendingIntent open = PendingIntent.getActivity(c, 7, confirm, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        nm.notify(7001, new Notification.Builder(c, "update").setSmallIcon(R.drawable.ic_stat)
+        nm.notify(7001, b.setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle("Новая версия Winger готова")
                 .setContentText("Нажмите, чтобы установить")
                 .setContentIntent(open)
@@ -220,8 +226,8 @@ final class Updater {
     }
 
     private static void download(Activity a, String base, JSONObject info) {
-        if (downloading) {
-            Toast.makeText(a, "Обновление уже загружается", Toast.LENGTH_SHORT).show();
+        if (downloading || quiet) {  // quiet: the same file is being fetched in the background, two writers would spoil it
+            Toast.makeText(a, "Обновление уже загружается — попробуйте через минуту", Toast.LENGTH_SHORT).show();
             return;
         }
         if (Build.VERSION.SDK_INT >= 26 && !a.getPackageManager().canRequestPackageInstalls()) {

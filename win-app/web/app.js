@@ -104,7 +104,7 @@ function drawConns(s) {
     list.innerHTML = "";
     s.conns.forEach((c, i) => {
       list.append(el("div", { class: "conn", role: "button", tabindex: "0", onclick: () => use(i),
-        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); use(i); } },
+        onkeydown: (e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); use(i); } },
         oncontextmenu: (e) => { e.preventDefault(); remove(i, S.conns[i]); } },
         el("span", { class: "dot" }),
         el("span", { class: "ic", text: c.bridge ? "🌉" : "🌐" }),

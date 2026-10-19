@@ -13,6 +13,7 @@ type wingerService struct{}
 // Execute: the service's life — the engine and the window's API while it runs; off when Windows stops it.
 func (wingerService) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	status <- svc.Status{State: svc.StartPending}
+	cleanOld(installedExe()) // the program's files left from an update
 	stop := make(chan struct{})
 	done := make(chan error, 1)
 	go func() { done <- serve(true, stop) }()

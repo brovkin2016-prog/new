@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -118,6 +119,24 @@ func TestRetriesSlowDownWhenItKeepsBreaking(t *testing.T) {
 	fails++
 	if fails != 1 || retryWait(fails) != 2*time.Second {
 		t.Fatalf("one that held %s did not start afresh: %d", steadyFor, fails)
+	}
+}
+
+// the bridge goes over to the call's video only for the data channel's own failures: not for a call that does not
+// answer, a captcha or a lost network
+func TestDcFaultsOnlyItsOwn(t *testing.T) {
+	other := errors.New("Мост не поднялся: звонок не отвечает.")
+	if n := dcFaults(dcFaults(0, other, 0), other, 0); n != 0 {
+		t.Fatalf("a call that does not answer counted: %d", n)
+	}
+	if n := dcFaults(dcFaults(0, errNoData, 0), errNoData, 0); n != 2 {
+		t.Fatalf("nothing through it twice: %d", n)
+	}
+	if n := dcFaults(1, other, time.Minute); n != 2 {
+		t.Fatalf("a session that died soon: %d", n)
+	}
+	if n := dcFaults(1, other, 10*time.Minute); n != 0 {
+		t.Fatalf("one that held a while did not start afresh: %d", n)
 	}
 }
 

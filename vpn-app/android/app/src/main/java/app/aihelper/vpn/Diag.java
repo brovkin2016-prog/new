@@ -199,7 +199,8 @@ final class Diag {
                 }
                 int code = h.getResponseCode();
                 h.disconnect();
-                if (code == 200) prefs.edit().putLong("diagAt", System.currentTimeMillis()).apply();
+                // any answer counts: a server that refuses (an old one, a login it no longer knows) is not asked again at once
+                prefs.edit().putLong("diagAt", System.currentTimeMillis()).apply();
                 Log.i(TAG, "journal sent: " + code);
             } catch (Exception e) {
                 Log.i(TAG, "journal not sent: " + e);
