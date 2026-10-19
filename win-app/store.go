@@ -27,6 +27,11 @@ type Settings struct {
 	Speeds map[string]string `json:"speeds,omitempty"`
 	// the last response time of each connection: «⏱ отклик 85 мс · 15:03» (a bridge's: when it was last on)
 	Pings map[string]string `json:"pings,omitempty"`
+	// this computer's login is the server owner's: «🛟 Спасение сервера» (kept, so it is there when the server's app broke)
+	Owner bool `json:"owner,omitempty"`
+	// the calls of this laptop's own bridges, as the server last gave them (platform|call): one call carries one
+	// device, so a bridge outside them (the phone's) is never gone to by itself — only by a tap on it
+	LaptopCalls []string `json:"laptopCalls,omitempty"`
 }
 
 // Store keeps the settings in a file in Winger's data folder.
@@ -107,6 +112,24 @@ func (st *Store) Profiles() []*Profile {
 }
 
 // Has: this link is among the saved connections.
+// Foreign: a bridge that is not this laptop's own (the phone's, pasted or kept from before) while the server gave it
+// bridges of its own — on it the laptop and the phone push each other out of the call.
+func (st *Store) Foreign(p *Profile) bool {
+	if p == nil || !p.Bridge {
+		return false
+	}
+	calls := st.Get().LaptopCalls
+	if len(calls) == 0 {
+		return false
+	}
+	for _, c := range calls {
+		if c == p.Platform+"|"+p.JoinLink {
+			return false
+		}
+	}
+	return true
+}
+
 func (st *Store) Has(link string) bool {
 	for _, sv := range st.Get().Profiles {
 		if sv.Link == link {

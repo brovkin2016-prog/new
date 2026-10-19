@@ -92,6 +92,8 @@ final class BridgeSync {
             boolean changed = false;
             if (code == 200) {
                 JSONObject js = new JSONObject(read(h.getInputStream()));
+                // the owner's login: «🛟 Спасение сервера» on the screen (kept, so it is there when the server's app is broken)
+                if (js.has("owner")) c.getSharedPreferences("vpn", Context.MODE_PRIVATE).edit().putBoolean("owner", js.optBoolean("owner")).apply();
                 Profile main = Profile.parse(js.optString("link")), hop = Profile.parse(js.optString("hop"));
                 changed = main != null && take(c, login, main, hop, Profile.parse(js.optString("obfs")));
             }
@@ -157,7 +159,7 @@ final class BridgeSync {
         return null;
     }
 
-    private static String read(InputStream in) throws Exception {
+    static String read(InputStream in) throws Exception {
         try (InputStream i = in; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] b = new byte[4096];
             for (int n; (n = i.read(b)) > 0; ) out.write(b, 0, n);

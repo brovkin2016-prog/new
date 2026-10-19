@@ -80,6 +80,7 @@ function draw(s) {
   if (cap) capBox.dataset.url = cap;  // a new check (the bridge started again) has its own page
   drawConns(s);
   $("#prep").hidden = !s.preparing;  // the laptop's own bridges being made on the server
+  $("#rescue").hidden = !s.owner;  // the server owner's only
   $("#appsCard").hidden = !has;
   document.querySelectorAll("#mode button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === (!!s.onlyApps || appsOpen)));
   const u = s.update || {};
@@ -119,7 +120,8 @@ function drawConns(s) {
       note = "Не отвечает — нажмите, чтобы попробовать снова";
       color = "wait"; edge = "chosen";
     } else {
-      note = c.bridge ? "Нажмите — через " + c.service + ", когда обычный не работает" : "Нажмите, чтобы включить через этот сервер";
+      note = c.foreign ? "Мост телефона: включайте, только когда телефон не на нём — иначе они выбивают друг друга"
+        : c.bridge ? "Нажмите — через " + c.service + ", когда обычный не работает" : "Нажмите, чтобы включить через этот сервер";
       if (i === cur) edge = "chosen";
     }
     // the response time: live for the one in use, else its last check (a bridge's: when it was last on)
@@ -250,6 +252,14 @@ $("#ver").onclick = async () => {
     }
     toast("Сервер не ответил — попробуйте ещё раз через минуту", 5000);
   } catch (e) { toast(e.message); } finally { b.disabled = false; }
+};
+$("#rescue").onclick = async () => {
+  toast("Открываю спасательную консоль…", 20000);
+  try {
+    const r = await call("rescue", {});
+    window.open(r.url, "_blank");
+    toast("Консоль открыта в браузере", 4000);
+  } catch (e) { toast(e.message, 8000); }
 };
 $("#journal").onclick = async () => {
   toast("Проверяю связь с сервером…", 10000);

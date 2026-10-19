@@ -42,8 +42,9 @@ type connView struct {
 	Service string `json:"service"`
 	Chosen  bool   `json:"chosen"`
 	Active  bool   `json:"active"`
-	Speed   string `json:"speed,omitempty"` // the last speed check, with its time
-	Ping    string `json:"ping,omitempty"`  // the last response time, with its time
+	Speed   string `json:"speed,omitempty"`   // the last speed check, with its time
+	Ping    string `json:"ping,omitempty"`    // the last response time, with its time
+	Foreign bool   `json:"foreign,omitempty"` // a bridge that is not this laptop's own (the phone's)
 }
 
 // activeIndex: the row of the connection in use now (the chosen one, or the one Winger moved to by itself).
@@ -95,7 +96,8 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		conns, name := []connView{}, ""
 		for i, p := range all {
 			c := connView{Name: p.Name, Bridge: p.Bridge, Service: p.Service(), Chosen: i == cur,
-				Active: status.Phase != "off" && status.Active == p.Link, Speed: s.Speeds[p.Link], Ping: s.Pings[p.Link]}
+				Active: status.Phase != "off" && status.Active == p.Link, Speed: s.Speeds[p.Link], Ping: s.Pings[p.Link],
+				Foreign: st.Foreign(p)}
 			if c.Active {
 				name = p.Name
 			}
@@ -108,7 +110,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		}
 		reply(w, map[string]any{"status": status, "conns": conns, "onlyApps": s.OnlyApps, "apps": s.Apps,
 			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo(), "captcha": Captcha(),
-			"down": down, "up": up, "activeName": name, "switch": other, "preparing": fam.Preparing()})
+			"down": down, "up": up, "activeName": name, "switch": other, "preparing": fam.Preparing(), "owner": s.Owner})
 	})
 	mux.HandleFunc("/api/connect", func(w http.ResponseWriter, r *http.Request) {
 		if err := eng.Connect(); err != nil {
@@ -246,6 +248,14 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		go fam.CheckUpdate()
 		go fam.SyncBridges(0)
 		reply(w, map[string]bool{"ok": true})
+	})
+	// «🛟 Спасение сервера» (the owner's only): a one-time link into the family server's rescue console
+	mux.HandleFunc("/api/rescue", func(w http.ResponseWriter, r *http.Request) {
+		if u, why := fam.RescueLink(); u != "" {
+			reply(w, map[string]string{"url": u})
+		} else {
+			fail(w, why)
+		}
 	})
 	mux.HandleFunc("/api/journal", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]string{"text": Report(eng, st)})

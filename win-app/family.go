@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -73,6 +75,15 @@ func (f *Family) SyncBridges(_ int) int {
 	f.mu.Lock()
 	f.preparing = out.Preparing
 	f.mu.Unlock()
+	if !out.Preparing { // this laptop's own calls: no other bridge is gone to by itself
+		calls := []string{}
+		for _, l := range out.Links {
+			if p, err := ParseLink(l); err == nil && p.Bridge {
+				calls = append(calls, p.Platform+"|"+p.JoinLink)
+			}
+		}
+		f.st.Update(func(s *Settings) { s.LaptopCalls = calls })
+	}
 	n := 0
 	for _, l := range out.Links {
 		if p, err := ParseLink(l); err == nil && p.Bridge && f.st.Keep(p) {
@@ -129,12 +140,16 @@ func (f *Family) SyncServer(auth string) bool {
 		return false
 	}
 	var out struct {
-		Link string `json:"link"`
-		Hop  string `json:"hop"`
-		Obfs string `json:"obfs"`
+		Link  string `json:"link"`
+		Hop   string `json:"hop"`
+		Obfs  string `json:"obfs"`
+		Owner *bool  `json:"owner"`
 	}
 	if !f.post("/api/winger_profile", map[string]string{"auth": auth}, &out) {
 		return false
+	}
+	if out.Owner != nil && f.st.Get().Owner != *out.Owner {
+		f.st.Update(func(s *Settings) { s.Owner = *out.Owner })
 	}
 	main, err := ParseLink(out.Link)
 	if err != nil {
@@ -153,6 +168,49 @@ func (f *Family) SyncServer(auth string) bool {
 		Logf("the server's salamander door kept as a connection")
 	}
 	return changed
+}
+
+// RescueLink: a one-time link (3 minutes) into the family server's rescue console (https://DOMAIN:9443, the owner only)
+// for this computer's VPN login — for days when the AI app or its «Управление» broke. Asked past the VPN first (it may be
+// what is broken), then through it. The link, or why there is none.
+func (f *Family) RescueLink() (string, string) {
+	host, auth := f.st.HomeHost()
+	if host == "" || auth == "" {
+		return "", "В Winger нет подключения к семейному серверу"
+	}
+	body, _ := json.Marshal(map[string]string{"auth": auth})
+	why := "Спасательная консоль не отвечает (порт 9443). Если сервер перезагружается — через пару минут ещё раз."
+	ports := []int{0}
+	if p := f.eng.ProbePort(); p > 0 {
+		ports = append(ports, p)
+	}
+	for _, port := range ports {
+		req, _ := http.NewRequest(http.MethodPost, "https://"+host+":9443/api/ticket", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Rescue", "1")
+		r, err := client(port, 20*time.Second).Do(req)
+		if err != nil {
+			Logf("rescue console: %v", err)
+			continue
+		}
+		var out struct {
+			URL string `json:"url"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&out)
+		r.Body.Close()
+		switch {
+		case r.StatusCode == 200 && strings.HasPrefix(out.URL, "https://"):
+			Logf("rescue console: opened") // never the link: it lets in
+			return out.URL, ""
+		case r.StatusCode == 401:
+			return "", "Спасательная консоль — только для владельца сервера"
+		case r.StatusCode == 429:
+			return "", "Слишком много попыток входа — попробуйте через 10 минут"
+		}
+		why = fmt.Sprintf("Спасательная консоль ответила %d", r.StatusCode)
+		Logf("rescue console: %d", r.StatusCode)
+	}
+	return "", why
 }
 
 // RenewNow: this connection's own current link from the family server (see SyncServer). The renewed connection, or nil

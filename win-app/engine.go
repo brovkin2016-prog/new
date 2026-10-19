@@ -589,7 +589,7 @@ func (e *Engine) nextChoiceFrom(from *Profile) *Profile {
 		}
 	}
 	for _, x := range all {
-		if x.Bridge && x.Link != pref.Link {
+		if x.Bridge && x.Link != pref.Link && !e.st.Foreign(x) { // never the phone's by itself: the two would push each other out
 			order = append(order, x)
 		}
 	}
@@ -731,7 +731,7 @@ func (e *Engine) Other() *Profile {
 		}
 	}
 	for _, x := range all {
-		if x.Bridge != now.Bridge {
+		if x.Bridge != now.Bridge && !e.st.Foreign(x) {
 			return x
 		}
 	}

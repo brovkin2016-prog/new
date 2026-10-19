@@ -235,6 +235,12 @@ public class MainActivity extends Activity implements State.Listener {
         journal.setPadding(dp(12), dp(6), dp(12), dp(4));
         journal.setOnClickListener(v -> copyJournal());
         root.addView(journal, new LinearLayout.LayoutParams(-2, -2));
+        if (Rescue.shown(this)) {  // the owner's only: the family server's rescue console in the browser
+            TextView rescue = label("🛟 Спасение сервера: консоль в браузере", 13, accent, false);
+            rescue.setPadding(dp(12), dp(6), dp(12), dp(4));
+            rescue.setOnClickListener(v -> Rescue.open(this));
+            root.addView(rescue, new LinearLayout.LayoutParams(-2, -2));
+        }
         setContentView(frame);
         // the screen comes in softly: each part rises into place, one after another
         for (int i = 0; i < root.getChildCount(); i++) {

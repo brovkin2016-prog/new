@@ -94,7 +94,7 @@ func api(path string) ([]byte, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: "wt", Value: token()})
-	c := &http.Client{Timeout: 5 * time.Second}
+	c := &http.Client{Timeout: map[bool]time.Duration{true: 60 * time.Second, false: 5 * time.Second}[path == "rescue"]}
 	r, err := c.Do(req)
 	if err != nil {
 		return nil, err
@@ -122,6 +122,9 @@ func runTray() error {
 		// the phone notification's one tap: to a bridge from the server, to the server from a bridge
 		other := systray.AddMenuItem("Через мост", "")
 		other.Hide()
+		// the owner's only: the family server's rescue console, when the AI app or its «Управление» broke
+		rescue := systray.AddMenuItem("🛟 Спасение сервера", "Консоль в браузере: починка сервера без приложения")
+		rescue.Hide()
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Выйти", "VPN выключится, значок уйдёт; снова — ярлык Winger")
 		shown, was := "", ""
@@ -143,6 +146,7 @@ func runTray() error {
 					} `json:"status"`
 					ActiveName string `json:"activeName"`
 					Switch     string `json:"switch"`
+					Owner      bool   `json:"owner"`
 				}
 				if err != nil || json.Unmarshal(b, &s) != nil {
 					s.Status.Phase = "off"
@@ -167,6 +171,11 @@ func runTray() error {
 				}
 				if s.Status.Phase != "off" && s.ActiveName != "" {
 					tip = s.ActiveName + "\n" + tip
+				}
+				if s.Owner {
+					rescue.Show()
+				} else {
+					rescue.Hide()
 				}
 				if now := s.Status.Phase + "|" + tip + "|" + s.Switch; now != was {
 					was = now
@@ -200,6 +209,19 @@ func runTray() error {
 					}
 				case <-other.ClickedCh:
 					_, _ = api("switch")
+				case <-rescue.ClickedCh:
+					b, err := api("rescue")
+					var out struct {
+						URL   string `json:"url"`
+						Error string `json:"error"`
+					}
+					if err == nil && json.Unmarshal(b, &out) == nil && strings.HasPrefix(out.URL, "https://") {
+						_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", out.URL).Start()
+					} else if out.Error != "" {
+						message(out.Error)
+					} else {
+						message("Спасательная консоль не открылась — Winger не отвечает, попробуйте ещё раз")
+					}
 				case <-quit.ClickedCh:
 					// out of Winger: the VPN off (it does not come back by itself after a restart either), the icon gone
 					if b, _ := api("state"); !strings.Contains(string(b), `"phase":"off"`) {

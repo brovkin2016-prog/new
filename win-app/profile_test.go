@@ -269,3 +269,33 @@ func TestSalamanderDoorKeptAndRenewedApart(t *testing.T) {
 		t.Fatalf("each took its own new link, names kept: %+v %+v", all[0], all[1])
 	}
 }
+
+// one call carries one device: a bridge that is not the laptop's own (the phone's) is never gone to by itself — not by
+// the tray's one-tap switch, not by the automatic choice — only by a tap on it; with no own calls known, all are as before
+func TestPhonesBridgeNeverTakenByItself(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://a:1@one.example.ru:443/#Один"))
+	st.Add(mustParse(t, "winger-bridge://vk?link=https%3A%2F%2Fvk.com%2Fcall%2Fjoin%2Fphonephonephone#Мост телефона"))
+	st.Add(mustParse(t, "winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F11111111111111#Мост ноутбука"))
+	all := st.Profiles()
+	e := NewEngine(st, t.TempDir(), "", nil, false)
+	e.wanted, e.profile, e.preferred = true, all[0], all[0]
+	if st.Foreign(all[1]) || st.Foreign(all[2]) {
+		t.Fatal("no own calls known yet: nothing is foreign")
+	}
+	if o := e.Other(); o == nil || o.Name != "Мост телефона" {
+		t.Fatal("before: the first bridge, as always")
+	}
+	st.Update(func(s *Settings) { s.LaptopCalls = []string{"telemost|https://telemost.yandex.ru/j/11111111111111"} })
+	if !st.Foreign(all[1]) || st.Foreign(all[2]) || st.Foreign(all[0]) {
+		t.Fatal("the phone's bridge not told apart from the laptop's own")
+	}
+	if o := e.Other(); o == nil || o.Name != "Мост ноутбука" {
+		t.Fatalf("the one-tap switch went to %v, not the laptop's own bridge", o)
+	}
+	for o, i := e.nextChoiceFrom(all[0]), 0; o != nil && i < 5; o, i = e.nextChoiceFrom(o), i+1 {
+		if o.Name == "Мост телефона" {
+			t.Fatal("the automatic choice went to the phone's bridge")
+		}
+	}
+}
