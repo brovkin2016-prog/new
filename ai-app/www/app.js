@@ -246,13 +246,29 @@
       });
     },
     tx(mode) { return this.db.transaction("msgs", mode).objectStore("msgs"); },
-    add(m) {
-      if (!this.db) { m.id = this.memId++; this.mem.push(m); return Promise.resolve(m.id); }
-      return new Promise((res) => { const r = this.tx("readwrite").add(m); r.onsuccess = () => res((m.id = r.result)); r.onerror = () => res(0); });
+    // a write counts once its transaction is complete (a full phone aborts it after the request itself succeeded)
+    write(op, m) {
+      return new Promise((res) => {
+        let t, r;
+        try { t = this.db.transaction("msgs", "readwrite"); r = t.objectStore("msgs")[op](m); } catch (e) { this.full(e); res(0); return; }
+        t.oncomplete = () => res(r.result);
+        t.onabort = () => { this.full(t.error); res(0); };
+      });
+    },
+    full(e) {
+      if (this.told || !e || !/quota/i.test(e.name + " " + e.message)) return;
+      this.told = true;
+      toast("Память телефона почти заполнена — новые сообщения не сохраняются. Удалите ненужные чаты или файлы на телефоне.", 8000);
+    },
+    async add(m) {
+      if (!this.db) { m.id = this.memId++; this.mem.push(m); return m.id; }
+      const id = await this.write("add", m);
+      if (id) m.id = id;
+      return id;
     },
     put(m) {
       if (!this.db) return Promise.resolve();
-      return new Promise((res) => { const r = this.tx("readwrite").put(m); r.onsuccess = r.onerror = () => res(); });
+      return this.write("put", m);
     },
     del(id) {
       if (!this.db) { this.mem = this.mem.filter((m) => m.id !== id); return Promise.resolve(); }
@@ -1040,7 +1056,6 @@
       liveEl = null;
       S.busy[name] = false;
       store.set(PEND, null);
-      if (rid) api("/api/job", { rid, ack: true }).catch(() => {});
       let out;
       if (end.t === "done") {
         if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
@@ -1055,6 +1070,7 @@
       } else {
         out = await api2.add({ role: "ai", text: "⚠️ " + end.text, err: true });
       }
+      if (rid) api("/api/job", { rid, ack: true }).catch(() => {});  // (once it is kept here: the server's copy may go)
       // a clip (5–8 min), a picture or an answer that came while another tab is open: a notice where the person is now,
       // and a mark on its tab until it is opened (the chats have their own list: not marked)
       const TAB_OF = { study: "Учёба", photo: "Фото", video: "Видео" };
