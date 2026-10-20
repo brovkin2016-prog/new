@@ -34,3 +34,37 @@ jobs:
           gh release delete "dep-mtg-$V" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
           gh release create "dep-mtg-$V" mtg-linux-amd64 mtg-linux-arm64 sums.txt --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --prerelease --title "mtg $V (Telegram proxy)" --notes "$NOTES"
+
+  # Hysteria and Xray for vpn-update: the newest release that is a week old (a broken or hijacked one is usually found
+  # out by then), checked against upstream's own sums, mirrored here; the server release pins its SHA-256 (vpn.pin), and
+  # vpn-update installs only that.
+  vpn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror the week-old Hysteria and Xray releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          week() {  # repo → the newest full release published at least 7 days ago
+            gh api "repos/$1/releases?per_page=30" --jq '[.[] | select(.draft | not) | select(.prerelease | not)
+              | select((now - (.published_at | fromdateiso8601)) > 7*86400)][0].tag_name'
+          }
+          mkdir -p /tmp/v && cd /tmp/v
+          HY=$(week apernet/hysteria); HV=${HY#app/}
+          gh release download "$HY" --repo apernet/hysteria --pattern hysteria-linux-amd64 --pattern hashes.txt
+          [ "$(awk '$2 ~ /(^|\/)hysteria-linux-amd64$/ {print $1; exit}' hashes.txt)" = "$(sha256sum hysteria-linux-amd64 | cut -d' ' -f1)" ]
+          chmod 755 hysteria-linux-amd64 && ./hysteria-linux-amd64 version | head -3
+          XR=$(week XTLS/Xray-core)
+          gh release download "$XR" --repo XTLS/Xray-core --pattern Xray-linux-64.zip --pattern Xray-linux-64.zip.dgst
+          [ "$(sed -n -e 's/^SHA2-256= *//p' -e 's/^SHA256= *//p' Xray-linux-64.zip.dgst | head -1)" = "$(sha256sum Xray-linux-64.zip | cut -d' ' -f1)" ]
+          unzip -q -o Xray-linux-64.zip xray -d xr && ./xr/xray version | head -1
+          sha256sum hysteria-linux-amd64 Xray-linux-64.zip | tee sums.txt
+          for x in "hysteria $HV hysteria-linux-amd64 apernet/hysteria $HY" "xray $XR Xray-linux-64.zip XTLS/Xray-core $XR"; do
+            set -- $x
+            NOTES=$(printf '%s %s from github.com/%s (release %s), checked against its own published sums.\n\n```\n%s\n```' \
+              "$1" "$2" "$4" "$5" "$(grep " $3\$" sums.txt)")
+            gh release delete "dep-$1-$2" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+            gh release create "dep-$1-$2" "$3" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+              --title "$1 $2 (for vpn-update)" --notes "$NOTES"
+          done
