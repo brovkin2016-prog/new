@@ -2097,7 +2097,8 @@
     const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить\u00a0фото", onclick: animate });
     const bar = el("div", { class: "vbar" });
     const paintBar = () => {  // «🎭 Я в ролике» only while the server has it
-      bar.replaceChildren(...(tv() ? [tvBtn, anBtn] : [anBtn]));
+      bar.innerHTML = "";  // (replaceChildren: not in the older WebViews the app runs on)
+      bar.append(...(tv() ? [tvBtn, anBtn] : [anBtn]));
       anBtn.className = tv() ? "btn line" : "btn";
       tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an());
     };
