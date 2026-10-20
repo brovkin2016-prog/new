@@ -426,6 +426,125 @@
         + "«Запомни: …» (его увидят все разговоры), «Забудь уроки» — стереть ваши правила." }),
         el("div", { class: "hints", style: "margin-top:8px" }, ...hints.map((t) => el("button", { class: "hint", text: t, onclick: () => send(t) }))));
     }
+    // «🔍 Дозор»: the agent that keeps looking over the server, VPN and bridges, protection, the app and new versions by
+    // itself; what it finds waits here as a list — ✓ Claude checks it and shows a plan, ✕ never offered again
+    function patrolCard(d) {
+      const o = d.patrol_open || {}, fix = o.fix || 0, idea = o.idea || 0;
+      const badge = (n, ic, bg) => el("span", { style: `flex:none;padding:4px 10px;border-radius:14px;font-size:14px;font-weight:600;background:${bg}`, text: `${ic} ${n}` });
+      const sub = !d.patrol_on ? "Выключен — включить ›" : fix + idea ? "Отметьте, что принять ›" : d.patrol ? "Проверяет сейчас…" : "Следит — новых замечаний нет ›";
+      return el("div", { class: "card patrol-card", style: "padding:6px 12px;cursor:pointer", role: "button", onclick: () => patrolSheet(d) },
+        el("div", { class: "row" }, el("span", { style: "font-size:24px", text: "🔍" }),
+          el("div", { class: "grow" }, el("b", { text: "Дозор" }), el("small", { text: sub })),
+          fix ? badge(fix, "🔴", "rgba(200,32,63,.14)") : "", idea ? badge(idea, "🟡", "rgba(234,179,8,.2)") : ""));
+    }
+    function patrolSheet(d) {
+      const pick = new Map();  // id → "yes" | "no": the owner's marks, sent together by the one button
+      sheet("🔍 Дозор", (box, close) => {
+        const body = el("div", {}, el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Загружаю список…" })));
+        const go = el("button", { class: "btn wide", disabled: true, text: "Отметьте ✓ или ✕" });
+        const foot = el("div", { class: "sheet-foot hidden" }, go);
+        box.append(el("small", { style: "display:block;color:var(--muted);margin:-4px 2px 8px;line-height:1.4",
+          text: "Дозор сам смотрит сервер, VPN и мосты, защиту, приложение и новые версии ИИ. ✓ — Claude проверит и покажет план "
+            + "(менять будет только после «✅ Выполнить»), ✕ — больше не предложит." }), body, foot);
+        const count = () => {
+          const y = [...pick.values()].filter((v) => v === "yes").length, n = pick.size - y;
+          go.disabled = !pick.size;
+          go.textContent = !pick.size ? "Отметьте ✓ или ✕" : y ? `Отправить Claude: ✓ ${y}` + (n ? ` · ✕ ${n}` : "") : `Отклонить: ✕ ${n}`;
+        };
+        const mark = (on, color) => "width:46px;min-height:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;"
+          + (on ? `background:${color};border-color:${color};color:#fff` : "");
+        const item = (x) => {
+          const [title, ...rest] = x.text.replace(/`/g, "").split(/\s+—\s+/);
+          const meta = [x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ");
+          const yes = el("button", { class: "chip", "aria-label": "Принять", title: "Принять", text: "✓" });
+          const no = el("button", { class: "chip", "aria-label": "Отклонить", title: "Отклонить", text: "✕" });
+          const words = el("div", { class: "grow" }, el("div", { style: "font-weight:600;line-height:1.35;overflow-wrap:anywhere", text: title }),
+            rest.length ? el("small", { style: "line-height:1.35;margin-top:2px;overflow-wrap:anywhere", text: rest.join(" — ") }) : "",
+            el("small", { style: "font-size:12px;margin-top:3px", text: meta }));
+          const row = el("div", { class: "row patrol-item", "data-id": x.id, style: "align-items:flex-start;padding:10px 0" }, words,
+            el("div", { style: "display:flex;gap:6px;flex:none" }, yes, no));
+          const paint = () => {
+            const v = pick.get(x.id);
+            yes.style.cssText = mark(v === "yes", "var(--ok)");
+            no.style.cssText = mark(v === "no", "var(--danger)");
+            words.style.opacity = v === "no" ? ".5" : "";
+            words.style.textDecoration = v === "no" ? "line-through" : "";
+          };
+          const flip = (v) => { if (pick.get(x.id) === v) pick.delete(x.id); else pick.set(x.id, v); paint(); count(); };
+          yes.onclick = () => flip("yes");
+          no.onclick = () => flip("no");
+          row.paint = paint;
+          paint();
+          return row;
+        };
+        const drawList = (items) => {
+          body.innerHTML = "";
+          const open = items.filter((x) => x.status === "new");
+          const rows = [];
+          for (const [kind, head] of [["fix", "🔴 Исправить"], ["idea", "🟡 Улучшить"]]) {
+            const these = open.filter((x) => x.kind === kind).sort((a, b) => b.first - a.first);
+            if (!these.length) continue;
+            const card = el("div", { class: "card", style: "padding:4px 12px;margin-bottom:10px" });
+            const mine = these.map(item);
+            rows.push(...mine);
+            card.append(el("div", { class: "row", style: "min-height:36px" }, el("b", { class: "grow", text: `${head} · ${these.length}` }),
+              el("button", { class: "hint", style: "min-height:36px;padding:6px 12px;font-size:14px", text: "✓ все", onclick: () => {
+                for (const x of these) pick.set(x.id, "yes");
+                mine.forEach((r) => r.paint());
+                count();
+              } })), ...mine);
+            body.append(card);
+          }
+          if (!open.length) {
+            body.append(el("div", { class: "card", style: "text-align:center;padding:18px 12px" },
+              el("div", { style: "font-size:28px", text: "✅" }), el("b", { text: "Новых замечаний нет" }),
+              el("small", { style: "display:block;color:var(--muted);margin-top:4px",
+                text: d.patrol_on ? "Дозор следит сам: что найдёт — появится здесь, о важном придёт уведомление." : "Дозор выключен." })));
+          }
+          for (const [status, head, ic] of [["sent", "Отправлено Claude", "⏳"], ["done", "Исправлено", "✅"]]) {
+            const these = items.filter((x) => x.status === status);
+            if (!these.length) continue;
+            body.append(el("details", { style: "margin:4px 4px 8px;font-size:14px" }, el("summary", { style: "color:var(--muted);min-height:32px", text: `${ic} ${head} · ${these.length}` }),
+              ...these.map((x) => el("div", { style: "margin:6px 0 0 18px;line-height:1.35;overflow-wrap:anywhere", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + x.text.replace(/`/g, "") }))));
+          }
+          const turn = (on) => async () => {
+            try {
+              const end = await panel({ op: "agent_patrol", on });
+              if (end.t !== "done") return toast("⚠️ " + end.text, 7000);
+              close(); cache.claude = end; draw();
+            } catch (e) { toast(problem(e)); }
+          };
+          body.append(el("div", { class: "chips", style: "margin:10px 0 4px;flex-wrap:wrap" },
+            el("button", { class: "chip" + (d.patrol_on ? " on" : ""), text: "🔍 Дозор: следит", onclick: d.patrol_on ? null : turn(true) }),
+            el("button", { class: "chip" + (d.patrol_on ? "" : " on"), text: "Выключен", onclick: d.patrol_on ? turn(false) : null }),
+            d.patrol_chat ? el("button", { class: "chip", text: "📄 Отчёты полностью", onclick: async () => {
+              close(); claude.chat = d.patrol_chat;
+              try { await panel({ op: "agent_select", chat: d.patrol_chat }); } catch (e) { /* the list stays */ }
+              reloadClaude();
+            } }) : ""));
+          foot.classList.toggle("hidden", !open.length);
+          count();
+        };
+        go.onclick = async () => {
+          const yes = [...pick].filter(([, v]) => v === "yes").map(([k]) => k), no = [...pick].filter(([, v]) => v === "no").map(([k]) => k);
+          go.disabled = true;
+          if (!yes.length) {
+            try {
+              const end = await panel({ op: "agent_patrol_pick", yes, no });
+              if (end.t !== "done") { go.disabled = false; return toast("⚠️ " + end.text, 7000); }
+              close(); toast(`✕ ${end.declined} — Дозор больше не предложит`, 4000); reloadClaude();
+            } catch (e) { go.disabled = false; toast(problem(e)); }
+            return;
+          }
+          close();
+          talk({ op: "agent_patrol_pick", chat: "new", yes, no }, `🔍 Из Дозора — принято: ${yes.length}`);
+        };
+        panel({ op: "agent_patrol_items" }).then((end) => {
+          if (end.t !== "done") { body.innerHTML = ""; body.append(el("p", { text: "⚠️ " + end.text })); return; }
+          drawList(end.items || []);
+        }).catch((e) => { body.innerHTML = ""; body.append(el("p", { text: problem(e) })); });
+      });
+    }
     // the rescue console: Claude Code on the owner's Anthropic key and the repairs, in a browser, apart from this app
     function rescueCard() {
       const box = el("div", { class: "card", style: "padding:6px 10px" });
@@ -477,10 +596,13 @@
         if (d.busy_chat === d.chat) follow(d.events);
         else acts.append(el("div", { class: "status", text: "⏳ Claude сейчас работает в другом разговоре" }));
       } else {
+        if (d.patrol) acts.append(el("div", { class: "status", text: "🔍 Дозор сейчас проверяет сервер — ваш вопрос его прервёт" }));
         if (d.can_run) acts.append(el("button", { class: "btn", text: "✅ Выполнить", onclick: runPlan }));
         if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Вернуть как было", onclick: () => undo(d) }));
       }
       if (acts.childNodes.length) scroll.append(acts);
+      // (here, over the field: the chat opens scrolled to its end, so the patrol's list is in sight at once)
+      if (d.patrol_on === true || d.patrol_on === false) scroll.append(patrolCard(d));
       // who answers here: the free models, or Claude itself on the owner's key (the month's cap less the console's reserve)
       const pick = async (body) => {
         const end = await panel(body);
