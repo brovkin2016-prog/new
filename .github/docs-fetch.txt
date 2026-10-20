@@ -1,4 +1,1 @@
 https://docs.viggle.ai/llms.txt
-https://docs.viggle.ai/v1/authentication.md
-https://docs.viggle.ai/v1/api-reference/credits.md
-https://modal.com/llms.txt
