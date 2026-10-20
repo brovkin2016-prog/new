@@ -417,14 +417,34 @@
       const live = liveBubble();
       claude.box.append(live.el);
       scroll.scrollTop = scroll.scrollHeight;
+      const unwatch = phoneWatch();
       try {
         const end = await stream("/api/panel", body, live.on);
         if (end.t === "error") toast("⚠️ " + end.text, 6000);
       } catch (e) {
         live.status("Связь прервалась — Claude работает дальше, жду…");
         await waitFree();
+      } finally {
+        unwatch();
       }
       reloadClaude();
+    }
+    // Claude may ask this phone to check the bridges (srv-phone on the server): while it works, its ask goes on to Winger
+    // at once (else Winger finds it itself within a few minutes while its VPN is on)
+    function phoneWatch() {
+      if (!(window.AIBridge && window.AIBridge.wingerCheck)) return () => {};
+      let on = true;
+      (async () => {
+        while (on) {
+          await new Promise((r) => setTimeout(r, 4000));
+          if (!on) break;
+          try {
+            const r = await panel({ op: "phone_task" });
+            if (on && r && r.task && window.AIBridge.wingerCheck(r.task)) toast("📱 Winger проверяет мосты с этого телефона — несколько минут", 6000);
+          } catch (e) { /* the next look */ }
+        }
+      })();
+      return () => { on = false; };
     }
     async function waitFree() {  // the phone lost the line: the server goes on; look again until it is done
       for (let i = 0; i < 180; i++) {

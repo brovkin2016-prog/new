@@ -107,7 +107,7 @@ final class Speed {
     }
 
     /** One request through a local SOCKS port: its time in ms, 0 when none came back. */
-    private static int probe(int port, int timeoutMs) {
+    static int probe(int port, int timeoutMs) {
         long t0 = SystemClock.elapsedRealtime();
         HttpURLConnection h = null;
         try {
@@ -139,7 +139,7 @@ final class Speed {
     }
 
     /** {Mbit/s, ms to the first byte}: reads for up to 8 s through the local SOCKS5 port. */
-    private static double[] download(int port) {
+    static double[] download(int port) {
         HttpURLConnection h = null;
         try {
             long t0 = SystemClock.elapsedRealtime();

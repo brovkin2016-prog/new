@@ -367,6 +367,7 @@ public final class VpnSvc extends VpnService {
                         + "/" + Math.round(State.upRate / 1024) + " KB/s" + (profile.bridge ? " (bridge)" : ""));
                 Diag.upload(this, false);  // now and then the journal goes to the family server
                 Updater.background(this, profile.bridge);  // a newer Winger: fetched now and then, put in while the screen is off
+                BridgeCheck.poll(this);  // the family server's Claude may want the bridges checked from this phone (the owner's)
                 if (!mine()) return "";  // switched off while it was pinging: the screen says «off», not «retrying»
                 TProxyService t = hev;
                 if (t == null || !t.TProxyIsRunning()) {

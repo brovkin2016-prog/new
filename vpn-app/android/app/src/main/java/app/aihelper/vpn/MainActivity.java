@@ -60,8 +60,9 @@ public class MainActivity extends Activity implements State.Listener {
     private PowerButton power;
     private AuroraView aurora;
     private AvatarView avatar;
-    private TextView status, detail, ping, appsName, hint, connsHead;
-    private LinearLayout conns, appsCard, addRow, firstAdd, rescueRow;
+    private TextView status, detail, ping, appsName, hint, connsHead, checkVal;
+    private LinearLayout conns, appsCard, addRow, firstAdd, rescueRow, checkRow;
+    private boolean checkAsked;  // the button here started the check: its result is shown here when it is done
     private String connsKey = "";
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
@@ -103,6 +104,7 @@ public class MainActivity extends Activity implements State.Listener {
         BridgeSync.run(this, false);  // the owner's bridge, kept ready (nobody else gets one)
         Speed.pingAll(this, () -> runOnUiThread(this::changed));  // every server's response time
         Diag.upload(this, false);  // the journal to the family server (it keeps the owner's only)
+        if (Rescue.shown(this)) new Thread(() -> BridgeCheck.sendPending(this), "check-send").start();  // a report made offline
     }
 
     @Override
@@ -235,6 +237,10 @@ public class MainActivity extends Activity implements State.Listener {
         }));
         // when the family server is out of reach the journal cannot go to it: copied here, it goes into a chat
         addTo(settings, setting("📋", "Скопировать журнал и проверку связи", null, v -> copyJournal()));
+        // the owner's only: the bridges checked from this phone, on its own network (the family server's Claude reads the report)
+        checkVal = label("", 13, muted, false);
+        checkRow = setting("🔬", "Проверить мосты с этого телефона", checkVal, v -> startCheck("", true));
+        addTo(settings, checkRow);
         // the owner's only: the family server's rescue console in the browser (shown once the server says it is the owner)
         rescueRow = setting("🛟", "Спасение сервера: консоль в браузере", null, v -> Rescue.open(this));
         addTo(settings, rescueRow);
@@ -346,6 +352,12 @@ public class MainActivity extends Activity implements State.Listener {
         setRow(appsCard, has);
         setRow(addRow, has);
         setRow(rescueRow, Rescue.shown(this));
+        setRow(checkRow, Rescue.shown(this));
+        checkVal.setText(BridgeCheck.running.get() ? "идёт…" : "");
+        if (checkAsked && BridgeCheck.fresh && !BridgeCheck.running.get()) {
+            checkAsked = false;
+            showCheck();
+        }
         if (has) {
             showConns(all);
             appsName.setText(Apps.summary(this));
@@ -511,9 +523,16 @@ public class MainActivity extends Activity implements State.Listener {
             appsChanged();
         }
         if (i.getBooleanExtra("connect", false) && Profile.chosen(this) != null && State.phase == State.Phase.OFF) connect();  // the tile
+        // the AI helper asks for the family server's Claude: the bridges checked from this phone (the owner's only); started
+        // here, before the screen may go back below — a check starts from the front
+        String check = i.getStringExtra("check_bridges");
+        if (check != null && Rescue.shown(this)) startCheck(check, false);
         // the AI helper switches Winger on when its server does not answer, and the person goes straight back to it
         // (unless Android still has to ask for the VPN: then this screen stays for the answer)
         if (i.getBooleanExtra("back", false) && VpnService.prepare(this) == null) moveTaskToBack(true);
+        if (BuildConfig.DEBUG && i.hasExtra("test_check_join")) BridgeCheck.joinMs = i.getLongExtra("test_check_join", 50_000);  // the emulator test only
+        if (BuildConfig.DEBUG && i.hasExtra("test_check")) startCheck(i.getStringExtra("test_check"), true);  // the emulator test only
+        if (i.getBooleanExtra("show_check", false)) showCheck();
         String testPick = BuildConfig.DEBUG ? i.getStringExtra("test_pick") : null;  // the emulator test only
         if (testPick != null) pickApps(testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
@@ -628,14 +647,51 @@ public class MainActivity extends Activity implements State.Listener {
         }
     }
 
-    /** A settings row shown or hidden together with its thin line (the one under it; the last row's: the one above). */
+    /** A settings row shown or hidden; each thin line stays only between two rows that are shown. */
     private void setRow(View row, boolean show) {
-        int vis = show ? View.VISIBLE : View.GONE;
-        row.setVisibility(vis);
+        row.setVisibility(show ? View.VISIBLE : View.GONE);
         ViewGroup list = (ViewGroup) row.getParent();
-        int at = list.indexOfChild(row);
-        if (at + 1 < list.getChildCount()) list.getChildAt(at + 1).setVisibility(vis);
-        else if (at > 0) list.getChildAt(at - 1).setVisibility(vis);
+        boolean before = false;  // a row shown above
+        for (int i = 0; i < list.getChildCount(); i++) {
+            View v = list.getChildAt(i);
+            if (v instanceof LinearLayout) {  // a row
+                before |= v.getVisibility() == View.VISIBLE;
+                continue;
+            }
+            View next = i + 1 < list.getChildCount() ? list.getChildAt(i + 1) : null;  // a line: above the next row
+            v.setVisibility(before && next != null && next.getVisibility() == View.VISIBLE ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /** The bridges checked from this phone (a few minutes, in the background with a notice); mine: asked here — its
+     *  result is shown here. An ask from outside (the AI helper) is taken at most once a minute. */
+    private void startCheck(String task, boolean mine) {
+        if (BridgeCheck.running.get()) {
+            if (mine) Toast.makeText(this, "Проверка уже идёт — её ход в уведомлении", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mine && System.currentTimeMillis() - BridgeCheck.lastStart() < 60_000) return;
+        checkAsked |= mine;
+        Intent s = new Intent(this, CheckSvc.class).putExtra(CheckSvc.TASK, task == null ? "" : task);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(s);
+            else startService(s);
+        } catch (RuntimeException e) {
+            Diag.w(this, "bridge check start", e);
+            return;
+        }
+        if (mine) Toast.makeText(this, "Проверяю мосты — несколько минут, ход в уведомлении", Toast.LENGTH_LONG).show();
+        changed();
+    }
+
+    /** The last check's report, in a few lines. */
+    private void showCheck() {
+        org.json.JSONObject r = BridgeCheck.last(this);
+        BridgeCheck.fresh = false;
+        if (r == null || isFinishing()) return;
+        String when = new java.text.SimpleDateFormat("dd.MM HH:mm", Locale.ROOT).format(new java.util.Date(r.optLong("at") * 1000));
+        new AlertDialog.Builder(this).setTitle("Проверка мостов · " + when).setMessage(BridgeCheck.summary(r))
+                .setPositiveButton("Понятно", null).show();
     }
 
     /** «⏱ отклик 85 мс · 15:03» → «85 мс · 15:03»; «⚡ 23,4 Мбит/с · 45 мс» stays with its ⚡ (one row's short line). */

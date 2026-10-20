@@ -117,6 +117,23 @@ final class Bridge {
         return Net.vpnOn();
     }
 
+    /** The family server's Claude asked the owner's phone to check the bridges: Winger starts the check (a few minutes, with
+     *  its notice) and gives the screen straight back. task: the ask's id, letters and digits only. */
+    @JavascriptInterface
+    public boolean wingerCheck(String task) {
+        if (task == null || !task.matches("[A-Za-z0-9_-]{4,40}")) return false;
+        Intent i = new Intent().setClassName(WINGER, WINGER + ".MainActivity").putExtra("check_bridges", task).putExtra("back", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        act.runOnUiThread(() -> {
+            try {
+                act.startActivity(i);
+            } catch (Exception e) {
+                android.util.Log.i("AIWeb", "Winger did not start the check: " + e);
+            }
+        });
+        return true;
+    }
+
     /** Winger switches on (over a bridge by itself when the server does not answer) and gives the screen straight back. */
     @JavascriptInterface
     public boolean startWinger() {
