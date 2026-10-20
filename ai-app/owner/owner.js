@@ -1046,35 +1046,50 @@
     // ---- «🔑 Ключи»: every key of the helper and Claude in one place — which are in, which are not, what each is for ----
     const KEY_SITE = {  // where each key is made
       dahl: "https://inference.dahl.global", orca: "https://orcarouter.ai", nvidia: "https://build.nvidia.com",
-      zhipu: "https://open.bigmodel.cn", gemini: "https://aistudio.google.com/apikey", openrouter: "https://openrouter.ai/keys",
+      zhipu: "https://open.bigmodel.cn", openrouter: "https://openrouter.ai/keys",
       groq: "https://console.groq.com/keys", exa: "https://dashboard.exa.ai/api-keys", giga: "https://developers.sber.ru/studio",
-      salute: "https://developers.sber.ru/studio", cf: "https://dash.cloudflare.com", ovh: "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/",
+      cf: "https://dash.cloudflare.com",
       hf: "https://huggingface.co/settings/tokens/new?tokenType=write", coverr: "https://coverr.co/developers",
       anthropic: "https://console.anthropic.com/settings/keys",
     };
     // the keys the helper's own cards check and keep (search, video, trends): [set, off, the field the key goes in]
     const APP_KEY_OP = { groq: ["groq_set", "groq_off", "key"], exa: ["exa_set", "exa_off", "key"], hf: ["hf_set", "hf_off", "token"],
       coverr: ["coverr_set", "coverr_off", "key"] };
-    let keysNow = null;  // the list as the server last said it
+    let keysNow = null, testedNow = null;  // the list and its last check, as the server last said them
     function allKeys() {
       sheet("🔑 Ключи", (box) => {
         const list = el("div", {}, el("div", { class: "status", style: "padding:12px" }, el("span", { class: "spin" }), "Загружаю…"));
         box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text:
           "Все ключи помощника и Claude в одном месте: ✅ — подключён, ➖ — нет. Нажмите строку — там написано, для чего ключ "
           + "и где его взять; там же его подключают, меняют и убирают. Ключи хранятся только на сервере — в чаты их не присылайте." }), list);
-        const fill = (keys) => {
+        const fill = (keys, tested) => {
           keysNow = keys;
+          if (tested !== undefined) testedNow = tested;
           list.innerHTML = "";
           list.append(el("div", { style: "font-size:14px;margin:0 2px 6px", text: `Подключено ${keys.filter((k) => k.on).length} из ${keys.length}` }));
           for (const k of keys) {
             list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => keyOne(k, fill) },
               el("span", { style: "font-size:18px;width:26px;flex:none;text-align:center", text: k.on ? "✅" : "➖" }),
-              el("div", { class: "grow" }, k.name, el("small", { text: k.use })),
+              el("div", { class: "grow" }, k.name, el("small", { text: k.use + (k.test === "unknown" ? " · ⚠️ при проверке не ответил" : "") })),
               el("span", { class: "muted", style: "font-size:22px", text: "›" })));
           }
+          const t = testedNow;
+          list.append(el("div", { style: "font-size:13px;color:var(--muted);margin:10px 2px 0", text: t
+            ? `🧪 Проверено ${ago(t.ts)} назад${t.auto ? " (само, после обновления)" : ""}`
+              + (t.removed.length ? ` · убраны как не принятые: ${t.removed.join(", ")}` : " · не принятых не было")
+            : "🧪 Все ключи ещё не проверялись разом." }),
+          el("button", { class: "btn line wide", style: "margin-top:8px", text: "🧪 Проверить все ключи", onclick: async (e) => {
+            const b = e.currentTarget;
+            busyBtn(b, "⏳ Пробую каждый ключ… до двух минут");
+            try {
+              const r = await panel({ op: "agent_testkeys" });
+              if (r.t !== "done") { toast("⚠️ " + r.text, 7000); freeBtn(b); return; }
+              fill(r.keys, r.tested); toast(r.text, 9000);
+            } catch (x) { toast(problem(x)); freeBtn(b); }
+          } }));
         };
         panel({ op: "agent_keys" }).then((r) => {
-          if (r.t === "done") return fill(r.keys);
+          if (r.t === "done") return fill(r.keys, r.tested || null);
           list.innerHTML = "";
           list.append(el("p", { class: "status", style: "padding:8px 0", text: "⚠️ " + (r.text || "Список ключей не открылся.")
             + " Список ведёт служба «🛠 Claude» — если она не отвечает, ключи поиска, видео и трендов есть в их карточках («🤖 Помощник»)." }));
