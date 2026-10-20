@@ -57,16 +57,6 @@ func activeIndex(all []*Profile, active string, current int) int {
 	return max(0, min(current, len(all)-1))
 }
 
-// carried: the programs the VPN carries with these settings (as Engine.start gives them to sing-box), nil: all of them.
-func carried(s Settings) []string {
-	if !s.OnlyApps || len(s.Apps) == 0 {
-		return nil
-	}
-	apps := append([]string(nil), s.Apps...)
-	sort.Strings(apps)
-	return apps
-}
-
 // API is the window's side of things: the state, the buttons, the settings.
 func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 	mux := http.NewServeMux()
@@ -109,6 +99,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 			other = map[bool]string{true: "Через мост", false: "Через сервер"}[o.Bridge]
 		}
 		reply(w, map[string]any{"status": status, "conns": conns, "onlyApps": s.OnlyApps, "apps": s.Apps,
+			"bridgeOnly": s.BridgeOnly, "bridgeApps": s.BridgeApps, "standard": map[string][]string{"server": standardApps[false], "bridge": standardApps[true]},
 			"auto": !s.Manual, "version": versionName, "update": fam.UpdateInfo(), "captcha": Captcha(),
 			"down": down, "up": up, "activeName": name, "switch": other, "preparing": fam.Preparing(), "owner": s.Owner})
 	})
@@ -223,6 +214,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 	mux.HandleFunc("/api/apps", func(w http.ResponseWriter, r *http.Request) {
 		m := body(r)
 		only, _ := m["only"].(bool)
+		bridge, _ := m["bridge"].(bool) // a bridge's list; else the server's
 		var apps []string
 		if list, ok := m["apps"].([]any); ok {
 			for _, a := range list {
@@ -233,10 +225,16 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		}
 		sort.Strings(apps)
 		was := st.Get()
-		st.Update(func(s *Settings) { s.OnlyApps, s.Apps = only && len(apps) > 0, apps })
-		// on anew only when what goes through the VPN changed: a click on the mode it is in already, or the same list
-		// saved again, does not break every connection
-		if !slices.Equal(carried(was), carried(st.Get())) {
+		st.Update(func(s *Settings) {
+			if bridge {
+				s.BridgeOnly, s.BridgeApps = only && len(apps) > 0, apps
+			} else {
+				s.OnlyApps, s.Apps = only && len(apps) > 0, apps
+			}
+		})
+		// on anew only when what the connection in use carries changed: a click on the mode it is in already, the same
+		// list saved again, or the other kind's list, does not break every connection
+		if on, err := ParseLink(eng.Status().Active); err == nil && on.Bridge == bridge && !slices.Equal(was.For(bridge), st.Get().For(bridge)) {
 			eng.Restart()
 		}
 		reply(w, map[string]bool{"ok": true})
@@ -307,8 +305,11 @@ func Report(eng *Engine, st *Store) string {
 		b.WriteString(" (выбран сам)")
 	}
 	b.WriteString("\nподключений: " + itoa(len(s.Profiles)))
-	if s.OnlyApps {
-		b.WriteString(", через VPN только: " + strings.Join(s.Apps, ", "))
+	if l := s.For(false); l != nil {
+		b.WriteString(", через сервер только: " + strings.Join(l, ", "))
+	}
+	if l := s.For(true); l != nil {
+		b.WriteString(", через мост только: " + strings.Join(l, ", "))
 	}
 	host, _ := st.HomeHost()
 	if host != "" {

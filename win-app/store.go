@@ -19,10 +19,14 @@ type Saved struct {
 type Settings struct {
 	Profiles []Saved  `json:"profiles"`
 	Current  int      `json:"current"`
-	OnlyApps bool     `json:"onlyApps"` // only the chosen programs through the VPN
+	OnlyApps bool     `json:"onlyApps"` // only the chosen programs through the server (apps.go)
 	Apps     []string `json:"apps"`     // their files: telegram.exe, chrome.exe…
-	Manual   bool     `json:"manual"`   // the automatic choice switched off
-	KeepOn   bool     `json:"keepOn"`   // on again after a restart of the computer
+	// a bridge's own list (a bridge is for other days than the server, and slow)
+	BridgeOnly bool     `json:"bridgeOnly,omitempty"`
+	BridgeApps []string `json:"bridgeApps,omitempty"`
+	AppsSet    int      `json:"appsSet,omitempty"` // 1: the two lists, the standard ones ticked (1.0.140)
+	Manual     bool     `json:"manual"`            // the automatic choice switched off
+	KeepOn     bool     `json:"keepOn"`            // on again after a restart of the computer
 	// the last speed check of each connection (by its link), as its row shows it: «⚡ 23,4 Мбит/с · 45 мс · 15:03»
 	Speeds map[string]string `json:"speeds,omitempty"`
 	// the last response time of each connection: «⏱ отклик 85 мс · 15:03» (a bridge's: when it was last on)
@@ -48,7 +52,7 @@ func OpenStore(dir string) *Store {
 	if b, err := os.ReadFile(st.path); err == nil {
 		_ = json.Unmarshal(b, &st.s)
 	}
-	if dualNames(st.s.Profiles) {
+	if a, b := dualNames(st.s.Profiles), twoLists(&st.s); a || b {
 		st.save()
 	}
 	return st
@@ -81,6 +85,7 @@ func (st *Store) Get() Settings {
 	s := st.s
 	s.Profiles = append([]Saved(nil), st.s.Profiles...)
 	s.Apps = append([]string(nil), st.s.Apps...)
+	s.BridgeApps = append([]string(nil), st.s.BridgeApps...)
 	s.Speeds, s.Pings = map[string]string{}, map[string]string{}
 	for k, v := range st.s.Speeds {
 		s.Speeds[k] = v

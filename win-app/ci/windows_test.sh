@@ -110,6 +110,9 @@ T=$(cat /c/ProgramData/Winger/ui-token)
 [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47710/api/state)" = 403 ] || fail "the API answers without the key"
 api() { curl -s -b "wt=$T" -H "Content-Type: application/json" -X POST -d "$2" "http://127.0.0.1:47710/api/$1"; }
 api add "{\"text\": \"Ваш VPN: $LINK\"}" | tee -a "$OUT/service.txt"
+# a new Winger sends only the standard programs through the server; the test's curl must go through it: all programs
+curl -s -b "wt=$T" http://127.0.0.1:47710/api/state | grep -q '"onlyApps":true' || fail "a new Winger: the standard programs are not ticked"
+api apps '{"bridge": false, "only": false, "apps": []}' | tee -a "$OUT/service.txt"
 api connect '{}' | tee -a "$OUT/service.txt"
 for _ in $(seq 1 60); do curl -s -b "wt=$T" http://127.0.0.1:47710/api/state | grep -q '"phase":"on"' && break; sleep 1; done
 curl -s -b "wt=$T" http://127.0.0.1:47710/api/state | tee -a "$OUT/service.txt" | grep -q '"phase":"on"' || fail "the service did not come on"

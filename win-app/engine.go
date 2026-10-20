@@ -352,9 +352,9 @@ func (e *Engine) run(g int) {
 func (e *Engine) start(g int, p *Profile, tunnel string) error {
 	s := e.st.Get()
 	opts := EngineOptions{Profile: p, ProbePort: e.port(), Tun: e.tun, Own: e.own}
-	if s.OnlyApps && len(s.Apps) > 0 {
-		opts.OnlyApps = s.Apps
-	}
+	opts.OnlyApps = s.For(p.Bridge) // the server's list or a bridge's (apps.go)
+	opts.Straight = !p.Bridge       // through the server, Russian sites go straight (banks); a bridge carries them all
+	opts.Home, _ = e.st.HomeHost()
 	if p.Bridge {
 		opts.SocksPort = FreePort()
 		var me *Relay

@@ -84,8 +84,12 @@ function draw(s) {
   $("#connsHead").hidden = !has;
   $("#prep").hidden = !s.preparing;  // the laptop's own bridges being made on the server
   $("#rescue").hidden = !s.owner;  // the server owner's only
+  // a list of its own for the server and for a bridge (the bridge's row once there is a bridge)
+  const many = (only, list) => only && (list || []).length ? "отмечено: " + list.length : "все программы";
   $("#appsRow").hidden = !has;
-  $("#appsVal").textContent = s.onlyApps ? "выбранные: " + (s.apps || []).length : "все программы";
+  $("#appsVal").textContent = many(s.onlyApps, s.apps);
+  $("#bridgeAppsRow").hidden = !(s.conns || []).some((c) => c.bridge);
+  $("#bridgeAppsVal").textContent = many(s.bridgeOnly, s.bridgeApps);
   const u = s.update || {};
   $("#verName").textContent = "Winger " + s.version + (u.state === "downloading" ? " · загружаю…" : u.state === "ready" ? " · ставлю…" : "");
   $("#ver").title = u.state === "downloading" ? "Загружаю " + (u.name || "новую версию")
@@ -213,24 +217,29 @@ $("#ping").onclick = async () => {
 };
 $("#add").onclick = paste;
 $("#addRow").onclick = paste;
-// «Через VPN»: all programs, or only the ticked ones (the list: the programs running now and those ticked before)
-function appsSheet() {
-  sheet("Какие программы через VPN", (box, close) => {
-    let only = !!S.onlyApps;
+// «Через сервер» / «Через мост»: all programs, or only the ticked ones — the standard ones ticked from the start, then
+// the programs running now and those ticked before
+function appsSheet(bridge) {
+  sheet(bridge ? "Какие программы через мост" : "Какие программы через сервер", (box, close) => {
+    let only = !!(bridge ? S.bridgeOnly : S.onlyApps);
+    const mine = (bridge ? S.bridgeApps : S.apps) || [], std = ((S.standard || {})[bridge ? "bridge" : "server"]) || [];
     const seg = el("div", { class: "seg", id: "mode" },
       el("button", { "data-only": "0", text: "Все программы" }), el("button", { "data-only": "1", text: "Только выбранные" }));
     const list = el("div", { class: "apps", id: "apps" });
     const mark = () => seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === only));
     const fill = async () => {
       list.innerHTML = "";
-      if (!only) { list.append(el("small", { class: "note", text: "Через VPN идут все программы этого компьютера." })); return; }
+      if (!only) { list.append(el("small", { class: "note", text: (bridge ? "Через мост" : "Через сервер") + " идут все программы этого компьютера." })); return; }
       let procs = [];
       try { procs = (await call("processes")).processes || []; } catch (e) { /* nothing */ }
       if (!only) return;  // switched back while the list was coming
-      const chosen = new Set((S.apps || []).map((a) => a.toLowerCase()));
-      const names = [...new Set([...chosen, ...procs.map((p) => p.toLowerCase())])].sort();
+      const chosen = new Set(mine.map((a) => a.toLowerCase()));
+      const rest = [...new Set([...chosen, ...procs.map((p) => p.toLowerCase())])].filter((n) => !std.includes(n)).sort();
+      const names = [...std, ...rest];  // the standard ones first, then the chosen and running ones
       list.innerHTML = "";
-      list.append(el("small", { class: "note", text: "Отметьте программы — через VPN пойдут только они. Список — запущенные сейчас программы." }));
+      list.append(el("small", { class: "note", text: bridge
+        ? "Мост медленный: мессенджеры, ИИ и браузеры — да, музыку и видео лучше не пускать. Отметьте любые другие программы."
+        : "Через сервер — отмеченные программы; русские сайты в браузерах (банки, Госуслуги) идут напрямую. Отметьте любые другие программы." }));
       for (const n of names) {
         const cb = el("input", { type: "checkbox" }); cb.checked = chosen.has(n); cb.dataset.name = n;
         list.append(el("label", {}, cb, el("span", { text: n })));
@@ -239,18 +248,20 @@ function appsSheet() {
     seg.onclick = (e) => { const b = e.target.closest("button"); if (!b) return; only = b.dataset.only === "1"; mark(); fill(); };
     box.append(seg, list, el("div", { class: "pair" }, el("button", { class: "btn line", text: "Отмена", onclick: close }),
       el("button", { class: "btn", text: "Сохранить", onclick: async () => {
-        const apps = only ? [...list.querySelectorAll("input:checked")].map((c) => c.dataset.name) : S.apps || [];
+        const apps = only ? [...list.querySelectorAll("input:checked")].map((c) => c.dataset.name) : mine;
         try {
-          await call("apps", { only: only && apps.length > 0, apps });
+          await call("apps", { bridge: !!bridge, only: only && apps.length > 0, apps });
           close();
-          toast(only && apps.length ? "Через VPN: " + apps.length + " прогр." : "Через VPN — все программы");
+          const where = bridge ? "Через мост" : "Через сервер";
+          toast(only && apps.length ? where + ": " + apps.length + " прогр." : where + " — все программы");
           refresh();
         } catch (e) { toast(e.message); }
       } })));
     mark(); fill();
   });
 }
-$("#appsRow").onclick = appsSheet;
+$("#appsRow").onclick = () => appsSheet(false);
+$("#bridgeAppsRow").onclick = () => appsSheet(true);
 // «Проверить обновление»: the family server is asked; what came of it is said (newest already, a new one coming, or why not)
 $("#ver").onclick = async () => {
   const b = $("#ver");

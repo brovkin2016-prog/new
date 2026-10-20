@@ -128,9 +128,13 @@ func selftest(args []string) error {
 		return err
 	}
 	st.Add(p)
-	if only != "" {
-		st.Update(func(s *Settings) { s.OnlyApps, s.Apps = true, strings.Split(strings.ToLower(only), ",") })
-	}
+	st.Update(func(s *Settings) { // all programs, or only these, through whatever connection the test has
+		apps := []string(nil)
+		if only != "" {
+			apps = strings.Split(strings.ToLower(only), ",")
+		}
+		s.OnlyApps, s.Apps, s.BridgeOnly, s.BridgeApps = only != "", apps, only != "", apps
+	})
 	relay, _ := relayPath(dir)
 	eng := NewEngine(st, dir, relay, straight(), true)
 	if err := eng.Connect(); err != nil {

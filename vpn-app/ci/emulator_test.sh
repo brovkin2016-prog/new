@@ -34,7 +34,7 @@ adb shell "am start -a android.intent.action.VIEW -d '$LINK' -n $ACT"
 sleep 3
 adb exec-out screencap -p > "$OUT/1-added.png"
 adb shell am start -n $ACT --ez test_all true --ez test_connect true  # first everything through the VPN
-wait_log "through the VPN: all apps" 60 || fail "not all apps through the VPN"
+wait_log "through the \(server\|bridge\): all apps" 60 || fail "not all apps through the VPN"
 wait_log "connected via" 60 || fail "no connection to the server"
 wait_log "ping [0-9]* ms" 40 || fail "no response time through the tunnel"
 sleep 2
@@ -122,7 +122,7 @@ adb logcat -c
 adb shell am start -n $ACT --es test_apps com.android.chrome --ez test_connect true
 # (YouTube on this emulator image is ticked by default too: the list must name Chrome, and YouTube shows the app sees them)
 step "(YouTube on this emulator image is ticked by default too: the list must name Chrome, and Y"
-wait_log "through the VPN: \[.*com\.android\.chrome" 60 || fail "the chosen app did not reach the VPN (is it visible to the app?)"
+wait_log "through the \(server\|bridge\): \[.*com\.android\.chrome" 60 || fail "the chosen app did not reach the VPN (is it visible to the app?)"
 wait_log "connected via" 60 || fail "no connection with only the chosen apps"
 sleep 2
 BEFORE=$(TUNNELED)
@@ -150,7 +150,7 @@ adb shell input keyevent KEYCODE_BACK
 adb shell input keyevent KEYCODE_BACK
 adb logcat -c
 adb shell am start -n $ACT --es test_apps com.android.settings --ez test_connect true
-wait_log "through the VPN: \[.*com\.android\.settings" 60 || fail "an app outside the known list did not reach the VPN"
+wait_log "through the \(server\|bridge\): \[.*com\.android\.settings" 60 || fail "an app outside the known list did not reach the VPN"
 wait_log "connected via" 60 || fail "no connection with an app outside the known list"
 adb shell am start -n $ACT --ez test_disconnect true
 wait_log "stopped" 20 || fail "did not switch off (an app outside the known list)"

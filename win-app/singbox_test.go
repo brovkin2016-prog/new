@@ -11,8 +11,12 @@ func TestConfigs(t *testing.T) {
 	br, _ := ParseLink("winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234#b")
 	own := []string{"winger.exe", "winger-relay.exe"}
 	cases := map[string]EngineOptions{
-		"server, all programs":      {Profile: srv, ProbePort: 47801, Own: own, Tun: true},
-		"server, chosen programs":   {Profile: srv, ProbePort: 47801, Own: own, Tun: true, OnlyApps: []string{"telegram.exe", "chrome.exe"}},
+		"server, all programs":    {Profile: srv, ProbePort: 47801, Own: own, Tun: true},
+		"server, chosen programs": {Profile: srv, ProbePort: 47801, Own: own, Tun: true, OnlyApps: []string{"telegram.exe", "chrome.exe"}},
+		"server, chosen, Russian sites straight": {Profile: srv, ProbePort: 47801, Own: own, Tun: true, OnlyApps: []string{"chrome.exe"},
+			Straight: true, Home: "vpn.sites-s.ru"},
+		"bridge, chosen programs": {Profile: br, SocksPort: 47802, ProbePort: 47801, Own: own, Tun: true, OnlyApps: []string{"telegram.exe"},
+			Home: "vpn.sites-s.ru"},
 		"port hopping and obfs":     {Profile: hop, ProbePort: 47801, Own: own, Tun: true},
 		"bridge":                    {Profile: br, SocksPort: 47802, ProbePort: 47801, Own: own, Tun: true},
 		"a look at the server only": {Profile: srv, ProbePort: 47803},
@@ -21,6 +25,30 @@ func TestConfigs(t *testing.T) {
 		if err := Check(Config(o)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+	// through the server, Russian sites in a chosen browser go straight (banks); the family server always through the
+	// connection, before them; a bridge carries a chosen program's Russian sites too
+	at := func(name string) (home, ru, proc int) {
+		home, ru, proc = -1, -1, -1
+		for i, r := range Config(cases[name])["route"].(map[string]any)["rules"].([]any) {
+			m := r.(map[string]any)
+			if d, ok := m["domain"].([]string); ok && d[0] == "vpn.sites-s.ru" && m["outbound"] == "proxy" {
+				home = i
+			}
+			if d, ok := m["domain_suffix"].([]string); ok && d[0] == ".ru" && m["outbound"] == "direct" {
+				ru = i
+			}
+			if p, ok := m["process_path_regex"].([]string); ok && len(p) == 1 && m["outbound"] == "proxy" {
+				proc = i
+			}
+		}
+		return
+	}
+	if h, r, p := at("server, chosen, Russian sites straight"); h < 0 || r < 0 || p < 0 || !(h < r && r < p) {
+		t.Fatalf("server: home %d, Russian sites %d, programs %d", h, r, p)
+	}
+	if h, r, p := at("bridge, chosen programs"); h < 0 || r >= 0 || p < 0 {
+		t.Fatalf("bridge: home %d, Russian sites %d (must be none), programs %d", h, r, p)
 	}
 	c := Config(cases["port hopping and obfs"])
 	px := c["outbounds"].([]any)[0].(map[string]any)

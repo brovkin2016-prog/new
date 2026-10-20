@@ -17,14 +17,22 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * What goes through the VPN. By default only the apps that need it (Instagram, Telegram, WhatsApp, YouTube and the
- * like) — the VPN can then stay on all the time, and banks, Gosuslugi, marketplaces and taxis go straight, as if there
- * were no VPN. Any other app on the phone can be ticked too (not by default). Or everything, as before.
+ * What goes through the VPN — a list of its own for the server and for a bridge, as the two are for different things.
+ * Through the server by default the apps that need it (Instagram, Telegram, WhatsApp, YouTube and the like): the VPN can
+ * then stay on all the time, and banks, Gosuslugi, marketplaces and taxis go straight, as if there were no VPN. Through
+ * a bridge (the days the mobile network lets only a list of sites through, and the bridge is slow) by default the
+ * messengers and the AI chats: no video, which would eat the bridge; the allowed sites go straight. Any other app can be
+ * ticked in either list (not by default). Or everything, as before.
  */
 final class Apps {
     /** package → the name shown; the ones in OFF_BY_DEFAULT are offered but not ticked. */
     static final Map<String, String> KNOWN = new LinkedHashMap<>();
     private static final Set<String> OFF_BY_DEFAULT = new HashSet<>();
+    /** Through a bridge by default: the messengers and the AI chats (the bridge is slow: no video). */
+    private static final Set<String> BRIDGE_DEFAULT = new HashSet<>(java.util.Arrays.asList(
+            "org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram", "com.whatsapp",
+            "com.whatsapp.w4b", "org.thoughtcrime.securesms", "com.viber.voip", "com.facebook.orca", "com.instagram.android",
+            "com.openai.chatgpt", "com.anthropic.claude", "com.google.android.apps.bard"));
 
     static {
         String[][] k = {
@@ -53,13 +61,18 @@ final class Apps {
         return c.getSharedPreferences("vpn", Context.MODE_PRIVATE);
     }
 
-    /** True: only the chosen apps; false: everything through the VPN. */
-    static boolean onlyChosen(Context c) {
-        return prefs(c).getBoolean("onlyApps", true);
+    /** A setting's name for the server's list (the old names: what was chosen before stays) or the bridge's. */
+    private static String key(boolean bridge, String name) {
+        return bridge ? "bridge." + name : name;
     }
 
-    static void setOnlyChosen(Context c, boolean only) {
-        prefs(c).edit().putBoolean("onlyApps", only).apply();
+    /** True: only the chosen apps; false: everything through the VPN. */
+    static boolean onlyChosen(Context c, boolean bridge) {
+        return prefs(c).getBoolean(key(bridge, "onlyApps"), true);
+    }
+
+    static void setOnlyChosen(Context c, boolean bridge, boolean only) {
+        prefs(c).edit().putBoolean(key(bridge, "onlyApps"), only).apply();
     }
 
     /** One app on the phone: its package and the name shown for it. */
@@ -81,7 +94,7 @@ final class Apps {
      * Every app with an icon on the phone's home screen (but this one): first the known ones, then the other ticked
      * ones, then the rest, by name. Takes a moment on a phone with many apps: not on the screen's thread.
      */
-    static List<App> all(Context c) {
+    static List<App> all(Context c, boolean bridge) {
         PackageManager pm = c.getPackageManager();
         Map<String, String> found = new HashMap<>();
         Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
@@ -95,7 +108,7 @@ final class Apps {
         for (String p : KNOWN.keySet()) if (found.containsKey(p)) out.add(new App(p, KNOWN.get(p)));
         for (Map.Entry<String, String> e : found.entrySet()) {
             if (KNOWN.containsKey(e.getKey())) continue;
-            (chosen(c, e.getKey()) ? on : rest).add(new App(e.getKey(), e.getValue()));
+            (chosen(c, bridge, e.getKey()) ? on : rest).add(new App(e.getKey(), e.getValue()));
         }
         Collator byName = Collator.getInstance();
         Collections.sort(on, (a, b) -> byName.compare(a.name, b.name));
@@ -114,41 +127,43 @@ final class Apps {
         }
     }
 
-    /** The known ones (but Chrome) are ticked unless switched off; any other app only when ticked. */
-    private static boolean onByDefault(String pkg) {
-        return KNOWN.containsKey(pkg) && !OFF_BY_DEFAULT.contains(pkg);
+    /** The server's: the known ones (but Chrome) are ticked unless switched off; the bridge's: its own few; any other
+     * app only when ticked. */
+    private static boolean onByDefault(boolean bridge, String pkg) {
+        return bridge ? BRIDGE_DEFAULT.contains(pkg) : KNOWN.containsKey(pkg) && !OFF_BY_DEFAULT.contains(pkg);
     }
 
-    static boolean chosen(Context c, String pkg) {
-        boolean byDefault = onByDefault(pkg);
-        Set<String> s = prefs(c).getStringSet(byDefault ? "appsOff" : "appsOn", new HashSet<>());
+    static boolean chosen(Context c, boolean bridge, String pkg) {
+        boolean byDefault = onByDefault(bridge, pkg);
+        Set<String> s = prefs(c).getStringSet(key(bridge, byDefault ? "appsOff" : "appsOn"), new HashSet<>());
         return byDefault != s.contains(pkg);
     }
 
-    static void choose(Context c, String pkg, boolean on) {
-        boolean byDefault = onByDefault(pkg);
-        String key = byDefault ? "appsOff" : "appsOn";
+    static void choose(Context c, boolean bridge, String pkg, boolean on) {
+        boolean byDefault = onByDefault(bridge, pkg);
+        String key = key(bridge, byDefault ? "appsOff" : "appsOn");
         Set<String> s = new HashSet<>(prefs(c).getStringSet(key, new HashSet<>()));
         if (byDefault != on) s.add(pkg);
         else s.remove(pkg);
         prefs(c).edit().putStringSet(key, s).apply();
     }
 
-    /** The packages that go through the VPN, or null for all of them (also when none of the chosen ones is here). */
-    static List<String> through(Context c) {
-        if (!onlyChosen(c)) return null;
+    /** The packages that go through the server (bridge: the bridge), or null for all of them (also when none of the
+     * chosen ones is here). */
+    static List<String> through(Context c, boolean bridge) {
+        if (!onlyChosen(c, bridge)) return null;
         PackageManager pm = c.getPackageManager();
-        List<String> out = new ArrayList<>(), more = new ArrayList<>(prefs(c).getStringSet("appsOn", new HashSet<>()));
+        List<String> out = new ArrayList<>(), more = new ArrayList<>(prefs(c).getStringSet(key(bridge, "appsOn"), new HashSet<>()));
         Collections.sort(more);
-        for (String p : KNOWN.keySet()) if (chosen(c, p) && here(pm, p)) out.add(p);
-        for (String p : more) if (!out.contains(p) && chosen(c, p) && here(pm, p)) out.add(p);
+        for (String p : KNOWN.keySet()) if (chosen(c, bridge, p) && here(pm, p)) out.add(p);
+        for (String p : more) if (!out.contains(p) && chosen(c, bridge, p) && here(pm, p)) out.add(p);
         return out.isEmpty() ? null : out;
     }
 
     /** «Instagram, Telegram, YouTube и ещё 2» for the main screen. */
-    static String summary(Context c) {
-        if (!onlyChosen(c)) return "Все приложения";
-        List<String> on = through(c);
+    static String summary(Context c, boolean bridge) {
+        if (!onlyChosen(c, bridge)) return "Все приложения";
+        List<String> on = through(c, bridge);
         if (on == null) return "Все приложения (не отмечено ни одно)";
         PackageManager pm = c.getPackageManager();
         List<String> names = new ArrayList<>();

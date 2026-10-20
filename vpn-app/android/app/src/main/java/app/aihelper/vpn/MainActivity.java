@@ -60,8 +60,8 @@ public class MainActivity extends Activity implements State.Listener {
     private PowerButton power;
     private AuroraView aurora;
     private AvatarView avatar;
-    private TextView status, detail, ping, appsName, hint, connsHead, checkVal;
-    private LinearLayout conns, appsCard, addRow, firstAdd, rescueRow, checkRow;
+    private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal;
+    private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow;
     private boolean checkAsked;  // the button here started the check: its result is shown here when it is done
     private String connsKey = "";
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
@@ -220,12 +220,19 @@ public class MainActivity extends Activity implements State.Listener {
         // the settings: which apps go through it, adding a connection, the update, the journal (and the owner's rescue)
         root.addView(section("Настройки"), sectionParams());
         LinearLayout settings = list();
+        // a list of its own for the server and for a bridge: the two are for different things
         appsName = label("", 13, muted, false);
         appsName.setSingleLine(true);
         appsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
         appsName.setMaxWidth(dp(150));
-        appsCard = setting("🧩", "Через VPN", appsName, v -> chooseApps());
+        appsCard = setting("🧩", "Через сервер", appsName, v -> chooseApps(false));
         addTo(settings, appsCard);
+        bridgeAppsName = label("", 13, muted, false);
+        bridgeAppsName.setSingleLine(true);
+        bridgeAppsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        bridgeAppsName.setMaxWidth(dp(150));
+        bridgeAppsCard = setting("🌉", "Через мост", bridgeAppsName, v -> chooseApps(true));
+        addTo(settings, bridgeAppsCard);
         addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
         addTo(settings, addRow);
         // which Winger this is, and a check right now (otherwise it looks for a new version every few hours by itself)
@@ -350,6 +357,9 @@ public class MainActivity extends Activity implements State.Listener {
         hint.setVisibility(has ? View.VISIBLE : View.GONE);
         firstAdd.setVisibility(has ? View.GONE : View.VISIBLE);
         setRow(appsCard, has);
+        boolean bridges = false;
+        if (has) for (Profile x : Profile.all(this)) bridges |= x.bridge;
+        setRow(bridgeAppsCard, bridges);
         setRow(addRow, has);
         setRow(rescueRow, Rescue.shown(this));
         setRow(checkRow, Rescue.shown(this));
@@ -360,7 +370,8 @@ public class MainActivity extends Activity implements State.Listener {
         }
         if (has) {
             showConns(all);
-            appsName.setText(Apps.summary(this));
+            appsName.setText(Apps.summary(this, false));
+            bridgeAppsName.setText(Apps.summary(this, true));
         }
         String st, dt;
         switch (State.phase) {
@@ -476,7 +487,10 @@ public class MainActivity extends Activity implements State.Listener {
     private void handle(Intent i) {
         if (i == null) return;
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getDataString() != null) add(i.getDataString());
-        if (BuildConfig.DEBUG && i.getBooleanExtra("test_all", false)) Apps.setOnlyChosen(this, false);  // the emulator test only
+        if (BuildConfig.DEBUG && i.getBooleanExtra("test_all", false)) {  // the emulator test only
+            Apps.setOnlyChosen(this, false, false);
+            Apps.setOnlyChosen(this, true, false);
+        }
         if (BuildConfig.DEBUG) VpnSvc.testMapdns = i.getBooleanExtra("test_mapdns", false);  // the emulator test only
         if (BuildConfig.DEBUG && i.hasExtra("test_back")) VpnSvc.testBackMs = i.getLongExtra("test_back", 0);  // the emulator test only
         if (BuildConfig.DEBUG && i.hasExtra("test_ai")) Apps.aiHelper = i.getStringExtra("test_ai");  // the emulator test only
@@ -518,8 +532,10 @@ public class MainActivity extends Activity implements State.Listener {
         }
         String testApps = BuildConfig.DEBUG ? i.getStringExtra("test_apps") : null;  // the emulator test only
         if (testApps != null) {
-            Apps.setOnlyChosen(this, true);
-            for (String pkg : testApps.split(",")) Apps.choose(this, pkg.trim(), true);
+            for (boolean bridge : new boolean[]{false, true}) {
+                Apps.setOnlyChosen(this, bridge, true);
+                for (String pkg : testApps.split(",")) Apps.choose(this, bridge, pkg.trim(), true);
+            }
             appsChanged();
         }
         if (i.getBooleanExtra("connect", false) && Profile.chosen(this) != null && State.phase == State.Phase.OFF) connect();  // the tile
@@ -534,7 +550,7 @@ public class MainActivity extends Activity implements State.Listener {
         if (BuildConfig.DEBUG && i.hasExtra("test_check")) startCheck(i.getStringExtra("test_check"), true);  // the emulator test only
         if (i.getBooleanExtra("show_check", false)) showCheck();
         String testPick = BuildConfig.DEBUG ? i.getStringExtra("test_pick") : null;  // the emulator test only
-        if (testPick != null) pickApps(testPick);
+        if (testPick != null) pickApps(false, testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
         if (testBridge != null) add(testBridge);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
@@ -887,38 +903,42 @@ public class MainActivity extends Activity implements State.Listener {
 
     // ---------- which apps go through the VPN ----------
 
-    private void chooseApps() {
-        String[] modes = {
+    /** What goes through the server (bridge: through a bridge): the standard list and any other ticked apps, or all. */
+    private void chooseApps(boolean bridge) {
+        String[] modes = bridge ? new String[]{
+                "Только отмеченные: Telegram, WhatsApp, Instagram, ChatGPT… и любые другие. Мост медленный — видео лучше не "
+                        + "пускать; разрешённые в эти дни сайты (банки, Госуслуги, Яндекс, VK) — напрямую",
+                "Все приложения"} : new String[]{
                 "Только отмеченные: Instagram, Telegram, YouTube… и любые другие. Банки, Госуслуги, маркетплейсы — напрямую",
                 "Все приложения"};
-        boolean only = Apps.onlyChosen(this);
+        boolean only = Apps.onlyChosen(this, bridge);
         int[] picked = {only ? 0 : 1};
         new AlertDialog.Builder(this)
-                .setTitle("Что пускать через VPN")
+                .setTitle(bridge ? "Что пускать через мост" : "Что пускать через сервер")
                 .setSingleChoiceItems(modes, picked[0], (d, w) -> picked[0] = w)
                 .setPositiveButton("Готово", (d, w) -> {
                     if ((picked[0] == 0) == only) return;
-                    Apps.setOnlyChosen(this, picked[0] == 0);
+                    Apps.setOnlyChosen(this, bridge, picked[0] == 0);
                     appsChanged();
                 })
-                .setNeutralButton("Какие приложения", (d, w) -> pickApps(null))
+                .setNeutralButton("Какие приложения", (d, w) -> pickApps(bridge, null))
                 .setNegativeButton("Отмена", null)
                 .show();
     }
 
     /** Every app on the phone, ticked or not, with a search; the list is gathered off the screen's thread. */
-    private void pickApps(String query) {
+    private void pickApps(boolean bridge, String query) {
         new Thread(() -> {
-            List<Apps.App> all = Apps.all(this);
+            List<Apps.App> all = Apps.all(this, bridge);
             Set<String> on = new HashSet<>();
-            for (Apps.App a : all) if (Apps.chosen(this, a.pkg)) on.add(a.pkg);
+            for (Apps.App a : all) if (Apps.chosen(this, bridge, a.pkg)) on.add(a.pkg);
             runOnUiThread(() -> {
-                if (!isFinishing() && !isDestroyed()) showApps(all, on, query);
+                if (!isFinishing() && !isDestroyed()) showApps(bridge, all, on, query);
             });
         }, "apps").start();
     }
 
-    private void showApps(List<Apps.App> all, Set<String> on, String query) {
+    private void showApps(boolean bridge, List<Apps.App> all, Set<String> on, String query) {
         AlertDialog.Builder b = new AlertDialog.Builder(this);
         Context dc = b.getContext();
         PackageManager pm = getPackageManager();
@@ -956,11 +976,11 @@ public class MainActivity extends Activity implements State.Listener {
         box.setPadding(dp(16), dp(4), dp(16), 0);
         box.addView(search, new LinearLayout.LayoutParams(-1, -2));
         box.addView(list, new LinearLayout.LayoutParams(-1, getResources().getDisplayMetrics().heightPixels * 55 / 100));
-        AlertDialog dialog = b.setTitle(appsTitle(on.size()))
+        AlertDialog dialog = b.setTitle(appsTitle(bridge, on.size()))
                 .setView(box)
                 .setPositiveButton("Готово", (d, w) -> {
-                    for (Apps.App a : all) Apps.choose(this, a.pkg, on.contains(a.pkg));
-                    Apps.setOnlyChosen(this, true);
+                    for (Apps.App a : all) Apps.choose(this, bridge, a.pkg, on.contains(a.pkg));
+                    Apps.setOnlyChosen(this, bridge, true);
                     appsChanged();
                 })
                 .setNegativeButton("Отмена", null)
@@ -977,7 +997,7 @@ public class MainActivity extends Activity implements State.Listener {
         list.setOnItemClickListener((p, v, pos, id) -> {
             if (list.isItemChecked(pos)) on.add(shown.get(pos).pkg);
             else on.remove(shown.get(pos).pkg);
-            dialog.setTitle(appsTitle(on.size()));
+            dialog.setTitle(appsTitle(bridge, on.size()));
         });
         search.addTextChangedListener(new TextWatcher() {
             @Override
@@ -997,8 +1017,9 @@ public class MainActivity extends Activity implements State.Listener {
         Log.i("AIVPN", "apps to pick: " + all.size() + ", shown " + shown.size());
     }
 
-    private static String appsTitle(int n) {
-        return n == 0 ? "Через VPN — отметьте приложения" : "Через VPN — отмечено: " + n;
+    private static String appsTitle(boolean bridge, int n) {
+        String where = bridge ? "Через мост" : "Через сервер";
+        return n == 0 ? where + " — отметьте приложения" : where + " — отмечено: " + n;
     }
 
     /** Takes effect at once: when on, the tunnel is opened again with the new list. */
@@ -1008,7 +1029,7 @@ public class MainActivity extends Activity implements State.Listener {
         Intent i = new Intent(this, VpnSvc.class).setAction(VpnSvc.START).putExtra("again", true);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
         else startService(i);
-        Toast.makeText(this, "Готово: " + Apps.summary(this), Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Готово", Toast.LENGTH_SHORT).show();
     }
 
     // ---------- looks ----------

@@ -165,18 +165,49 @@ func TestRenewedMeanwhileIsFound(t *testing.T) {
 }
 
 // the programs' setting changes what the VPN carries only when the list in use changes: a click on the mode it is in
-// already, or the same list saved again (in another order), does not make the connection anew
+// already, or the same list saved again (in another order), does not make the connection anew; the server and a bridge
+// each have their own
 func TestCarriedOnlyWhatIsInUse(t *testing.T) {
 	all := Settings{Apps: []string{"telegram.exe"}}
-	only := Settings{OnlyApps: true, Apps: []string{"telegram.exe", "chrome.exe"}}
+	only := Settings{OnlyApps: true, Apps: []string{"telegram.exe", "chrome.exe"}, BridgeOnly: true, BridgeApps: []string{"whatsapp.exe"}}
 	same := Settings{OnlyApps: true, Apps: []string{"chrome.exe", "telegram.exe"}}
-	if carried(all) != nil || carried(Settings{OnlyApps: true}) != nil {
+	if all.For(false) != nil || (Settings{OnlyApps: true}).For(false) != nil || all.For(true) != nil {
 		t.Fatal("all programs: nothing chosen")
 	}
-	if got := carried(only); len(got) != 2 || got[0] != "chrome.exe" || carried(same)[0] != "chrome.exe" {
+	if got := only.For(false); len(got) != 2 || got[0] != "chrome.exe" || same.For(false)[0] != "chrome.exe" {
 		t.Fatalf("%v", got)
+	}
+	if got := only.For(true); len(got) != 1 || got[0] != "whatsapp.exe" {
+		t.Fatalf("a bridge's own list: %v", got)
 	}
 	if only.Apps[0] != "telegram.exe" {
 		t.Fatal("the settings' own list was changed")
+	}
+}
+
+// Winger before 1.0.140 started with all programs and had one list: the standard ones now, a list chosen before kept
+// as the server's, a bridge's own list the standard one; once only
+func TestTwoLists(t *testing.T) {
+	old := Settings{}
+	if !twoLists(&old) || !old.OnlyApps || len(old.Apps) != len(standardApps[false]) || !old.BridgeOnly ||
+		len(old.BridgeApps) != len(standardApps[true]) || old.AppsSet != 1 {
+		t.Fatalf("the old start: %+v", old)
+	}
+	chosen := Settings{OnlyApps: true, Apps: []string{"telegram.exe"}}
+	twoLists(&chosen)
+	if len(chosen.Apps) != 1 || chosen.Apps[0] != "telegram.exe" || len(chosen.BridgeApps) == 0 {
+		t.Fatalf("a list chosen before: %+v", chosen)
+	}
+	chosen.OnlyApps = false // «all programs» chosen now: stays so
+	if twoLists(&chosen) || chosen.OnlyApps {
+		t.Fatal("taken again")
+	}
+	for _, n := range standardApps[true] {
+		if n == "spotify.exe" || n == "discord.exe" {
+			t.Fatal("a bridge is slow: no music or voice-call programs by default")
+		}
+	}
+	if st := OpenStore(t.TempDir()); !st.Get().OnlyApps || st.Get().AppsSet != 1 {
+		t.Fatal("a new Winger: the standard lists")
 	}
 }

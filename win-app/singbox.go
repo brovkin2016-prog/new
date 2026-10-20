@@ -29,6 +29,8 @@ type EngineOptions struct {
 	SocksPort int      // a bridge: the relay's SOCKS port on this computer
 	ProbePort int      // a local HTTP/SOCKS port through the connection: checks, the speed test, the family server
 	OnlyApps  []string // program files (telegram.exe…) that go through the VPN; empty: all of them
+	Straight  bool     // with chosen programs: their Russian sites (.ru, .рф, .su) go straight, as without the VPN
+	Home      string   // the family server's name: always through the connection (it may be shut on the network)
 	Tun       bool     // false: no virtual interface — the connection is only being looked at
 	Own       []string // this program's own files: always straight
 	LogFile   string
@@ -113,6 +115,12 @@ func Config(o EngineOptions) map[string]any {
 	}
 	final := "proxy"
 	if only {
+		if o.Home != "" {
+			rules = append(rules, map[string]any{"domain": []string{o.Home}, "outbound": "proxy"})
+		}
+		if o.Straight { // banks, Gosuslugi and the like in a browser: as without the VPN (they dislike a foreign address)
+			rules = append(rules, map[string]any{"domain_suffix": []string{".ru", ".xn--p1ai", ".su"}, "outbound": "direct"})
+		}
 		rules = append(rules, map[string]any{"process_path_regex": procNames(o.OnlyApps), "outbound": "proxy"})
 		final = "direct"
 	}

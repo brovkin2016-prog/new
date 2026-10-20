@@ -848,7 +848,7 @@ public final class VpnSvc extends VpnService {
             } catch (IllegalArgumentException ignored) {
                 // no IPv6 on this phone
             }
-            List<String> only = Apps.through(this);  // only Instagram, Telegram… — or null: everything
+            List<String> only = Apps.through(this, profile.bridge);  // the server's list or the bridge's — or null: everything
             // on a bridge the phone's own way to the family server is most likely shut as well (a mobile network open
             // only to a list of sites): the AI helper, which talks to that server alone, goes through the bridge too
             if (only != null && mapped && !only.contains(Apps.aiHelper)) {
@@ -876,7 +876,7 @@ public final class VpnSvc extends VpnService {
                     // it is this very package
                 }
             }
-            Diag.i(this, allowed > 0 ? "through the VPN: " + only : "through the VPN: all apps");
+            Diag.i(this, (profile.bridge ? "through the bridge: " : "through the server: ") + (allowed > 0 ? only : "all apps"));
             b.setConfigureIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                     PendingIntent.FLAG_IMMUTABLE));
             if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);

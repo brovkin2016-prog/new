@@ -103,7 +103,7 @@ final class Diag {
                 .append(State.auto ? " (выбран сам)" : "").append(State.note.isEmpty() ? "" : " — " + State.note);
         try {
             c.getPackageManager().getPackageInfo(Apps.aiHelper, 0);
-            List<String> through = Apps.through(c);
+            List<String> through = Apps.through(c, on != null && on.bridge);
             s.append("\nИИ-помощник: установлен, ").append(State.phase == State.Phase.OFF ? "идёт напрямую (VPN выключен)"
                     : through == null || through.contains(Apps.aiHelper) || (on != null && on.bridge) ? "идёт через VPN" : "идёт напрямую");
         } catch (Exception e) {
