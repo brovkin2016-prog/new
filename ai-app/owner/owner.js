@@ -1063,11 +1063,12 @@
       groq: "https://console.groq.com/keys", exa: "https://dashboard.exa.ai/api-keys", giga: "https://developers.sber.ru/studio",
       cf: "https://dash.cloudflare.com",
       hf: "https://huggingface.co/settings/tokens/new?tokenType=write", coverr: "https://coverr.co/developers",
+      viggle: "https://portal.viggle.ai/keys",
       anthropic: "https://console.anthropic.com/settings/keys",
     };
     // the keys the helper's own cards check and keep (search, video, trends): [set, off, the field the key goes in]
     const APP_KEY_OP = { groq: ["groq_set", "groq_off", "key"], exa: ["exa_set", "exa_off", "key"], hf: ["hf_set", "hf_off", "token"],
-      coverr: ["coverr_set", "coverr_off", "key"] };
+      coverr: ["coverr_set", "coverr_off", "key"], viggle: ["viggle_set", "viggle_off", "key"] };
     let keysNow = null, testedNow = null;  // the list and its last check, as the server last said them
     function allKeys() {
       sheet("🔑 Ключи", (box) => {

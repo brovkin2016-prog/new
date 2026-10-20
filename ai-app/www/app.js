@@ -1069,6 +1069,10 @@
           // a photo brought to life shows that photo until it is played
           poster: end.video && path === "/api/animate" && last ? last.still : null,
           pdf: end.pdf ? blobOf(end.pdf, "application/pdf") : null });
+        // a photoshoot's other pictures: each its own message under the first (saved and opened the same way)
+        for (const extra of end.image && Array.isArray(end.more) ? end.more : []) {
+          await api2.add({ role: "ai", text: "", name: end.name, result: blobOf(extra, end.mime) });
+        }
         if (out.audio) playAudio(out.audio);
       } else {
         out = await api2.add({ role: "ai", text: "⚠️ " + end.text, err: true });
@@ -1141,7 +1145,7 @@
         const small = JSON.stringify(body || {}).length < 100000;
         store.set(PEND, { rid, path, at: Date.now(), body: small ? body : null });
         // a picture, a clip or a PDF is first sent off; «Думаю…» is for words, until the server says what it is doing
-        const lv = live(/\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf)$/.test(path) ? "Отправляю…" : "Думаю…", path);
+        const lv = live(/\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf|shoot)$/.test(path) ? "Отправляю…" : "Думаю…", path);
         const again = () => stream(path, Object.assign({}, body, { rid }), lv.event).catch((e) => {
           if (e instanceof HttpError) throw e;
           return null;  // broke again (on the way there or back): asked by its number again
@@ -1585,13 +1589,16 @@
     const scroll = el("div", { class: "scroll" });
     let photo = null;  // the photo chosen now; a job takes it away, the next step is chosen again
     const tplOk = () => !!(canTpl("photo") || S.me.panel);
+    const shootOk = () => !!((S.me.can || {}).shoot || S.me.panel) && !!S.me.shoot;
     const empty = () => (photo ? null : el("div", { class: "empty" }, el("h2", { text: "Что сделать с фото?" }),
       el("p", { text: "Пришлите фото и скажите или напишите, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»." }),
       el("div", { class: "big-actions", style: "margin:16px 0 4px" },
         el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
         el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи"),
         tplOk() ? el("button", { class: "big wide", onclick: () => templatesSheet("photo", th) }, el("span", { class: "ic", text: "🎭" }),
-          el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null),
+          el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null,
+        shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, el("span", { class: "ic", text: "📸" }),
+          el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до трёх) на фото по теме: море, Новый год, журнал…" }))) : null),
       S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите — я нарисую:" }),
         el("div", { class: "hints" }, DRAW_HINTS.map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.dispatchEvent(new Event("input")); ta.focus(); } })))] : null));
     const has = (op) => !!(S.me.photo_ops[op] || S.me.ai_ops[op]);
@@ -1605,6 +1612,7 @@
         tool("✍️ Своё изменение", own),
         // «pick my photo, then put me in a picture»: the photo chosen here is offered in who-is-who
         tplOk() ? tool("🎭 Я на фото", () => templatesSheet("photo", th)) : null,
+        shootOk() ? tool("📸 Фотосессия", () => shootSheet(th)) : null,
         tool("🧰 Другое", more)))
       // pages for a PDF being collected: their banner over the input is the next step (no second «📷» here)
       : S.scan.length ? null
@@ -1612,7 +1620,8 @@
         el("div", { class: "menu-sec", style: "grid-column:1/-1;padding:4px 2px 0", text: "Новое фото" }),
         el("button", { class: "btn", text: "📷 Снять фото", onclick: () => pick(true) }),
         el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => pick(false) }),
-        tplOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🎭 Я на фото", onclick: () => templatesSheet("photo", th) }) : null)
+        tplOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🎭 Я на фото", onclick: () => templatesSheet("photo", th) }) : null,
+        shootOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "📸 Фотосессия", onclick: () => shootSheet(th) }) : null)
       : null);
     const th = thread("photo", scroll, empty, chosen);
     scroll.append(th.box);
@@ -1622,7 +1631,8 @@
     autoGrow(ta);
     const cam = el("button", { class: "round ghost", text: "📷", title: "Выбрать фото", onclick: () => menu("Выбрать фото", [
       ["📷", "Снять фото", () => pick(true)], ["🖼️", "Из галереи", () => pick(false)],
-      tplOk() ? ["🎭", "Я на фото", () => templatesSheet("photo", th)] : null]) });
+      tplOk() ? ["🎭", "Я на фото", () => templatesSheet("photo", th)] : null,
+      shootOk() ? ["📸", "Фотосессия", () => shootSheet(th)] : null]) });
     const act = el("button", { class: "round main", text: "🎤" });
     const row = el("div", { class: "inrow" }, cam, ta, act);
     root.append(scroll, el("div", { class: "composer" }, scanBar, ownHint, row));
@@ -1936,6 +1946,100 @@
       if (st.loaded) paint(); else load(1);
     });
   }
+  // ---------- «📸 Фотосессия»: a theme (the server's list or one's own words), 1–3 people with a photo each, the shape;
+  // two pictures come into the Фото thread ----------
+  function shootSheet(th) {
+    if (S.busy[th.name]) { toast("Подождите, предыдущее фото ещё делается"); return; }
+    if (!(S.me.can || {}).shoot && !S.me.panel) { toast("Фотосессия пока не включена — её включает владелец помощника.", 5000); return; }
+    const themes = S.me.shoot || {};
+    const mine = S.views.photo && S.views.photo.current ? S.views.photo.current() : null;
+    const photos = [mine || null];  // one row to start; the photo chosen in Фото is the first person's
+    let theme = "", aspect = "3:4";
+    sheet("📸 Фотосессия", (box, close) => {
+      const why = el("div", { class: "why" });
+      const own = el("input", { class: "input hidden", placeholder: "Своя тема: например, «на яхте в Монако»", maxlength: "300" });
+      // the themes in one row that scrolls sideways (as the templates' gallery): the people's rows stay in sight at 360×640
+      const tchips = el("div", { class: "chips", style: "margin:0 0 6px" });
+      const paintThemes = () => {
+        const x = tchips.scrollLeft;  // the row stays where it was scrolled to
+        tchips.innerHTML = "";
+        for (const [k, v] of Object.entries(themes).concat([["", "✍️ Своя тема"]])) {
+          tchips.append(el("button", { class: "chip" + (k === theme && (k || !own.classList.contains("hidden")) ? " on" : ""), text: v, onclick: () => {
+            theme = k;
+            own.classList.toggle("hidden", !!k);
+            if (!k) own.focus();
+            if (why.textContent.startsWith("Выберите")) why.textContent = "";
+            paintThemes();
+          } }));
+        }
+        tchips.scrollLeft = x;
+      };
+      const rows = el("div");
+      const addBtn = el("button", { class: "btn line wide", style: "margin:4px 0 10px", text: "+ Ещё человек", onclick: () => { photos.push(null); paintRows(); } });
+      const take = async (i, camera) => {
+        const f = await pickFile("image/*", camera);
+        if (!f) return;
+        photos[i] = f;
+        if (why.textContent.startsWith("Добавьте")) why.textContent = "";
+        paintRows();
+      };
+      const paintRows = () => {
+        rows.innerHTML = "";
+        photos.forEach((p, i) => {
+          const who = photos.length === 1 ? "Кто на фото" : "Человек " + (i + 1);
+          const slot = el("button", { class: "slot" + (p ? " set" : ""), "aria-label": "Фото: " + who, onclick: () => menu(who, [
+            ["📷", "Снять фото", () => take(i, true)], ["🖼️", "Из галереи", () => take(i, false)],
+            i > 0 ? ["✕", "Убрать этого человека", () => { photos.splice(i, 1); paintRows(); }] : null]) },
+            p ? el("img", { src: urlOf(p), alt: "" }) : el("span", {}, el("b", { class: "plus", text: "+" }), "фото"));
+          rows.append(el("div", { class: "who-row" }, slot,
+            el("div", { class: "who" }, el("b", { text: who }), el("small", { text: p ? "✓ фото есть" : "лицо крупно и прямо, при хорошем свете" }))));
+        });
+        addBtn.classList.toggle("hidden", photos.length >= 3);
+      };
+      const achips = el("div", { class: "chips", style: "margin:0 0 6px" });
+      const paintAspect = () => {
+        achips.innerHTML = "";
+        for (const [k, v] of [["3:4", "Портрет"], ["1:1", "Квадрат"], ["9:16", "Сторис"]]) {
+          achips.append(el("button", { class: "chip" + (k === aspect ? " on" : ""), text: v, onclick: () => { aspect = k; paintAspect(); } }));
+        }
+      };
+      const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
+      const goBtn = el("button", { class: "btn wide", text: "📸 Сделать фотосессию", onclick: async () => {
+        const text = own.value.trim();
+        const set = photos.filter(Boolean);
+        if (!theme && !text) { why.textContent = "Выберите тему или напишите свою."; return; }
+        if (!set.length) { why.textContent = "Добавьте хотя бы одно фото."; return; }
+        if (!check.checked) { why.textContent = set.length === 1 ? "Поставьте галочку: фото ваше или человек согласен." : "Поставьте галочку: фото ваши или люди согласны."; return; }
+        goBtn.disabled = true;
+        goBtn.textContent = "Готовлю фото…";
+        why.textContent = "";
+        const images = [];
+        try {
+          for (const p of set) images.push(await b64(await shrink(p, 1600, 0.9)));
+        } catch (e) {
+          goBtn.disabled = false;
+          goBtn.textContent = "📸 Сделать фотосессию";
+          why.textContent = "Не получилось прочитать фото — выберите другое.";
+          return;
+        }
+        if (!goBtn.isConnected) return;
+        close();
+        if (S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
+        const title = theme ? themes[theme] : "📸 " + text;
+        await th.run("/api/shoot", { theme: theme || undefined, text: theme ? undefined : text, images, aspect, consent: true },
+          { role: "me", image: set[0], text: title + (set.length > 1 ? " · 👥 " + set.length : "") });
+      } });
+      paintThemes();
+      paintRows();
+      paintAspect();
+      box.append(el("p", { class: "muted", style: "margin:0 0 8px;font-size:15px", text: "Выберите тему и добавьте фото — до трёх человек. Придут 2 снимка, обычно за 1–2 минуты." }),
+        el("div", { class: "menu-sec", text: "Тема" }), tchips, own,
+        el("div", { class: "menu-sec", style: "margin-top:10px", text: "Кто на фото" }), rows, addBtn,
+        el("div", { class: "menu-sec", text: "Формат" }), achips,
+        el("div", { class: "sheet-foot" },
+          el("label", { class: "agree" }, check, el("span", { text: "Это мои фото, или люди на них согласны" })), why, goBtn));
+    });
+  }
   async function ownClip(th) {
     const f = await pickFile("video/*", false);
     if (!f) return;
@@ -2041,8 +2145,9 @@
       } });
       // how long it takes is read before the faces; the last thing over the sticky foot is a face row, so its fade hides
       // nothing that is only said there
-      wait.replaceWith(el("p", { style: "margin:4px 0 6px", text: (found.note ? found.note + " " : "") + hint }),
-        el("p", { class: "muted", style: "font-size:14px;margin:0 0 8px", text: T.foot }), rows,
+      // the server may say both its own way (a whole person in the clip wants a photo of the whole person)
+      wait.replaceWith(el("p", { style: "margin:4px 0 6px", text: (found.note ? found.note + " " : "") + (found.hint || hint) }),
+        el("p", { class: "muted", style: "font-size:14px;margin:0 0 8px", text: found.foot || T.foot }), rows,
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото, или человек на фото согласен" : "Это мои фото, или люди на них согласны" })),
           why, goBtn));
@@ -2070,7 +2175,7 @@
       const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
         el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
       box.append(
-        tv() ? feat(true, "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.", "") : "",
+        tv() ? feat(true, "tv", "🎭 Я в ролике", (S.me.texts || {}).tclips || "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.", "") : "",
         feat(an(), "an", "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
       return box;
     };
