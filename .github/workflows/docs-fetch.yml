@@ -15,9 +15,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fetch
         run: |
-          while read -r url; do
+          # a line: URL [regex] — markdown/text pages are printed as they are (HTML tags stripped only from web pages);
+          # with a regex only the matching lines, two lines around each
+          while read -r url re; do
             case "$url" in ""|\#*) continue ;; esac
-            echo "=================== $url"
-            curl -sSL -m 40 -A "Mozilla/5.0 docs-fetch" "$url" | sed -e 's/<[^>]*>//g' | grep -v '^\s*$' | head -c 60000
+            echo "=================== $url $re"
+            curl -sSL -m 40 -A "Mozilla/5.0 docs-fetch" "$url" > page || true
+            case "$url" in *.md|*.txt|*.yaml|*.yml|*.json) ;; *) sed -i -e 's/<[^>]*>//g' page ;; esac
+            if [ -n "$re" ]; then grep -i -E -C2 -- "$re" page || true; else grep -v '^\s*$' page || true; fi | head -c 60000
             echo
           done < .github/docs-fetch.txt

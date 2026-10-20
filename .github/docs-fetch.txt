@@ -1,6 +1,3 @@
-https://docs.viggle.ai/v1/authentication.md
-https://docs.viggle.ai/v1/pricing.md
-https://docs.viggle.ai/v1/api-reference/videos/create-from-character-animation.md
-https://docs.viggle.ai/v1/api-reference/videos/get.md
-https://docs.viggle.ai/v1/api-reference/credits.md
-https://docs.viggle.ai/v1/production/errors.md
+https://docs.viggle.ai/v1/api-reference/videos/create-from-character-animation.md Character[0-9]|tags
+https://docs.viggle.ai/v1/guides/quickstart-mix.md
+https://docs.viggle.ai/v1/production/async-jobs.md
