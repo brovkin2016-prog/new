@@ -59,7 +59,7 @@ func openWindow() error {
 		message("Служба Winger не отвечает. Перезагрузите компьютер; не поможет — установите Winger заново.")
 		return errStr("нет ключа окна")
 	}
-	url := uiURL() + "/?t=" + t
+	url := uiURL() + "/?t=" + t + "#win" // the page fits a window so marked into the screen (the mark survives the redirect)
 	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "Winger", "window")
 	for _, p := range []string{os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
 		os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
@@ -129,7 +129,7 @@ func runTray() error {
 		other := systray.AddMenuItem("Через мост", "")
 		other.Hide()
 		// the owner's only: the family server's rescue console, when the AI app or its «Управление» broke
-		rescue := systray.AddMenuItem("🛟 Спасение сервера", "Консоль в браузере: починка сервера без приложения")
+		rescue := systray.AddMenuItem("Спасение сервера", "Консоль в браузере: починка сервера без приложения")
 		rescue.Hide()
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Выйти", "VPN выключится, значок уйдёт; снова — ярлык Winger")

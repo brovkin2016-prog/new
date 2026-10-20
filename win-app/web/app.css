@@ -2,14 +2,14 @@
 @media (prefers-color-scheme:dark){:root{--bg:#0f1020;--card:#1a1c30;--text:#eceefe;--muted:#9a9db8;--accent:#8b80ff;--accent2:#2fd3b5;--line:#262941;--danger:#ff6b7f;--soft:#26284a;--ok:#34d399;--ok-soft:rgba(52,211,153,.14);--wait:#fbbf24;--wait-soft:rgba(251,191,36,.13);--bad:#f87171;--bad-soft:rgba(248,113,113,.13)}}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 "Segoe UI",system-ui,sans-serif}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 "Segoe UI",system-ui,sans-serif,"Segoe UI Emoji"}
 main{max-width:520px;margin:0 auto;padding:14px 16px 24px}
 header{display:flex;gap:10px;align-items:center}
 header h1{margin:0;font-size:20px;line-height:1.1}header small{color:var(--muted);font-size:12px}
 .logo{width:34px;height:34px}
 /* the button and how it is: the screen's middle */
 .hero{text-align:center;padding:14px 0 6px}
-.power{width:136px;height:136px;border-radius:50%;border:0;cursor:pointer;font-size:46px;color:#fff;background:#a3a6bd;box-shadow:0 8px 26px rgba(0,0,0,.16);transition:.3s}
+.power{width:136px;height:136px;border-radius:50%;border:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;color:#fff;background:#a3a6bd;box-shadow:0 8px 26px rgba(0,0,0,.16);transition:.3s}
 .power:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
 .power.on{background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 0 0 9px rgba(91,79,240,.13),0 0 38px rgba(34,195,166,.42)}
 .power.none{opacity:.55}

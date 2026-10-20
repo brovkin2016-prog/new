@@ -299,3 +299,17 @@ const pingAll = () => call("pingall", {}).catch(() => {});
 pingAll();
 document.addEventListener("visibilitychange", () => { if (!document.hidden) pingAll(); });
 window.addEventListener("focus", pingAll);
+// Winger's own window (opened as «…#win») is 470×900; on a small laptop screen (or at 125–150 %) its bottom would be
+// past the screen's edge with no way to scroll to it: made to fit the screen above the taskbar
+function fitScreen() {
+  if (location.hash !== "#win") return;
+  const left = screen.availLeft || 0, top = screen.availTop || 0;
+  const w = Math.min(window.outerWidth, screen.availWidth), h = Math.min(window.outerHeight, screen.availHeight);
+  try {
+    if (w < window.outerWidth || h < window.outerHeight) window.resizeTo(w, h);
+    const x = Math.min(Math.max(window.screenX, left), left + screen.availWidth - w);
+    const y = Math.min(Math.max(window.screenY, top), top + screen.availHeight - h);
+    if (x !== window.screenX || y !== window.screenY) window.moveTo(x, y);
+  } catch (e) { /* a browser tab: nothing to fit */ }
+}
+fitScreen();

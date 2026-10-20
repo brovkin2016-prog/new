@@ -242,7 +242,7 @@ public class MainActivity extends Activity implements State.Listener {
         checkRow = setting("🔬", "Проверить мосты с этого телефона", checkVal, v -> startCheck("", true));
         addTo(settings, checkRow);
         // the owner's only: the family server's rescue console in the browser (shown once the server says it is the owner)
-        rescueRow = setting("🛟", "Спасение сервера: консоль в браузере", null, v -> Rescue.open(this));
+        rescueRow = setting("🆘", "Спасение сервера: консоль в браузере", null, v -> Rescue.open(this));
         addTo(settings, rescueRow);
         root.addView(settings, new LinearLayout.LayoutParams(-1, -2));
         setContentView(frame);

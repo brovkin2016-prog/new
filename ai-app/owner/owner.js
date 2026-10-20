@@ -362,7 +362,7 @@
     // the rescue console: Claude Code on the owner's Anthropic key and the repairs, in a browser, apart from this app
     function rescueCard() {
       const box = el("div", { class: "card", style: "padding:6px 10px" });
-      const go = el("button", { class: "btn line wide", style: "min-height:40px", text: "🛟 Спасательная консоль (если этот чат сломается)", onclick: async () => {
+      const go = el("button", { class: "btn line wide", style: "min-height:40px", text: "🆘 Спасательная консоль (если этот чат сломается)", onclick: async () => {
         go.disabled = true;
         try {
           const end = await panel({ op: "rescue_link" });
@@ -370,7 +370,7 @@
           go.replaceWith(el("a", { class: "btn wide", href: end.url, target: "_blank", rel: "noopener", style: "display:block;text-align:center;text-decoration:none",
             text: "👉 Открыть консоль в браузере" }),
             el("small", { style: "display:block;color:var(--muted);margin-top:6px", text: "Там войдите своей ссылкой VPN (она в «🛡 VPN» → ваша карточка). "
-              + "Без ввода — из Winger: «🛟 Спасение сервера». Отсюда консоль сама не впускает: так её не откроет никто, кто проберётся в приложение." }));
+              + "Без ввода — из Winger: «🆘 Спасение сервера». Отсюда консоль сама не впускает: так её не откроет никто, кто проберётся в приложение." }));
         } catch (e) { toast(problem(e)); go.disabled = false; }
       } });
       box.append(go);
