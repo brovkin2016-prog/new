@@ -286,7 +286,49 @@
     // ---------- «🛠 Claude»: the owner's chat with Claude Code on this server ----------
     // A message: Claude looks (files, services, journals) and answers; a change it only plans. «✅ Выполнить» carries the
     // plan out after the server copies its files; the server checks itself after it and puts the copy back if it broke.
-    const claude = { chat: store.get("claudeChat", ""), box: null, head: null, composer: null, draft: "" };
+    const claude = { chat: store.get("claudeChat", ""), box: null, head: null, composer: null, draft: "", shots: [], drawShots: null };
+    // «📎»: screenshots with a question (an error is quicker shown than written) — up to 4, made smaller here (the
+    // longest side 1600 px: still sharp text, what Claude looks at anyway); the free models get what is read off them
+    const SHOTS_MAX = 4;
+    function pickImage(camera) {
+      return new Promise((resolve) => {
+        const inp = el("input", { type: "file", accept: "image/*", capture: camera ? "environment" : null, class: "hidden" });
+        inp.addEventListener("change", () => { resolve(inp.files && inp.files[0]); inp.remove(); });
+        document.body.append(inp);
+        inp.click();
+      });
+    }
+    async function shotOf(file) {
+      let bmp;
+      try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (e) {
+        try { bmp = await createImageBitmap(file); } catch (e2) { return null; }
+      }
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const c = el("canvas");
+      c.width = Math.round(bmp.width * k);
+      c.height = Math.round(bmp.height * k);
+      const g = c.getContext("2d");
+      g.fillStyle = "#fff";  // a transparent screenshot stays readable as JPEG
+      g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(bmp, 0, 0, c.width, c.height);
+      return new Promise((res) => c.toBlob((b) => res(b), "image/jpeg", 0.85));
+    }
+    async function addShots(files, redraw) {
+      let bad = 0;
+      for (const f of files) {
+        if (claude.shots.length >= SHOTS_MAX) { toast(`Не больше ${SHOTS_MAX} скриншотов за раз`); break; }
+        const b = f && /^image\//.test(f.type || "image/") ? await shotOf(f) : null;
+        if (b) claude.shots.push(b); else bad += 1;
+      }
+      if (bad) toast("Это не картинка — приложите снимок экрана или фото");
+      redraw();
+    }
+    const b64of = (blob) => new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(",", 2)[1] || "");
+      r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
     const STEP_ICON = { Bash: "▶️", Read: "📄", Edit: "✏️", Write: "📝", Glob: "🔎", Grep: "🔎" };
     const html = (t) => (A.md ? A.md(t) : String(t || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).replace(/\n/g, "<br>"));
     const stepLine = (icon, what) => el("div", { style: "font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0;color:var(--muted)",
@@ -295,6 +337,10 @@
       const wrap = el("div", { class: "msg " + (m.role === "me" ? "me" : "ai") });
       const b = el("div", { class: "bubble" + (m.err ? " err" : "") });
       if (m.role === "me") b.textContent = m.text; else b.innerHTML = html(m.text);
+      if (m.thumbs && m.thumbs.length) {  // just sent from here: the pictures themselves
+        b.append(el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-top:6px" },
+          ...m.thumbs.map((u) => el("img", { src: u, alt: "Скриншот", style: "width:72px;height:72px;object-fit:cover;border-radius:8px" }))));
+      } else if (m.shots) b.append(el("div", { style: "font-size:13px;opacity:.8;margin-top:4px", text: `📎 Скриншотов: ${m.shots}` }));
       wrap.append(b);
       if (String(m.text || "").length > 600) {  // a long answer folded: the chat stays short, the whole is a tap away
         b.style.maxHeight = "11em";
@@ -442,21 +488,50 @@
       const ta = el("textarea", { rows: 1, placeholder: d.busy ? "Claude работает… можно написать следующее" : "Что проверить или сделать?" });
       ta.value = claude.draft;
       ta.addEventListener("input", () => { claude.draft = ta.value; ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
+      const shots = el("div", { class: "attach-row hidden" });
+      const drawShots = () => {
+        shots.innerHTML = "";
+        shots.classList.toggle("hidden", !claude.shots.length);
+        claude.shots.forEach((b, i) => shots.append(el("img", { src: urlOf(b), alt: "Скриншот " + (i + 1), title: "Посмотреть", style: "cursor:pointer",
+          onclick: () => viewer(b, "скриншот.jpg") })));
+        if (claude.shots.length) {
+          shots.append(el("button", { class: "x", text: "✕", "aria-label": "Убрать скриншоты", onclick: () => { claude.shots = []; drawShots(); } }));
+        }
+      };
+      drawShots();
+      claude.drawShots = drawShots;
+      // a screenshot pasted into the field (a computer's browser; some phone keyboards) comes in as one picked
+      ta.addEventListener("paste", (e) => {
+        const files = [...((e.clipboardData && e.clipboardData.items) || [])].filter((x) => x.kind === "file" && /^image\//.test(x.type)).map((x) => x.getAsFile());
+        if (files.length) { e.preventDefault(); addShots(files, drawShots); }
+      });
+      const clip = el("button", { class: "round ghost", text: "📎", title: "Приложить скриншот", "aria-label": "Приложить скриншот", onclick: () => {
+        if (claude.shots.length >= SHOTS_MAX) return toast(`Не больше ${SHOTS_MAX} скриншотов за раз`);
+        sheet("Приложить скриншот", (box, close) => {
+          const list = el("div", { class: "list" });
+          for (const [ic, words, camera] of [["🖼️", "Скриншот или фото из галереи", false], ["📷", "Снять экран камерой", true]]) {
+            list.append(el("button", { onclick: async () => { close(); const f = await pickImage(camera); if (f) addShots([f], drawShots); } },
+              el("span", { class: "ic", text: ic }), el("span", { text: words })));
+          }
+          box.append(list, el("small", { style: "display:block;color:var(--muted);margin-top:8px",
+            text: "Скриншот — кнопки громкости и питания вместе; он в галерее, в «Скриншотах». До 4 за раз. Claude видит сами картинки, бесплатные модели — прочитанный с них текст." }));
+        });
+      } });
       const go = el("button", { class: "round main", text: d.busy ? "⏹" : "➤", title: d.busy ? "Стоп" : "Отправить", onclick: () => {
         if (d.busy) return stopClaude();
         const t = ta.value.trim();
-        if (t) { claude.draft = ""; ta.value = ""; send(t); }
+        if (t || claude.shots.length) { claude.draft = ""; ta.value = ""; ta.style.height = ""; send(t); }
       } });
-      claude.composer = el("div", { class: "composer" }, el("div", { class: "inrow" }, ta, go));
+      claude.composer = el("div", { class: "composer" }, shots, el("div", { class: "inrow" }, clip, ta, go));
       root.append(claude.composer);
       requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
     }
-    async function talk(body, me) {  // a request to Claude with its steps shown as they come; the chat redrawn after it
+    async function talk(body, me, thumbs) {  // a request to Claude with its steps shown as they come; the chat redrawn after it
       if (!claude.box) return;
       if (me) {
         if (body.chat === "new") { claude.box.innerHTML = ""; if (claude.head) claude.head.textContent = me.slice(0, 40); }
         claude.box.querySelectorAll(".msg.note").forEach((n) => n.remove());
-        claude.box.append(claudeMsg({ role: "me", text: me }));
+        claude.box.append(claudeMsg({ role: "me", text: me, thumbs }));
       }
       const live = liveBubble();
       claude.box.append(live.el);
@@ -504,7 +579,20 @@
       cache.claude = null;
       load();
     }
-    function send(text) { talk({ op: "agent_ask", chat: claude.chat, text }, text); }
+    async function send(text) {
+      const pics = claude.shots;
+      claude.shots = [];
+      if (claude.drawShots) claude.drawShots();
+      const body = { op: "agent_ask", chat: claude.chat, text };
+      if (pics.length) {
+        try { body.images = await Promise.all(pics.map(b64of)); } catch (e) {
+          claude.shots = pics;
+          if (claude.drawShots) claude.drawShots();
+          return toast("Скриншот не прочитался — приложите его снова");
+        }
+      }
+      talk(body, text || "📎 Посмотри скриншот" + (pics.length > 1 ? "ы" : ""), pics.map(urlOf));
+    }
     async function runPlan() {
       if (!(await confirmBox("Claude поменяет сервер по плану выше. Сначала сервер сделает снимок файлов, а после проверит себя: если что-то сломается — сам вернёт как было.", "✅ Выполнить"))) return;
       talk({ op: "agent_run", chat: claude.chat }, "✅ Выполнить");
