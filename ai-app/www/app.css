@@ -390,3 +390,8 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .agree input { width: 24px; height: 24px; flex: none; margin: 0; accent-color: var(--accent); }
 .why { color: var(--danger-ink); font-size: 14px; margin: 0 0 8px; }
 .why:empty { display: none; }
+/* the owner's mini-app: the whole screen, its own page in a closed frame under a thin bar */
+.ma-view { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); }
+.ma-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--card); }
+.ma-head b { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ma-view iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }

@@ -797,6 +797,7 @@
     }
     for (const v of Object.values(S.views)) S.viewsEl.append(v.root);
     show(tabsFor(S.me).some((t) => t[0] === S.tab) && S.tab !== "vpn" ? S.tab : "chat");
+    maTry();  // an app's icon on the home screen brought the helper up: that app now
   }
   function show(tab) {
     // a notice belongs to the screen it was said on; the owner's code shows one and redraws the same tab right after
@@ -2114,6 +2115,144 @@
   }
 
   // ---------- More: translator, reminders, settings, memory, app ----------
+  // ---------- the owner's mini-apps (the server's Claude writes them: srv-miniapp) ----------
+  // Each is one page, shown in a closed frame of its own: it cannot reach this app's sign-in or anything of the page;
+  // what it may do goes through window.app (its own storage here, a note, copy, share, a link, a question to the helper).
+  const MA_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; "
+    + "media-src data: blob: https:; font-src data:; connect-src https:";
+  const MA_API = '(function(){var n=0,w={};addEventListener("message",function(e){if(e.source!==parent)return;var d=e.data;'
+    + 'if(!d||!d.__ma||!w[d.id])return;w[d.id][d.ok?0:1](d.v);delete w[d.id];});function c(op,a){return new Promise(function(r,j){'
+    + 'var i=++n;w[i]=[r,j];parent.postMessage({__ma:1,id:i,op:op,args:a},"*");});}window.app={get:function(k){return c("get",[k])},'
+    + 'set:function(k,v){return c("set",[k,v])},remove:function(k){return c("remove",[k])},keys:function(){return c("keys",[])},'
+    + 'toast:function(t){return c("toast",[t])},copy:function(t){return c("copy",[t])},share:function(t){return c("share",[t])},'
+    + 'open:function(u){return c("open",[u])},ask:function(q){return c("ask",[q])},close:function(){return c("close",[])}};})();';
+  const maKey = (id, k) => "ma:" + id + ":" + String(k).slice(0, 100);
+  const ls = {  // (the phone's storage may refuse: a full disk, a private window)
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { localStorage.setItem(k, v); },
+    del(k) { try { localStorage.removeItem(k); } catch (e) { /* nothing to remove */ } },
+    keys(prefix) { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith(prefix)) out.push(k); } } catch (e) { /* none */ } return out; },
+  };
+  function maPage(html) {  // the app's page with its rules (nothing from outside but https requests) and window.app first
+    const head = '<meta http-equiv="Content-Security-Policy" content="' + MA_CSP + '"><script>' + MA_API + "<\/script>";
+    const m = /<head[^>]*>/i.exec(html);
+    return m ? html.slice(0, m.index + m[0].length) + head + html.slice(m.index + m[0].length) : head + html;
+  }
+  let maOpen = null;  // the mini-app on the screen: {id, frame, el}
+  let maWanted = "";  // asked to open (its icon on the home screen) before the helper was ready
+  async function maCall(cur, op, a) {
+    switch (op) {
+      case "get": { const v = ls.get(maKey(cur.id, a[0])); return v === null ? null : JSON.parse(v); }
+      case "set": {
+        const v = JSON.stringify(a[1] === undefined ? null : a[1]);
+        if (v.length > 200000) throw new Error("значение больше 200 КБ");
+        const used = ls.keys("ma:" + cur.id + ":").reduce((n, k) => n + k.length + (ls.get(k) || "").length, 0);
+        if (used + v.length > 2000000) throw new Error("место приложения (2 МБ) кончилось");
+        ls.set(maKey(cur.id, a[0]), v);
+        return true;
+      }
+      case "remove": ls.del(maKey(cur.id, a[0])); return true;
+      case "keys": return ls.keys("ma:" + cur.id + ":").map((k) => k.slice(cur.id.length + 4));
+      case "toast": toast(String(a[0]).slice(0, 300), 4000); return true;
+      case "copy": copyText(String(a[0]).slice(0, 100000)); return true;
+      case "share": {
+        const t = String(a[0]).slice(0, 100000);
+        if (Native && Native.shareText) Native.shareText(t);
+        else if (navigator.share) navigator.share({ text: t }).catch(() => {});
+        else copyText(t);
+        return true;
+      }
+      case "open": {
+        const u = String(a[0]);
+        if (!/^https:\/\/[^\s]+$/.test(u)) throw new Error("открываются только ссылки https://");
+        window.open(u, "_blank", "noopener");
+        return true;
+      }
+      case "ask": {  // a question to the helper (the same answers as in the chat, nothing kept there)
+        const end = await stream("/api/chat", { text: String(a[0]).slice(0, 8000) }, () => {});
+        if (end.t !== "done") throw new Error(end.text || "помощник не ответил");
+        return end.text || "";
+      }
+      case "close": cur.el.close(); return true;
+    }
+    throw new Error("нет такого: " + op);
+  }
+  window.addEventListener("message", async (e) => {
+    const cur = maOpen;
+    if (!cur || e.source !== cur.frame.contentWindow) return;  // only the app on the screen, nothing else
+    const d = e.data;
+    if (!d || d.__ma !== 1 || typeof d.op !== "string") return;
+    const reply = (ok, v) => { try { e.source.postMessage({ __ma: 1, id: d.id, ok, v }, "*"); } catch (er) { /* closed */ } };
+    try { reply(true, await maCall(cur, d.op, Array.isArray(d.args) ? d.args : [])); } catch (er) { reply(false, String((er && er.message) || er)); }
+  });
+  async function openMiniapp(id) {
+    let m = null;
+    try {
+      const r = await api("/api/miniapps", { op: "miniapp", id });
+      if (r.t === "done" && r.html) { m = r; try { ls.set("mah:" + id, JSON.stringify(r)); } catch (e) { /* kept next time */ } }
+      else if (r.t === "error") { toast(r.text); ls.del("mah:" + id); return; }
+    } catch (e) { /* the server is away: the copy kept here */ }
+    if (!m) { try { m = JSON.parse(ls.get("mah:" + id) || "null"); } catch (e) { m = null; } }
+    if (!m) { toast("Приложение не загрузилось — нет связи с сервером"); return; }
+    if (maOpen) maOpen.el.close();
+    const frame = el("iframe", { sandbox: "allow-scripts allow-forms allow-modals", title: m.name });
+    frame.srcdoc = maPage(m.html);
+    const pin = Native && Native.pinApp
+      ? el("button", { class: "icon-btn", title: "На главный экран", text: "📌", onclick: () => { if (!Native.pinApp(m.id, m.name, m.icon)) toast("Этот телефон не умеет ставить значки"); } })
+      : null;
+    const box = el("div", { class: "ma-view", role: "dialog", "aria-label": m.name },
+      el("div", { class: "ma-head" }, el("button", { class: "icon-btn", "aria-label": "Назад", text: "←", onclick: () => box.close() }),
+        el("b", { class: "grow", text: m.icon + " " + m.name }), pin), frame);
+    box.close = () => { box.remove(); if (maOpen && maOpen.el === box) maOpen = null; };
+    maOpen = { id: m.id, frame, el: box };
+    document.body.append(box);
+  }
+  window.__aiMiniapp = (id) => { maWanted = String(id || ""); maTry(); };  // the Android app: an app's icon was tapped
+  function maTry() {
+    if (!maWanted || !S.me) return;
+    const id = maWanted;
+    maWanted = "";
+    if (S.me.panel) openMiniapp(id);
+  }
+  function miniApps() {
+    sheet("📱 Мои приложения", (box, close) => {
+      const list = el("div", {}, el("p", { class: "muted", text: "Загружаю…" }));
+      box.append(list);
+      const draw = (apps, offline) => {
+        list.innerHTML = "";
+        if (!apps.length) {
+          list.append(el("p", { class: "muted", text: "Приложений пока нет. Попросите Claude: «Управление» → «🛠 Claude» → «Сделай приложение …» "
+            + "(список покупок, счётчик, расписание, калькулятор — что угодно). Оно появится здесь, его можно поставить значком на главный экран." }));
+          return;
+        }
+        if (offline) list.append(el("p", { class: "muted", text: "Нет связи с сервером — показаны сохранённые на телефоне." }));
+        for (const a of apps) {
+          list.append(el("div", { class: "row chat-row", role: "button", tabindex: "0", "aria-label": a.name, onclick: () => { close(); openMiniapp(a.id); } },
+            el("span", { style: "font-size:26px", text: a.icon }),
+            el("div", { class: "grow" }, el("span", { class: "t", text: a.name }), el("small", { text: a.desc || "версия " + a.v })),
+            el("button", { class: "round ghost", text: "🗑️", title: "Убрать", "aria-label": "Убрать «" + a.name + "»", onclick: async (e) => {
+              e.stopPropagation();
+              if (!(await confirmBox(`Убрать «${a.name}» с телефона? Claude может вернуть его, опубликовав снова.`, "Убрать", true))) return;
+              try { await api("/api/miniapps", { op: "miniapp_hide", id: a.id }); ls.del("mah:" + a.id); load(); } catch (er) { toast(problem(er)); }
+            } })));
+        }
+      };
+      const load = async () => {
+        try {
+          const r = await api("/api/miniapps", { op: "miniapps" });
+          if (r.t !== "done") throw new Error(r.text || "нет ответа");
+          ls.set("miniapps", JSON.stringify(r.apps));
+          draw(r.apps || [], false);
+        } catch (e) {
+          let kept = [];
+          try { kept = JSON.parse(ls.get("miniapps") || "[]"); } catch (er) { kept = []; }
+          draw(kept.filter((a) => ls.get("mah:" + a.id)), true);
+        }
+      };
+      load();
+    });
+  }
+
   function moreView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
@@ -2134,6 +2273,11 @@
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => (S.views.vpn && S.views.vpn.keys ? S.views.vpn.keys() : show("vpn")) },
           el("span", { style: "font-size:24px", text: "🔑" }),
           el("div", { class: "grow" }, "Ключи", el("small", { text: "Все ключи помощника и Claude: какие подключены, каких нет" })),
+          el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
+      if (me.panel) scroll.append(el("div", { class: "card" },
+        el("button", { class: "row", style: "width:100%;text-align:left", onclick: miniApps },
+          el("span", { style: "font-size:24px", text: "📱" }),
+          el("div", { class: "grow" }, "Мои приложения", el("small", { text: "Их пишет Claude в «Управлении» по вашей просьбе" })),
           el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
       if (Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
@@ -2295,7 +2439,7 @@
   window.__aiApp = { refresh: () => S.views.more && S.views.more.onShow() };
   // the phone's Back button: close what is open on top, then go back to the chat; false lets the app go to the background
   window.__aiBack = function () {
-    const top = [...document.querySelectorAll(".sheet-bg, .viewer")].pop();
+    const top = [...document.querySelectorAll(".sheet-bg, .viewer, .ma-view")].pop();
     if (top) { if (top.close) top.close(); else top.remove(); return true; }
     if (S.views.chat && S.tab !== "chat") { show("chat"); return true; }
     return false;

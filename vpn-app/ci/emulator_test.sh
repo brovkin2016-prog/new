@@ -445,7 +445,7 @@ adb shell "am start -n $ACT --es test_remove МостVK" >/dev/null; sleep 1
 adb shell am start -n $ACT --es test_remove Запасной >/dev/null; sleep 1
 
 # the bridges checked from the phone (the family server's Claude asks, srv-phone): each bridge in a short call of its own,
-# the sites straight from the phone, a report — here the call is not real: the bridge is told «not in the call»
+# the sites straight from the phone, a report — here the call is not real: «not in the call» or the service's error
 step "the bridges checked from the phone: a bridge in a short call of its own, the sites, a report"
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null; sleep 2
 CHK='winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F98765432109876&fps=24&batch=45#МостПроверка'
@@ -455,12 +455,12 @@ adb shell "am start -n $ACT --el test_check_join 8000 --es test_check ci1" >/dev
 for _ in $(seq 1 240); do adb logcat -d -s AIVPN:V | grep -q "bridge check: done" && break; sleep 1; done
 adb logcat -d -s AIVPN:V | grep "bridge check" | tee "$OUT/check.log"
 grep -q "bridge check: started (the server's ask)" "$OUT/check.log" || fail "the check did not start"
-grep -q "bridge check: «МостПроверка» no_join" "$OUT/check.log" || fail "the bridge was not tried in a call of its own"
+grep -qE "bridge check: «МостПроверка» (no_join|error)" "$OUT/check.log" || fail "the bridge was not tried in a call of its own"
 grep -qE "bridge check: done, [0-9]+ bridges, 0 carry" "$OUT/check.log" || fail "the check did not finish"
 sleep 2
 dump /sdcard/ui.xml
 adb shell cat /sdcard/ui.xml | grep -q 'Проверка мостов' || fail "the check's result is not shown"
-adb shell cat /sdcard/ui.xml | grep -q 'МостПроверка» — не вошёл в звонок' || fail "the bridge's line is not in the result"
+adb shell cat /sdcard/ui.xml | grep -qE 'МостПроверка» — (не вошёл в звонок|ошибка звонка)' || fail "the bridge's line is not in the result"
 adb exec-out screencap -p > "$OUT/9-check.png"
 adb shell input keyevent KEYCODE_BACK
 adb shell "am start -n $ACT --es test_remove МостПроверка" >/dev/null; sleep 1

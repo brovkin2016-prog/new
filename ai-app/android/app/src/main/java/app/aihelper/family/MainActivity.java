@@ -39,6 +39,9 @@ public class MainActivity extends Activity {
     private Uri cameraUri;
     private PermissionRequest micRequest;
     private boolean tested;
+    static final String MINIAPP = "miniapp";  // a mini-app's icon on the home screen: which one to open
+    private String miniapp;  // to open once the page is there
+    private boolean pageReady;
     private boolean away;  // gone to the camera, the files, the phone's lock or a permission: the page waits for what comes back
 
     @Override
@@ -81,6 +84,8 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                pageReady = true;
+                openMiniapp();
                 if (!BuildConfig.TEST_LOGIN.isEmpty() && !tested) {
                     tested = true;
                     selfTest();
@@ -152,12 +157,15 @@ public class MainActivity extends Activity {
         }
         assets.refresh();
         new Thread(this::dropOldShots, "camera-clean").start();
+        takeMiniapp(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        takeMiniapp(intent);
+        if (pageReady) openMiniapp();
     }
 
     @Override
@@ -267,6 +275,22 @@ public class MainActivity extends Activity {
         fileCallback.onReceiveValue(out);
         fileCallback = null;
         if (req == REQ_CAMERA) cameraUri = null;
+    }
+
+    private void takeMiniapp(Intent i) {
+        String id = i == null ? null : i.getStringExtra(MINIAPP);
+        if (id != null && id.matches("[a-z0-9][a-z0-9-]{1,31}")) {
+            miniapp = id;
+            i.removeExtra(MINIAPP);
+        }
+    }
+
+    /** The page opens the mini-app as soon as it can (it waits for the sign-in and the owner's screens itself). */
+    private void openMiniapp() {
+        if (miniapp == null) return;
+        String id = miniapp;
+        miniapp = null;
+        web.evaluateJavascript("window.__aiMiniapp && window.__aiMiniapp(" + JSONObject.quote(id) + ")", null);
     }
 
     /** The camera's shots stay in the cache only while they are sent: those from yesterday and before go. */

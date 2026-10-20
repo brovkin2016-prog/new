@@ -300,6 +300,54 @@ final class Bridge {
         Files.shareApp(act, text);  // copies the installed APK here, off the main thread, then opens the share sheet
     }
 
+    /** A mini-app's own icon on the home screen (Android asks the person to place it); a tap opens it in the helper. */
+    @JavascriptInterface
+    public boolean pinApp(String id, String name, String emoji) {
+        if (Build.VERSION.SDK_INT < 26 || id == null || !id.matches("[a-z0-9][a-z0-9-]{1,31}")) return false;
+        android.content.pm.ShortcutManager sm = act.getSystemService(android.content.pm.ShortcutManager.class);
+        if (sm == null || !sm.isRequestPinShortcutSupported()) return false;
+        String label = name == null || name.trim().isEmpty() ? id : name.trim();
+        if (label.length() > 24) label = label.substring(0, 24);
+        Intent open = new Intent(act, MainActivity.class).setAction(Intent.ACTION_VIEW).putExtra(MainActivity.MINIAPP, id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        android.content.pm.ShortcutInfo si = new android.content.pm.ShortcutInfo.Builder(act, "ma-" + id)
+                .setShortLabel(label).setIcon(android.graphics.drawable.Icon.createWithBitmap(emojiIcon(emoji))).setIntent(open).build();
+        try {
+            return sm.requestPinShortcut(si, null);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** The app's sign on a round coloured plate, as the launcher shows it. */
+    private static android.graphics.Bitmap emojiIcon(String emoji) {
+        int s = 192;
+        android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(s, s, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas c = new android.graphics.Canvas(b);
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0xFFEEEBFF);
+        c.drawCircle(s / 2f, s / 2f, s / 2f, p);
+        p.setTextSize(s * 0.55f);
+        p.setTextAlign(android.graphics.Paint.Align.CENTER);
+        String e = emoji == null || emoji.isEmpty() ? "📱" : emoji;
+        android.graphics.Paint.FontMetrics fm = p.getFontMetrics();
+        c.drawText(e, s / 2f, s / 2f - (fm.ascent + fm.descent) / 2f, p);
+        return b;
+    }
+
+    /** A text to another app (a message, notes): Android's own «share» list. */
+    @JavascriptInterface
+    public void shareText(String text) {
+        Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text == null ? "" : text);
+        act.runOnUiThread(() -> {
+            try {
+                act.startActivity(Intent.createChooser(send, "Поделиться").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (Exception e) {
+                android.util.Log.i("AIWeb", "share: " + e);
+            }
+        });
+    }
+
     @JavascriptInterface
     public void copy(String text) {
         act.runOnUiThread(() -> {
