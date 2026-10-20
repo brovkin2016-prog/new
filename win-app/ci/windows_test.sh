@@ -129,6 +129,53 @@ if [ -x "$EDGE" ]; then
   done
   ls -la "$OUT"/window-*.png 2>/dev/null || echo "no window pictures"
 fi
+
+step "an update while the VPN is on: the new program in place, the VPN back by itself, the icon from the new program"
+# as the service does it (applyUpdate): the new file, run with --replace; it watches the new service before it ends
+UP1=$((CODE + 1)); UP2=$((CODE + 2))
+state() { curl -s -m 5 -b "wt=$T" http://127.0.0.1:47710/api/state; }
+# (by the program's name: the PowerShell asking has «--tray» in its own command line too)
+trays() { powershell -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { \$_.Name -like 'winger*' -and \$_.CommandLine -like '*--tray*' }).ProcessId" | tr -d '\r' | sort; }
+upfail() { cp /c/ProgramData/Winger/journal.log "$OUT/service-journal.log" 2>/dev/null; note "$OUT/update.txt"; fail "$@"; }
+"/c/Program Files/Winger/winger.exe" --tray &  # the icon by the clock, as after a sign-in (the old program's)
+sleep 8
+TRAY_OLD=$(trays)
+echo "icon before: $TRAY_OLD" | tee "$OUT/update.txt"
+T0=$(date +%s)
+timeout 300 ./winger-up1.exe --replace 'C:\Program Files\Winger\winger.exe'
+echo "replace (1.0.$UP1) ended with $? after $(( $(date +%s) - T0 )) s" | tee -a "$OUT/update.txt"
+state | tee -a "$OUT/update.txt" | grep -q "\"version\":\"1.0.$UP1\"" || upfail "after the update the service is not the new version"
+for _ in $(seq 1 60); do state | grep -q '"phase":"on"' && break; sleep 1; done
+state | grep -q '"phase":"on"' || upfail "the VPN did not come back on after the update"
+[ "$("$CURL" -s -o NUL -w '%{http_code}' --max-time 30 https://www.example.org/)" = 200 ] || upfail "no page through the VPN after the update"
+grep -q 'reqAddr.*example\.org' "$OUT/hysteria.log" || upfail "after the update the page did not go through the VPN"
+grep "update: 1.0.$UP1 runs" /c/ProgramData/Winger/journal.log | tee -a "$OUT/update.txt" | grep -q . || upfail "the journal does not say the new version runs"
+for _ in $(seq 1 30); do TRAY_NEW=$(trays); [ -n "$TRAY_NEW" ] && [ "$TRAY_NEW" != "$TRAY_OLD" ] && break; sleep 1; done
+echo "icon after: $TRAY_NEW" | tee -a "$OUT/update.txt"
+[ -n "$TRAY_OLD" ] || upfail "the old icon did not start (nothing to compare)"
+{ [ -n "$TRAY_NEW" ] && ! echo "$TRAY_NEW" | grep -qx "$TRAY_OLD"; } || upfail "the icon by the clock did not move to the new program"
+
+step "a new version whose service does not run: put back, the VPN on again, not taken a second time"
+reg add 'HKLM\SYSTEM\CurrentControlSet\Services\Winger' /v Environment /t REG_MULTI_SZ /d "WINGER_DIRECT=hysteria.exe\\0WINGER_FAIL_VERSION=$UP2" /f
+T0=$(date +%s)
+timeout 400 ./winger-up2.exe --replace 'C:\Program Files\Winger\winger.exe'
+RC=$?
+echo "replace (1.0.$UP2, broken) ended with $RC after $(( $(date +%s) - T0 )) s" | tee -a "$OUT/update.txt"
+[ "$RC" != 0 ] || upfail "a new version that does not run was kept"
+for _ in $(seq 1 60); do state | grep -q '"phase":"on"' && break; sleep 1; done
+state | tee -a "$OUT/update.txt" | grep -q "\"version\":\"1.0.$UP1\"" || upfail "after a failed update the earlier version is not back"
+state | grep -q '"phase":"on"' || upfail "the VPN did not come back on after the earlier version was put back"
+[ "$("$CURL" -s -o NUL -w '%{http_code}' --max-time 30 https://www.example.net/)" = 200 ] || upfail "no page through the VPN after the put-back"
+cat /c/ProgramData/Winger/rollback/bad.json | tee -a "$OUT/update.txt" | grep -q "\"code\":$UP2" || upfail "the version that did not run is not marked"
+PID=$(sc queryex Winger | grep -i pid | tr -dc 0-9)
+T0=$(date +%s)
+timeout 60 ./winger-up2.exe --replace 'C:\Program Files\Winger\winger.exe'
+RC=$?
+[ "$RC" != 0 ] && [ $(( $(date +%s) - T0 )) -lt 20 ] || upfail "the marked version was tried again ($RC)"
+[ "$(sc queryex Winger | grep -i pid | tr -dc 0-9)" = "$PID" ] || upfail "the marked version's try stopped the service"
+reg add 'HKLM\SYSTEM\CurrentControlSet\Services\Winger' /v Environment /t REG_MULTI_SZ /d WINGER_DIRECT=hysteria.exe /f
+for p in $(trays); do taskkill /pid "$p" /f > /dev/null 2>&1; done  # the double-click below starts its own icon
+echo "update ✓"
 api disconnect '{}'
 cp /c/ProgramData/Winger/journal.log "$OUT/service-journal.log" 2>/dev/null
 "/c/Program Files/Winger/winger.exe" --uninstall

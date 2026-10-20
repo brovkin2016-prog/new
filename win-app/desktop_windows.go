@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/systray"
@@ -118,7 +119,29 @@ func runTray() error {
 	if err == windows.ERROR_ALREADY_EXISTS {
 		return nil
 	}
-	defer windows.CloseHandle(h)
+	var gone sync.Once
+	defer gone.Do(func() { windows.CloseHandle(h) })
+	// an update put a new version in: this icon (the old program) gives way to the new program's own — once for that
+	// version (should the installed file be another version than the service, no icon starts after icon)
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			v, _ := serviceSays()
+			if v == "" || v == versionName || os.Getenv("WINGER_TRAY_FOR") == v {
+				continue
+			}
+			gone.Do(func() { windows.CloseHandle(h) })
+			cmd := exec.Command(installedExe(), "--tray")
+			cmd.Env = append(os.Environ(), "WINGER_TRAY_FOR="+v)
+			hideWindow(cmd)
+			if err := cmd.Start(); err != nil {
+				return // this icon stays
+			}
+			systray.Quit()
+			time.Sleep(5 * time.Second)
+			os.Exit(0)
+		}
+	}()
 	systray.Run(func() {
 		systray.SetIcon(iconOff)
 		systray.SetTitle("Winger")
@@ -134,6 +157,7 @@ func runTray() error {
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Выйти", "VPN выключится, значок уйдёт; снова — ярлык Winger")
 		shown, was := "", ""
+		var updating time.Time // a new version was being put in: the service's short absence is that, not «off»
 		go func() {
 			for {
 				b, err := api("state")
@@ -153,9 +177,17 @@ func runTray() error {
 					ActiveName string `json:"activeName"`
 					Switch     string `json:"switch"`
 					Owner      bool   `json:"owner"`
+					Update     struct {
+						State string `json:"state"`
+					} `json:"update"`
 				}
 				if err != nil || json.Unmarshal(b, &s) != nil {
 					s.Status.Phase = "off"
+					if time.Since(updating) < 3*time.Minute {
+						s.Status.Phase = "updating"
+					}
+				} else if s.Update.State == "ready" {
+					updating = time.Now()
 				}
 				// as the phone's notification: the connection's name, then «Защищено · отклик N мс» or what it is doing
 				tip, title := "Winger: выключен", "Выключить VPN"
@@ -172,6 +204,8 @@ func runTray() error {
 					tip = "Подключаюсь…"
 				case "retrying":
 					tip = "Переподключаюсь…"
+				case "updating":
+					tip = "Winger обновляется — VPN вернётся сам"
 				default:
 					title = "Включить VPN"
 				}

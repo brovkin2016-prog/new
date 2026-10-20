@@ -91,10 +91,26 @@ function draw(s) {
   $("#bridgeAppsRow").hidden = !(s.conns || []).some((c) => c.bridge);
   $("#bridgeAppsVal").textContent = many(s.bridgeOnly, s.bridgeApps);
   const u = s.update || {};
-  $("#verName").textContent = "Winger " + s.version + (u.state === "downloading" ? " · загружаю…" : u.state === "ready" ? " · ставлю…" : "");
+  updating = u.state === "ready" ? Date.now() : updating;
+  $("#verName").textContent = "Winger " + s.version + (u.state === "downloading" ? " · загружаю…" : u.state === "waiting" ? " · новая ждёт тихой минуты"
+    : u.state === "ready" ? " · ставлю…" : "");
   $("#ver").title = u.state === "downloading" ? "Загружаю " + (u.name || "новую версию")
-    : u.state === "ready" ? "Ставлю " + (u.name || "новую версию") + ", окно закроется на минуту" : "";
+    : u.state === "waiting" ? "Новая версия " + (u.name || "") + " встанет сама, когда через VPN почти ничего не идёт (VPN прервётся на несколько секунд). Нажмите — поставить сейчас"
+    : u.state === "ready" ? "Ставлю " + (u.name || "новую версию") + " — VPN прервётся на несколько секунд, окно обновится само" : "";
+  // a new version came in (the service answers as it): the window takes its own new page, and says so once
+  if (seenVersion && s.version !== seenVersion) {
+    try { sessionStorage.setItem("wingerWas", seenVersion); } catch (e) { /* nothing */ }
+    location.reload();
+    return;
+  }
+  if (!seenVersion) {
+    seenVersion = s.version;
+    let was = "";
+    try { was = sessionStorage.getItem("wingerWas") || ""; sessionStorage.removeItem("wingerWas"); } catch (e) { /* nothing */ }
+    if (was && was !== s.version) toast("Winger обновился: " + s.version, 6000);
+  }
 }
+let seenVersion = "", updating = 0;
 // the connections in one list, as on the phone: made again only when the list changes (a click is never lost to a
 // redraw); each row: a mark (filled: in use), its name, one short line (its response time and speed, or what a bridge
 // goes through), what it is doing now on the right, and ⚡ for its speed
@@ -151,7 +167,9 @@ function drawConns(s) {
   if ($("#hint").textContent !== hint) $("#hint").textContent = hint;
 }
 async function refresh() {
-  try { draw(await call("state")); } catch (e) { $("#state").textContent = "Служба Winger не отвечает"; }
+  try { draw(await call("state")); } catch (e) {
+    $("#state").textContent = Date.now() - updating < 180000 ? "Winger обновляется — VPN вернётся сам" : "Служба Winger не отвечает";
+  }
 }
 // a connection's button: on through it (switching over from another one), or off when it is the one in use
 async function use(i) {
@@ -278,8 +296,9 @@ $("#ver").onclick = async () => {
       if ((u.checked || 0) < t0 && u.state !== "downloading") continue;
       draw(st);
       if (u.state === "latest") toast("У вас последняя версия — Winger " + st.version, 4000);
-      else if (u.state === "downloading") toast("Есть новая версия " + (u.name || "") + " — загружаю и ставлю, окно закроется на минуту", 7000);
-      else if (u.state === "ready") toast("Ставлю новую версию " + (u.name || "") + " — окно закроется на минуту", 7000);
+      else if (u.state === "downloading") toast("Есть новая версия " + (u.name || "") + " — загружаю и ставлю; VPN прервётся на несколько секунд", 7000);
+      else if (u.state === "ready") toast("Ставлю новую версию " + (u.name || "") + " — VPN прервётся на несколько секунд, окно обновится само", 7000);
+      else if (u.state === "waiting") continue;
       else if ((u.state || "").startsWith("failed: ")) toast("Не получилось: " + u.state.slice(8), 7000);
       else continue;
       return;

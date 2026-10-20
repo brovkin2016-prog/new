@@ -748,6 +748,18 @@ func (e *Engine) PingAll() {
 	}()
 }
 
+// OnBridge: the VPN is on (or coming on) through a bridge.
+func (e *Engine) OnBridge() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.wanted && e.profile != nil && e.profile.Bridge
+}
+
+// Moved: the bytes the programs moved through the VPN so far, both ways (all its runs together).
+func (e *Engine) Moved() int64 {
+	return e.box.traffic.up.Load() + e.box.traffic.down.Load()
+}
+
 // Rates: bytes a second down and up through the VPN now.
 func (e *Engine) Rates() (down, up float64) {
 	return e.box.Rates()

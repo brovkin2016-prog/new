@@ -26,6 +26,8 @@ type Family struct {
 	preparing bool
 	stuckAt   map[string]time.Time // a service's bridge last said to be stuck (Stuck)
 	journalAt time.Time            // the journal last sent
+	updAt     time.Time            // the update last went to downloading / waiting / ready (one stuck there is let go)
+	updNow    chan struct{}        // «Проверить обновление» while a new version waits for a quiet minute: in now
 }
 
 // UpdateInfo is the newest Winger for Windows the family server has.
@@ -35,8 +37,16 @@ type UpdateInfo struct {
 	SHA256  string `json:"sha256"`
 	Notes   string `json:"notes"`
 	Checked int64  `json:"checked"`
-	State   string `json:"state"` // "", "latest", "downloading", "ready", "failed: …"
+	State   string `json:"state"` // "", "latest", "downloading", "waiting", "ready", "failed: …"
 }
+
+// the family server's update files and the way to them (the tests' own server); how often a waiting update looks
+// whether the VPN is quiet
+var (
+	updateURL    = func(host, file string) string { return "https://" + host + ":8443/app/" + file }
+	updateClient = client
+	quietEvery   = 15 * time.Second
+)
 
 func (f *Family) post(path string, body any, out any) bool {
 	host, _ := f.st.HomeHost()
@@ -229,12 +239,40 @@ func (f *Family) RenewNow(p *Profile) *Profile {
 	return nil
 }
 
-// CheckUpdate asks the family server for a newer Winger for Windows and, when there is one, gets it ready. What came of
-// it is in Update.State (the window says it after «Проверить обновление»).
-func (f *Family) CheckUpdate() {
+// busyUpdate: a check already on it (not one stuck: after 20 minutes it is let go). Called with f.mu held.
+func (f *Family) busyUpdate() bool {
+	switch f.Update.State {
+	case "waiting":
+		return true
+	case "downloading", "ready":
+		return time.Since(f.updAt) < 20*time.Minute
+	}
+	return false
+}
+
+// CheckUpdate asks the family server for a newer Winger for Windows and, when there is one, puts it in. What came of it
+// is in Update.State (the window says it after «Проверить обновление»). The server is asked straight first (the VPN
+// stays free), then through the VPN when it runs on the server — through a bridge only when the person asked (a bridge
+// is slow: the file would take it over for long). Asked by the person, the new version goes in at once; found by itself,
+// at a quiet minute (the VPN off, or next to nothing through it), so no call or film breaks off for the restart. A
+// version that did not run on this computer (put back by --replace) is not taken again: the next one is waited for.
+func (f *Family) CheckUpdate(asked bool) {
+	f.mu.Lock()
+	if f.busyUpdate() {
+		if asked && f.Update.State == "waiting" && f.updNow != nil {
+			f.Update.Checked = time.Now().Unix()
+			select {
+			case f.updNow <- struct{}{}:
+			default:
+			}
+		}
+		f.mu.Unlock()
+		return
+	}
+	f.mu.Unlock()
 	said := func(state string) {
 		f.mu.Lock()
-		if f.Update.State != "downloading" && f.Update.State != "ready" {
+		if !f.busyUpdate() {
 			f.Update.State = state
 		}
 		f.Update.Checked = time.Now().Unix()
@@ -245,17 +283,27 @@ func (f *Family) CheckUpdate() {
 		said("failed: сначала добавьте подключение — новые версии Winger приходят с вашего сервера по нему")
 		return
 	}
-	c := client(f.eng.ProbePort(), 30*time.Second)
-	r, err := c.Get("https://" + host + ":8443/app/winger-win.json")
-	if err != nil {
-		Logf("update check: %v", err)
-		said("failed: семейный сервер не ответил — проверьте интернет и попробуйте ещё раз")
-		return
+	ports := []int{0}
+	if p := f.eng.ProbePort(); p > 0 && (asked || !f.eng.OnBridge()) {
+		ports = append(ports, p)
 	}
 	var info UpdateInfo
-	ok := r.StatusCode == 200 && json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&info) == nil
-	r.Body.Close()
+	port, ok := -1, false
+	for _, p := range ports {
+		r, err := updateClient(p, 30*time.Second).Get(updateURL(host, "winger-win.json"))
+		if err != nil {
+			Logf("update check (%s): %v", map[bool]string{true: "straight", false: "through the VPN"}[p == 0], err)
+			continue
+		}
+		ok = r.StatusCode == 200 && json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&info) == nil
+		r.Body.Close()
+		port = p
+		break
+	}
 	switch {
+	case port < 0:
+		said("failed: семейный сервер не ответил — проверьте интернет и попробуйте ещё раз")
+		return
 	case !ok || len(info.SHA256) != 64 && info.Code > versionCode:
 		said("failed: семейный сервер не дал сведений о версии")
 		return
@@ -263,28 +311,81 @@ func (f *Family) CheckUpdate() {
 		said("latest")
 		return
 	}
+	if code, why := badUpdate(f.dataDir); code == info.Code {
+		said("failed: версия " + info.Name + " не заработала на этом компьютере (" + why + ") — работает прежняя, Winger подождёт следующую")
+		return
+	}
 	f.mu.Lock()
-	if f.Update.State == "downloading" || f.Update.State == "ready" { // a check already on it
+	if f.busyUpdate() { // another check got here first
 		f.mu.Unlock()
 		return
 	}
 	info.Checked, info.State = time.Now().Unix(), "downloading"
-	f.Update = info
+	f.Update, f.updAt = info, time.Now()
 	f.mu.Unlock()
 	Logf("update: version %s found, downloading", info.Name)
-	path, err := f.download(c, "https://"+host+":8443/app/winger-win.exe", info.SHA256)
+	path, err := f.download(updateClient(port, 0), updateURL(host, "winger-win.exe"), info.SHA256)
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if err != nil {
 		f.Update.State = "failed: " + err.Error()
+		f.mu.Unlock()
 		Logf("update: %v", err)
 		return
 	}
-	f.Update.State = "ready"
-	Logf("update: ready, installing")
+	now := make(chan struct{}, 1)
+	f.Update.State, f.updAt, f.updNow = "waiting", time.Now(), now
+	f.mu.Unlock()
+	if !asked {
+		Logf("update: %s downloaded, waiting for a quiet minute", info.Name)
+		f.waitQuiet(now)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Update.State, f.updAt, f.updNow = "ready", time.Now(), nil
+	Logf("update: installing %s", info.Name)
 	if err := applyUpdate(path); err != nil {
 		f.Update.State = "failed: " + err.Error()
 		Logf("update: %v", err)
+	}
+}
+
+// badUpdate: the version that did not run on this computer and was put back (its code and why), 0 when none. Kept in
+// the folder --replace keeps the earlier program in (only SYSTEM and Administrators write there).
+func badUpdate(dir string) (int, string) {
+	var bad struct {
+		Code int    `json:"code"`
+		Why  string `json:"why"`
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "rollback", "bad.json"))
+	if err != nil || json.Unmarshal(b, &bad) != nil {
+		return 0, ""
+	}
+	return bad.Code, bad.Why
+}
+
+func markBadUpdate(dir string, code int, why string) {
+	b, _ := json.Marshal(map[string]any{"code": code, "why": why, "at": time.Now().Unix()})
+	_ = os.WriteFile(filepath.Join(dir, "rollback", "bad.json"), b, 0o644)
+}
+
+// waitQuiet: until a minute with the VPN off or next to nothing through it (under 20 KB/s), or the person asks for the
+// update now; a day at most.
+func (f *Family) waitQuiet(now <-chan struct{}) {
+	quiet, last := 0, f.eng.Moved()
+	for end := time.Now().Add(24 * time.Hour); quiet < 4 && time.Now().Before(end); {
+		select {
+		case <-now:
+			return
+		case <-time.After(quietEvery):
+		}
+		moved := f.eng.Moved()
+		rate := float64(moved-last) / quietEvery.Seconds()
+		last = moved
+		if f.eng.Status().Phase != "on" || rate < 20<<10 {
+			quiet++
+		} else {
+			quiet = 0
+		}
 	}
 }
 
@@ -390,7 +491,7 @@ func (f *Family) Loop() {
 			if _, auth := f.st.HomeHost(); auth != "" { // the family server's own login (a bridge may be the chosen one)
 				f.SyncServer(auth)
 			}
-			f.CheckUpdate()
+			go f.CheckUpdate(false) // a new version may wait for a quiet minute: the bridges are not held up meanwhile
 		case f.Preparing() || !f.hasBridge() && time.Since(lastBridges) >= 20*time.Minute:
 			lastBridges = time.Now()
 			f.SyncBridges(0)

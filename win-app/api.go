@@ -243,7 +243,7 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 		reply(w, map[string]any{"processes": Processes()})
 	})
 	mux.HandleFunc("/api/update", func(w http.ResponseWriter, r *http.Request) {
-		go fam.CheckUpdate()
+		go fam.CheckUpdate(true)
 		go fam.SyncBridges(0)
 		reply(w, map[string]bool{"ok": true})
 	})

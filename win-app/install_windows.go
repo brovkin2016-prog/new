@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -244,9 +245,20 @@ func uninstall() error {
 	return nil
 }
 
-// replace (an update, run by the service): stops the service, puts this file in place of the installed one, starts it.
+// replace (an update, run by the service from the new file it got): keeps the installed program aside, stops the
+// service, puts this file in its place and starts it — then watches it. When the new one does not run, does not answer
+// as itself or does not take the VPN back on, the earlier program is put back and started (the VPN as it was), and this
+// version is marked not to be taken again on this computer (the next one is waited for).
 func replace(target string) error {
+	dir := dataDir()
+	OpenJournal(dir)
+	if code, _ := badUpdate(dir); code == versionCode {
+		Logf("update: %s did not run here before — not put in again", versionName)
+		return errors.New("эта версия здесь уже не заработала")
+	}
 	time.Sleep(2 * time.Second)
+	_, phase := serviceSays()
+	wasOn := phase != "" && phase != "off"
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -257,23 +269,111 @@ func replace(target string) error {
 		return err
 	}
 	defer s.Close()
-	stopService(s)
-	self, _ := os.Executable()
-	for i := 0; i < 20; i++ {
-		if err = copyFile(self, target); err == nil {
-			break
-		}
-		time.Sleep(time.Second)
-	}
-	if err != nil {
-		_ = s.Start()
+	prev := filepath.Join(dir, "rollback", "winger-prev.exe")
+	if err := privateDir(filepath.Dir(prev)); err != nil {
 		return err
 	}
+	if err := copyFile(target, prev); err != nil { // no update without the way back
+		Logf("update: the program now in use could not be kept aside: %v", err)
+		return err
+	}
+	t0 := time.Now()
+	stopService(s)
+	self, _ := os.Executable()
+	if err := copyOver(self, target); err != nil {
+		Logf("update: %s not put in: %v", versionName, err)
+		startAndWait(s)
+		return err
+	}
+	_ = s.Start()
+	up, why := runsWell(s, wasOn)
+	if why != "" {
+		Logf("update: %s — %s; the earlier program is put back", versionName, why)
+		markBadUpdate(dir, versionCode, why)
+		stopService(s)
+		if err := copyOver(prev, target); err != nil {
+			Logf("update: the earlier program not put back: %v", err)
+		}
+		startAndWait(s)
+		return errors.New(why)
+	}
+	_ = os.Remove(prev)
 	if k, err := registry.OpenKey(registry.LOCAL_MACHINE, uninstallKey, registry.SET_VALUE); err == nil {
 		_ = k.SetStringValue("DisplayVersion", versionName)
 		k.Close()
 	}
-	return s.Start()
+	Logf("update: %s runs, answering %d s after the old one was stopped (the VPN was %s)", versionName,
+		int(up.Sub(t0).Seconds()), map[bool]string{true: "on — on again", false: "off"}[wasOn])
+	return nil
+}
+
+// copyOver: copyFile, tried for 20 seconds (an antivirus may hold the file a moment).
+func copyOver(from, to string) (err error) {
+	for i := 0; i < 20; i++ {
+		if err = copyFile(from, to); err == nil {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return err
+}
+
+// serviceSays: the running service's version and its VPN's phase; "" when it does not answer.
+func serviceSays() (version, phase string) {
+	b, err := api("state")
+	var s struct {
+		Version string `json:"version"`
+		Status  struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+	if err != nil || json.Unmarshal(b, &s) != nil {
+		return "", ""
+	}
+	return s.Version, s.Status.Phase
+}
+
+// runsWell: when the started service began answering as this version, and "" once it has for 20 seconds in a row, one
+// process all along, and — when the VPN was on — has it on again or coming on; else what is wrong. Its first moments
+// may fail (the old one still leaving the window's port): Windows' own restarts and ours are waited out, two minutes at
+// most.
+func runsWell(s *mgr.Service, wasOn bool) (time.Time, string) {
+	var since, started time.Time
+	var pid uint32
+	for end := time.Now().Add(2 * time.Minute); time.Now().Before(end); time.Sleep(time.Second) {
+		q, err := s.Query()
+		v, phase := serviceSays()
+		if err != nil || q.State != svc.Running || v != versionName || pid != 0 && q.ProcessId != pid {
+			since, pid = time.Time{}, 0
+			if err == nil && q.State == svc.Stopped && time.Since(started) > 10*time.Second {
+				started = time.Now()
+				_ = s.Start()
+			}
+			continue
+		}
+		if since.IsZero() {
+			since, pid = time.Now(), q.ProcessId
+		}
+		if time.Since(since) >= 20*time.Second {
+			if wasOn && phase == "off" {
+				return since, "VPN не включился снова"
+			}
+			return since, ""
+		}
+	}
+	return since, "служба не заработала"
+}
+
+// startAndWait: the service started and seen answering (a minute at most; started again while it stays stopped).
+func startAndWait(s *mgr.Service) {
+	for end := time.Now().Add(time.Minute); time.Now().Before(end); time.Sleep(time.Second) {
+		if v, _ := serviceSays(); v != "" {
+			return
+		}
+		if q, err := s.Query(); err == nil && q.State == svc.Stopped {
+			_ = s.Start()
+		}
+	}
 }
 
 // applyUpdate (in the service): the new file, checked, replaces this one from a process of its own.

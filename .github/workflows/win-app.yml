@@ -99,11 +99,18 @@ jobs:
           V="-X main.versionName=1.0.${{ steps.v.outputs.code }} -X main.versionCodeStr=${{ steps.v.outputs.code }}"
           CGO_ENABLED=0 go build -trimpath -tags "$TAGS" -ldflags "-checklinkname=0 -s -w $V -H windowsgui" -o winger.exe .
           CGO_ENABLED=0 go build -trimpath -tags "$TAGS" -ldflags "-checklinkname=0 -s -w $V" -o winger-console.exe .
+          # the update test's newer versions: one that runs, one whose service does not (it must be put back)
+          for n in 1 2; do
+            C=$((${{ steps.v.outputs.code }} + n))
+            CGO_ENABLED=0 go build -trimpath -tags "$TAGS" -ldflags "-checklinkname=0 -s -w -X main.versionName=1.0.$C -X main.versionCodeStr=$C" \
+              -o "winger-up$n.exe" .
+          done
           ls -la *.exe
       - name: Test on Windows
-        timeout-minutes: 25
+        timeout-minutes: 35
         env:
           GH_TOKEN: ${{ github.token }}
+          CODE: ${{ steps.v.outputs.code }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/out"
           cd win-app
