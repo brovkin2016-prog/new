@@ -415,12 +415,12 @@
         if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Вернуть как было", onclick: () => undo(d) }));
       }
       if (acts.childNodes.length) scroll.append(acts);
-      // who answers here: the free models, or Claude itself on the owner's key (half the month's cap; the rest is the console's)
+      // who answers here: the free models, or Claude itself on the owner's key (the month's cap less the console's reserve)
       const pick = async (body) => {
         const end = await panel(body);
         if (end.t === "done") { cache.claude = end; draw(); } else toast("⚠️ " + end.text, 7000);
       };
-      const money = ` · $${(d.spent || 0).toFixed(2)} из $${Number(d.cap || 0).toFixed(2)} в месяц (половина предела $${d.month_cap || 20}; вторая — для спасательной консоли)`;
+      const money = ` · $${(d.spent || 0).toFixed(2)} из $${Number(d.cap || 0).toFixed(2)} в месяц (предел $${d.month_cap || 20}, из них $${d.reserve || 5} — запас для ремонта в спасательной консоли)`;
       const chip = (on, text, body) => el("button", { class: "chip" + (on ? " on" : ""), text, onclick: () => { if (!on) pick(body); } });
       const engineRow = d.paid_key ? el("div", { class: "chips", style: "margin:0 0 6px;flex-wrap:wrap" },
         chip(!d.on_claude, "🆓 Бесплатные", { op: "agent_engine", engine: "free" }),
