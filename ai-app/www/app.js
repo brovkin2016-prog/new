@@ -1584,7 +1584,7 @@
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     let photo = null;  // the photo chosen now; a job takes it away, the next step is chosen again
-    const tplOk = () => !!(S.me.can.tvideo || S.me.panel);
+    const tplOk = () => !!(canTpl("photo") || S.me.panel);
     const empty = () => (photo ? null : el("div", { class: "empty" }, el("h2", { text: "Что сделать с фото?" }),
       el("p", { text: "Пришлите фото и скажите или напишите, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»." }),
       el("div", { class: "big-actions", style: "margin:16px 0 4px" },
@@ -1795,10 +1795,15 @@
   // загружаются…»), but when it is off they read this app's «not on yet» for that kind: the server's reasons then name
   // programs (ffmpeg) or say «Видео» in the photo gallery — on purpose, unlike «when can is false, show note».
   const noteFor = (kind, st) => (S.me.panel ? st.note || TPL[kind].none : !st.can ? TPL[kind].off : st.note || TPL[kind].none);
+  // «🎭 Я на фото» and «🎭 Я в ролике» each by its own flag; a server before v23 sends one («tvideo») for both
+  function canTpl(kind) {
+    const c = S.me.can || {};
+    return kind === "photo" ? !!("tphoto" in c ? c.tphoto : c.tvideo) : !!("tclips" in c ? c.tclips : c.tvideo);
+  }
   function templatesSheet(kind, th) {
     const T = TPL[kind];
     if (S.busy[th.name]) { toast(T.busy); return; }
-    if (!S.me.can.tvideo && !S.me.panel) { toast(T.off, 5000); return; }
+    if (!canTpl(kind) && !S.me.panel) { toast(T.off, 5000); return; }
     sheet(T.title, (box, close) => {
       if (!gal[kind]) gal[kind] = { theme: "", home: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0, credit: null };
       const st = gal[kind];
@@ -2056,7 +2061,7 @@
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     const NOT_ON = "Видео вам пока не включено — его включает владелец помощника.";
-    const tv = () => !!S.me.can.tvideo;
+    const tv = () => canTpl("video");
     const an = () => !!((S.me.ai_ops || {}).animate || (S.me.photo_ops || {}).animate);
     const empty = () => {
       // the title centred as on the sibling tabs; the two features are cards with their words to the left (.feat)
@@ -2065,8 +2070,7 @@
       const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
         el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
       box.append(
-        feat(tv(), "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.",
-          S.me.panel ? "Пока не работает — нажмите «🎭 Я в ролике» внизу, чтобы узнать почему." : "Пока не включено."),
+        tv() ? feat(true, "tv", "🎭 Я в ролике", "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.", "") : "",
         feat(an(), "an", "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
       return box;
     };
@@ -2091,8 +2095,13 @@
       templatesSheet("video", th);
     } });
     const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить\u00a0фото", onclick: animate });
-    const paintBar = () => { tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an()); };
-    root.append(scroll, el("div", { class: "composer" }, el("div", { class: "vbar" }, tvBtn, anBtn)));
+    const bar = el("div", { class: "vbar" });
+    const paintBar = () => {  // «🎭 Я в ролике» only while the server has it
+      bar.replaceChildren(...(tv() ? [tvBtn, anBtn] : [anBtn]));
+      anBtn.className = tv() ? "btn line" : "btn";
+      tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an());
+    };
+    root.append(scroll, el("div", { class: "composer" }, bar));
     async function animate() {
       if (!an()) { offTap("an", "Оживить фото"); return; }
       if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
@@ -2104,7 +2113,7 @@
     th.redraw();
     return {
       root, th, redraw: th.redraw,
-      sub: () => (tv() || an() || S.me.panel ? "ролики с вами и ожившие фото" : "пока не включено"),
+      sub: () => (tv() ? "ролики с вами и ожившие фото" : an() || S.me.panel ? "ожившие фото" : "пока не включено"),
       buttons: () => (S.msgs.video.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.video.length) { toast("Здесь пока пусто"); return; }
         if (!(await confirmBox("Удалить все ролики из списка?", "Очистить", true))) return;

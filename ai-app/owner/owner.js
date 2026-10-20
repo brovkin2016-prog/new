@@ -415,17 +415,30 @@
         if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Вернуть как было", onclick: () => undo(d) }));
       }
       if (acts.childNodes.length) scroll.append(acts);
+      // who answers here: the free models, or Claude itself on the owner's key (half the month's cap; the rest is the console's)
+      const pick = async (body) => {
+        const end = await panel(body);
+        if (end.t === "done") { cache.claude = end; draw(); } else toast("⚠️ " + end.text, 7000);
+      };
+      const money = ` · $${(d.spent || 0).toFixed(2)} из $${Number(d.cap || 0).toFixed(2)} в месяц (половина предела $${d.month_cap || 20}; вторая — для спасательной консоли)`;
+      const chip = (on, text, body) => el("button", { class: "chip" + (on ? " on" : ""), text, onclick: () => { if (!on) pick(body); } });
+      const engineRow = d.paid_key ? el("div", { class: "chips", style: "margin:0 0 6px" },
+        chip(!d.on_claude, "🆓 Бесплатные", { op: "agent_engine", engine: "free" }),
+        chip(!!d.on_claude, "🟠 Claude", { op: "agent_engine", engine: "claude" })) : null;
+      const modelRow = d.paid_key && d.on_claude ? el("div", { class: "chips", style: "margin:0 0 6px" },
+        chip((d.model || "auto") === "auto", "Авто", { op: "agent_model", model: "auto" }),
+        ...(d.models || []).map((m) => chip(d.model === m.id, m.name, { op: "agent_model", model: m.id }))) : null;
       scroll.append(el("div", { style: "font-size:12px;color:var(--muted);margin:0 4px 12px" },
-        "Модели: " + (d.engines.length ? d.engines.join(" → ") : "нет ключей — «Ещё» → «🔑 Ключи»"),
-        // when the free models' day is used up: Claude itself on the owner's key from the rescue console
-        el("br"), d.paid_key
-          ? el("a", { href: "#", text: (d.paid ? "💳 Кончились бесплатные — дальше Claude по вашему ключу: вкл" : "💳 Claude по вашему ключу, когда кончились бесплатные: выкл")
-              + ` · $${(d.spent || 0).toFixed(2)} из $${d.cap || 5} в месяц`, onclick: async (e) => {
-              e.preventDefault();
-              const end = await panel({ op: "agent_paid", on: !d.paid });
-              if (end.t === "done") { cache.claude = end; draw(); } else toast("⚠️ " + end.text);
-            } })
-          : el("span", { text: "💳 Когда бесплатные модели кончатся за день, ответит Claude по вашему ключу: ключ Anthropic — «Ещё» → «🔑 Ключи»" })));
+        engineRow || "", modelRow || "",
+        d.paid_key && d.on_claude
+          ? el("span", { text: ((d.model || "auto") === "auto" ? "🟠 Отвечает Claude: Haiku смотрит вопрос и выбирает модель, «Выполнить» — не ниже Sonnet"
+              : "🟠 Все ответы — " + ((d.models || []).find((m) => m.id === d.model) || {}).name) + money })
+          : el("span", {}, "Модели: " + (d.engines.length ? d.engines.join(" → ") : "нет ключей — «Ещё» → «🔑 Ключи»"),
+            // when the free models' day is used up: Claude itself on the owner's key from the rescue console
+            el("br"), d.paid_key
+              ? el("a", { href: "#", text: (d.paid ? "💳 Кончились бесплатные — дальше Claude по вашему ключу: вкл" : "💳 Claude по вашему ключу, когда кончились бесплатные: выкл")
+                  + money, onclick: (e) => { e.preventDefault(); pick({ op: "agent_paid", on: !d.paid }); } })
+              : el("span", { text: "💳 Claude по вашему ключу (когда бесплатные кончатся или по вашему выбору): ключ Anthropic — «Ещё» → «🔑 Ключи»" }))));
       const ta = el("textarea", { rows: 1, placeholder: d.busy ? "Claude работает… можно написать следующее" : "Что проверить или сделать?" });
       ta.value = claude.draft;
       ta.addEventListener("input", () => { claude.draft = ta.value; ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
