@@ -1327,13 +1327,13 @@
         const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"],
           ["obfs", "Маскировка", "Hysteria с маскировкой salamander: если обычный режут, пакеты выглядят как шум. Winger берёт его сам"],
           ["vless", "VLESS", "запасной, когда режут UDP"],
-          ["tg", "Telegram", "Telegram без VPN: iPhone, компьютер, любой телефон (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
+          ["tg", "Telegram", "Только Telegram, без VPN — для iPhone или компьютера без Winger: Telegram сам ходит через этот прокси (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
         const chips = el("div", { class: "chips", style: "margin-bottom:10px" });
         if (u.links.hy2) {  // what to give the person: three ways, each a ready message to send
           box.append(el("div", { style: "font-weight:600;margin:2px 2px 8px", text: "Выдать человеку" }),
-            giveTile("📲", "Программа + VPN", "Winger с подключением внутри: человек скачает и нажмёт одну кнопку. Ссылка на сутки, там же Telegram без VPN.",
-              () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); }),
+            giveTile("📲", "Программа + VPN", "Winger с подключением внутри: человек скачает и нажмёт одну кнопку. Ссылка на сутки.",
+              () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "Winger и VPN — " + u.name); }),
             giveTile("💻", "Ноутбук (Windows)", "Winger для Windows с подключением и мостами внутри — своими, не телефона: они не мешают друг другу. Ссылка на сутки.",
               () => { close(); makeLink({ op: "dl_winapp", name: u.name }, "Winger для Windows — " + u.name); }),
             giveTile("🔗", "Только ссылка VPN", "Если Winger уже стоит: ссылка и QR-код — вставить или отсканировать.", () => { close(); vpnOnly(u); }),
