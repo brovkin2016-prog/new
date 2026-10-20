@@ -1,4 +1,3 @@
-https://docs.byteplus.com/llms.txt
-https://docs.byteplus.com/en/docs/ModelArk/1520757 seedance|content|task|duration|resolution|ratio|image_url|video_url|status|model
-https://docs.byteplus.com/en/docs/ModelArk/1541523 seedream|image|size|sequential|watermark|response_format|b64|model
-https://docs.byteplus.com/en/docs/ModelArk/1330310 seedance|seedream|25[0-9]{4}
+https://docs.viggle.ai/v1/guides/quickstart-image.md
+https://docs.viggle.ai/v1/api-reference/images/create.md (reference|image|prompt|resolution|aspect|seed|model|n\b|202|200|status|id)
+https://docs.viggle.ai/v1/api-reference/images/get.md (status|images|url|error|ready)
