@@ -1,3 +1,4 @@
-https://docs.viggle.ai/v1/api-reference/videos/create-from-character-animation.md Character[0-9]|tags
-https://docs.viggle.ai/v1/guides/quickstart-mix.md
-https://docs.viggle.ai/v1/production/async-jobs.md
+https://docs.byteplus.com/llms.txt
+https://docs.byteplus.com/en/docs/ModelArk/1520757 seedance|content|task|duration|resolution|ratio|image_url|video_url|status|model
+https://docs.byteplus.com/en/docs/ModelArk/1541523 seedream|image|size|sequential|watermark|response_format|b64|model
+https://docs.byteplus.com/en/docs/ModelArk/1330310 seedance|seedream|25[0-9]{4}
