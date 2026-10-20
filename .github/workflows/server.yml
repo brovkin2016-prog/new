@@ -28,5 +28,7 @@ jobs:
           [ "$(openssl pkey -pubin -in ../update-key.pub -outform DER | sha256sum | cut -c1-16)" = "$FP" ] || { echo "not for server/update-key.pub"; exit 1; }
           { jq -r .notes release.json; printf '\nsha256: %s\nfor: %s\n' "$SHA" "$FP"; } > notes.txt
           gh release delete "server-v$V" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "server-v$V" installer.enc key.enc --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+          # installer.sig: the owner's signature of the installer (from v18 the server takes only signed ones)
+          SIG=(); [ -s installer.sig ] && SIG=(installer.sig)
+          gh release create "server-v$V" installer.enc key.enc "${SIG[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
             --title "Сервер v$(( V >= 1000 ? V - 1000 : V ))" --notes-file notes.txt

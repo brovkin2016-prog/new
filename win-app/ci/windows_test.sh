@@ -115,6 +115,17 @@ for _ in $(seq 1 60); do curl -s -b "wt=$T" http://127.0.0.1:47710/api/state | g
 curl -s -b "wt=$T" http://127.0.0.1:47710/api/state | tee -a "$OUT/service.txt" | grep -q '"phase":"on"' || fail "the service did not come on"
 [ "$("$CURL" -s -o NUL -w '%{http_code}' --max-time 30 https://www.mozilla.org/)" = 200 ] || fail "no page through the service's VPN"
 grep -q 'reqAddr.*mozilla\.org' "$OUT/hysteria.log" || fail "the service's VPN did not carry the page"
+# the window as Windows draws it (its fonts, emoji, scroll bars, 100 % and 150 % scale): pictures to look at, no test
+EDGE="/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+if [ -x "$EDGE" ]; then
+  for sc in 1 1.25 1.5; do
+    "$EDGE" --headless=new --disable-gpu --no-first-run --window-size=470,868 --force-device-scale-factor=$sc \
+      --virtual-time-budget=6000 --user-data-dir="$(cygpath -w "$OUT/edge-$sc")" \
+      --screenshot="$(cygpath -w "$OUT/window-$sc.png")" "http://127.0.0.1:47710/?t=$T" > /dev/null 2>&1 || true
+    rm -rf "$OUT/edge-$sc"
+  done
+  ls -la "$OUT"/window-*.png 2>/dev/null || echo "no window pictures"
+fi
 api disconnect '{}'
 cp /c/ProgramData/Winger/journal.log "$OUT/service-journal.log" 2>/dev/null
 "/c/Program Files/Winger/winger.exe" --uninstall
