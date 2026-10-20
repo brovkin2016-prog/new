@@ -135,7 +135,15 @@ echo "service ✓"
 
 step "a double-click, as a person does it: Winger installs itself, then its icon and its window come up"
 sleep 3  # the removed one's own clean-up is finished
-timeout 240 ./winger.exe; echo "double-click: Winger ended with $?"
+# the Winger made for one laptop in «Управление»: the laptop's own VPN line at the program's end (JSON, its length in 8
+# bytes little-endian, «WGRPROF1») — after the install it is the chosen connection and the phone's login (the one the
+# service test above left in the settings) is gone
+OWN='{"v":1,"name":"CI","links":["hysteria2://family-pc:laptop-pass@'"$IP"':4443/?sni=vpn.test.local&insecure=1#CI-laptop"]}'
+N=${#OWN}
+cp winger.exe winger-own.exe
+printf '%s' "$OWN" >> winger-own.exe
+printf "$(printf '\\%03o\\%03o' $((N & 255)) $((N >> 8 & 255)))\\0\\0\\0\\0\\0\\0WGRPROF1" >> winger-own.exe
+timeout 240 ./winger-own.exe; echo "double-click: Winger ended with $?"
 cat > procs.ps1 <<'EOT'
 Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'winger.exe','msedge.exe' } | ForEach-Object { $_.CommandLine }
 EOT
@@ -144,6 +152,11 @@ echo "$P" | grep -i winger | head -5 > "$OUT/double-click.txt"
 sc query Winger | tee -a "$OUT/double-click.txt" | grep -q RUNNING || fail "after a double-click the service does not run"
 echo "$P" | grep -q -- "--tray" || fail "after a double-click there is no icon by the clock"
 echo "$P" | grep -q -- "--app=http://127.0.0.1:47710/?t=" || fail "after a double-click Winger's window did not open"
+T=$(cat /c/ProgramData/Winger/ui-token)
+curl -s -b "wt=$T" http://127.0.0.1:47710/api/state | tee "$OUT/own-line.txt" | grep -q '"name":"CI-laptop"' \
+  || fail "the laptop's own line built into Winger was not taken"
+grep -q '"name":"CI"' "$OUT/own-line.txt" && fail "the phone's login stayed next to the laptop's own line"
+grep -q 'own VPN line built into this Winger: taken' /c/ProgramData/Winger/journal.log || fail "the journal does not say the line was taken"
 # the real window on this computer's screen (a small one: it has to fit), as a person sees it: a picture, no test
 sleep 8
 cat > shot.ps1 <<'EOT'

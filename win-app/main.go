@@ -62,6 +62,7 @@ func serve(tun bool, stop <-chan struct{}) error {
 	}
 	endLeftRelays()
 	st := OpenStore(dir)
+	takeOwnLine(st)
 	relay, err := relayPath(dir)
 	if err != nil {
 		Logf("bridge program: %v", err)

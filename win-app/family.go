@@ -240,7 +240,7 @@ func (f *Family) CheckUpdate() {
 	}
 	host, _ := f.st.HomeHost()
 	if host == "" {
-		said("failed: новые версии приходят с семейного сервера, а его ссылки в Winger нет")
+		said("failed: сначала добавьте подключение — новые версии Winger приходят с вашего сервера по нему")
 		return
 	}
 	c := client(f.eng.ProbePort(), 30*time.Second)

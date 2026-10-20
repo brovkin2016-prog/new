@@ -27,11 +27,13 @@ type Settings struct {
 	Speeds map[string]string `json:"speeds,omitempty"`
 	// the last response time of each connection: «⏱ отклик 85 мс · 15:03» (a bridge's: when it was last on)
 	Pings map[string]string `json:"pings,omitempty"`
-	// this computer's login is the server owner's: «🛟 Спасение сервера» (kept, so it is there when the server's app broke)
+	// this computer's login is the server owner's: «🆘 Спасение сервера» (kept, so it is there when the server's app broke)
 	Owner bool `json:"owner,omitempty"`
 	// the calls of this laptop's own bridges, as the server last gave them (platform|call): one call carries one
 	// device, so a bridge outside them (the phone's) is never gone to by itself — only by a tap on it
 	LaptopCalls []string `json:"laptopCalls,omitempty"`
+	// the fingerprint of the laptop's own line built into this Winger, once taken (embedded.go)
+	Embedded string `json:"embedded,omitempty"`
 }
 
 // Store keeps the settings in a file in Winger's data folder.

@@ -86,7 +86,8 @@
         list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
           el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
           el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
-            el("small", { text: (u.online ? "в сети" : "не в сети") + (u.until ? " · ⏰ гость до " + when(u.until) : "") + (u.bridge ? " · 🌉 мост" : "") })),
+            el("small", { text: (u.online ? "в сети" : "не в сети") + (u.laptop ? (u.laptop.online ? " · 💻 в сети" : " · 💻") : "")
+              + (u.until ? " · ⏰ гость до " + when(u.until) : "") + (u.bridge ? " · 🌉 мост" : "") })),
           u.owner ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delVpn(u.name); } }),
           "›"));
       }
@@ -1321,7 +1322,8 @@
       sheet("👤 " + u.name + (u.owner ? " 👑" : ""), (box, close) => {
         box.append(el("div", { style: "color:var(--muted);font-size:14px;margin:-6px 0 10px",
           text: (u.online ? `🟢 в сети, подключений: ${u.online}` : "⚪ не в сети") + ` · ↓${bytes(u.tx)} ↑${bytes(u.rx)} с перезапуска VPN`
-            + (u.until ? ` · ⏰ гость до ${when(u.until)}, потом выключится сам` : "") }));
+            + (u.until ? ` · ⏰ гость до ${when(u.until)}, потом выключится сам` : "")
+            + (u.laptop ? ` · 💻 ноутбук: ${u.laptop.online ? "в сети" : "не в сети"}, ↓${bytes(u.laptop.tx)} ↑${bytes(u.laptop.rx)}` : "") }));
         const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"],
           ["obfs", "Маскировка", "Hysteria с маскировкой salamander: если обычный режут, пакеты выглядят как шум. Winger берёт его сам"],
           ["vless", "VLESS", "запасной, когда режут UDP"],
@@ -1332,6 +1334,8 @@
           box.append(el("div", { style: "font-weight:600;margin:2px 2px 8px", text: "Выдать человеку" }),
             giveTile("📲", "Программа + VPN", "Winger с подключением внутри: человек скачает и нажмёт одну кнопку. Ссылка на сутки, там же Telegram без VPN.",
               () => { close(); makeLink({ op: "dl_vpnlink", name: u.name }, "VPN и Telegram — " + u.name); }),
+            giveTile("💻", "Ноутбук (Windows)", "Winger для Windows с подключением и мостами внутри — своими, не телефона: они не мешают друг другу. Ссылка на сутки.",
+              () => { close(); makeLink({ op: "dl_winapp", name: u.name }, "Winger для Windows — " + u.name); }),
             giveTile("🔗", "Только ссылка VPN", "Если Winger уже стоит: ссылка и QR-код — вставить или отсканировать.", () => { close(); vpnOnly(u); }),
             u.owner ? "" : giveTile("🌉", "Мост", "На дни, когда интернет пускает только разрешённые сайты: выберите, какой.",
               () => { close(); bridgePick(u); }, !u.can_bridge && !(u.bridges || []).length ? "Сначала поднимите свой мост: «🖥 Сервер» → «🌉 Мосты»." : ""));
