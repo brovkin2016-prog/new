@@ -224,13 +224,13 @@ public class MainActivity extends Activity implements State.Listener {
         appsName = label("", 13, muted, false);
         appsName.setSingleLine(true);
         appsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        appsName.setMaxWidth(dp(150));
+        appsName.setMaxWidth(dp(120));  // «Через сервер» stays on one line on a narrow phone
         appsCard = setting("🧩", "Через сервер", appsName, v -> chooseApps(false));
         addTo(settings, appsCard);
         bridgeAppsName = label("", 13, muted, false);
         bridgeAppsName.setSingleLine(true);
         bridgeAppsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        bridgeAppsName.setMaxWidth(dp(150));
+        bridgeAppsName.setMaxWidth(dp(120));  // «Через сервер» stays on one line on a narrow phone
         bridgeAppsCard = setting("🌉", "Через мост", bridgeAppsName, v -> chooseApps(true));
         addTo(settings, bridgeAppsCard);
         addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
