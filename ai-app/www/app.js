@@ -2288,7 +2288,8 @@
     function draw() {
       const me = S.me;
       scroll.innerHTML = "";
-      scroll.append(el("div", { class: "card" },
+      // the owner's «Ещё» is for work: no translator, reminders or memory (the family keeps them)
+      if (!me.panel) scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: translator },
           el("span", { style: "font-size:24px", text: "🗣️" }),
           el("div", { class: "grow" }, "Переводчик", el("small", { text: "Скажите фразу — переведу и прочитаю вслух" })),
@@ -2304,17 +2305,16 @@
           el("span", { style: "font-size:24px", text: "📱" }),
           el("div", { class: "grow" }, "Мои приложения", el("small", { text: "Их пишет Claude в «Управлении» по вашей просьбе" })),
           el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
-      if (Native && Native.reminders) scroll.append(remindersCard(draw));
+      if (!me.panel && Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
-      for (const [k, v] of Object.entries(me.modes).filter(([k]) => me.panel || k !== "coder" || k === me.mode)) {
-        modeSel.append(el("option", { value: k, text: v, selected: k === me.mode }));
-      }
+      for (const [k, v] of Object.entries(me.modes)) modeSel.append(el("option", { value: k, text: v, selected: k === me.mode }));
       const card = el("div", { class: "card" }, el("h3", { text: "Общение" }),
         el("div", { class: "row" }, el("div", { class: "grow" }, "Как отвечать в чате"), modeSel));
       if (me.panel && Object.keys(me.models || {}).length > 2) {  // the models: the owner's business
         const modelSel = el("select", { "aria-label": "Модель", onchange: () => setPref({ model: modelSel.value }) });
         for (const [k, v] of Object.entries(me.models)) modelSel.append(el("option", { value: k, text: v, selected: k === me.model }));
-        card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Модель", el("small", { text: "Авто — самая умная из доступных" })), modelSel));
+        card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Модель",
+          el("small", { text: me.models.claude ? "Авто — сначала Claude, потом остальные" : "Авто — самая умная из доступных" })), modelSel));
       }
       if (me.can.speak) {
         card.append(el("div", { class: "row" }, el("div", { class: "grow" }, "Отвечать голосом",
@@ -2345,7 +2345,7 @@
         const t = await ask("Что запомнить?", "Например: у меня двое детей, младшему 7 лет");
         if (t) { const r = await api("/api/memory", { add: t }).catch((e) => toast(problem(e))); if (r) { S.me.memory = r.memory; draw(); } }
       } }));
-      scroll.append(mem);
+      if (!me.panel) scroll.append(mem);
       const theme = el("select", { "aria-label": "Тема", onchange: () => { store.set("theme", theme.value); applyTheme(); } });
       for (const [k, v] of Object.entries(THEMES)) theme.append(el("option", { value: k, text: v, selected: k === store.get("theme", "system") }));
       const appCard = el("div", { class: "card" }, el("h3", { text: "Приложение" }),

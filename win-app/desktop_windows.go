@@ -46,8 +46,10 @@ func uiAnswers() bool {
 	return true
 }
 
-// openWindow: Winger's window — Edge as an app (no address bar), with a profile of its own; the usual browser when
-// there is no Edge. The first start of the service takes a while (the antivirus looks at its new files): waited for.
+// openWindow: Winger's window — Edge as an app (no address bar), with a profile of its own; on a computer without the
+// new Edge (an old Windows) Chrome or Yandex Browser the same way; the usual browser only when there is none of them (an
+// old Internet Explorer cannot draw the window). The first start of the service takes a while (the antivirus looks at
+// its new files): waited for.
 func openWindow() error {
 	for i := 0; i < 180 && !uiAnswers(); i++ {
 		time.Sleep(500 * time.Millisecond)
@@ -61,7 +63,11 @@ func openWindow() error {
 	profile := filepath.Join(os.Getenv("LOCALAPPDATA"), "Winger", "window")
 	for _, p := range []string{os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
 		os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
-		os.Getenv("LOCALAPPDATA") + `\Microsoft\Edge\Application\msedge.exe`} {
+		os.Getenv("LOCALAPPDATA") + `\Microsoft\Edge\Application\msedge.exe`,
+		os.Getenv("ProgramFiles") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("ProgramFiles(x86)") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("LOCALAPPDATA") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("LOCALAPPDATA") + `\Yandex\YandexBrowser\Application\browser.exe`} {
 		if _, err := os.Stat(p); err == nil {
 			if exec.Command(p, "--app="+url, "--window-size=470,900", "--user-data-dir="+profile,
 				"--no-first-run", "--no-default-browser-check", "--disable-features=Translate").Start() == nil {
