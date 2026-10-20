@@ -181,3 +181,50 @@ func TestLookupFallsBack(t *testing.T) {
 	}
 	t.Logf("the second DNS answered after %s", time.Since(t0).Round(time.Millisecond))
 }
+
+// the server's side of the bridge silent: the tunnel unanswered twice within 5 minutes, or a call error («organizer
+// not in the room») — the family server is told (OnStuck), once for each; a single unanswered moment is not enough
+func TestRelayStuckTold(t *testing.T) {
+	journalIn(t)
+	var mu sync.Mutex
+	var told []string
+	OnStuck = func(platform, why string) { mu.Lock(); told = append(told, platform+"|"+why); mu.Unlock() }
+	t.Cleanup(func() { OnStuck = nil })
+	got := func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), told...) }
+	path := fakeRelay(t, `echo "STATUS:READY"
+read join
+echo "STATUS:TUNNEL_CONNECTED"
+echo "2026/10/20 06:28:07 telemost-joiner: the creator has not answered the reliable tunnel for 22s, reconnecting as a new joiner"
+sleep 0.5
+echo "2026/10/20 06:28:30 telemost-joiner: the creator has not answered the reliable tunnel for 22s, reconnecting as a new joiner"
+sleep 30
+`)
+	r, err := StartRelay(path, &Profile{Bridge: true, Platform: "telemost", Link: "winger-bridge://telemost?link=x"}, "", FreePort(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := len(got()); n != 0 {
+		t.Fatalf("told after one unanswered moment: %v", got())
+	}
+	time.Sleep(time.Second)
+	if g := got(); len(g) != 1 || g[0] != "telemost|the server's side does not answer the tunnel" {
+		t.Fatalf("the second unanswered moment not told: %v", g)
+	}
+	r.Stop()
+	<-r.ended
+	errRelay := fakeRelay(t, `echo "STATUS:READY"
+read join
+echo "STATUS:ERROR:join as guest: tryJoinCall: no active call at chat16, organizer not in the room"
+sleep 30
+`)
+	r, err = StartRelay(errRelay, &Profile{Bridge: true, Platform: "bitrix", Link: "winger-bridge://bitrix?link=x"}, "", FreePort(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-r.ended
+	time.Sleep(200 * time.Millisecond)
+	if g := got(); len(g) != 2 || !strings.HasPrefix(g[1], "bitrix|ERROR:join as guest") {
+		t.Fatalf("a call error not told: %v", g)
+	}
+}

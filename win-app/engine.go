@@ -404,6 +404,10 @@ func (e *Engine) start(g int, p *Profile, tunnel string) error {
 	}
 	if p.Bridge {
 		Logf("bridge: in the call, but nothing comes back through it")
+		if e.fam != nil {
+			go e.fam.Stuck(p.Platform, "in the call, nothing comes back") // the server restarts its side; the next try may work
+			go e.fam.SendJournal(true)
+		}
 		if e.fam != nil && e.fam.SyncBridges(0) > 0 { // the server gave a new call: tried at once
 			for _, x := range e.st.Profiles() {
 				if x.Bridge && x.Platform == p.Platform && x.DualTrack == p.DualTrack && x.Link != p.Link {

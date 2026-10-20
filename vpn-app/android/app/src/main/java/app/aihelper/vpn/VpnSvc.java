@@ -363,8 +363,14 @@ public final class VpnSvc extends VpnService {
             if (now - lastPing >= 20_000) {
                 lastPing = now;
                 ping();
-                Diag.i(this, "traffic down " + State.down + " up " + State.up + ", now " + Math.round(State.downRate / 1024)
-                        + "/" + Math.round(State.upRate / 1024) + " KB/s" + (profile.bridge ? " (bridge)" : ""));
+                long kbDown = Math.round(State.downRate / 1024), kbUp = Math.round(State.upRate / 1024);
+                // a quiet line every 20 s filled the journal (a day of it is what the server keeps): written when
+                // something goes through, else every 5 minutes
+                if (kbDown + kbUp > 0 || now - lastTrafficLog >= 5 * 60_000L) {
+                    lastTrafficLog = now;
+                    Diag.i(this, "traffic down " + State.down + " up " + State.up + ", now " + kbDown + "/" + kbUp + " KB/s"
+                            + (profile.bridge ? " (bridge)" : ""));
+                }
                 Diag.upload(this, false);  // now and then the journal goes to the family server
                 Updater.background(this, profile.bridge);  // a newer Winger: fetched now and then, put in while the screen is off
                 BridgeCheck.poll(this);  // the family server's Claude may want the bridges checked from this phone (the owner's)
@@ -611,7 +617,7 @@ public final class VpnSvc extends VpnService {
             }
             own[0] = proc;
             CountDownLatch up = connected;
-            new Thread(() -> readBridge(proc, up, join, me), "bridge-log").start();
+            new Thread(() -> readBridge(proc, up, join, me, p), "bridge-log").start();
             long deadline = SystemClock.elapsedRealtime() + 90_000;
             while (!up.await(1, TimeUnit.SECONDS)) {  // a VK check («I am not a robot») gets five minutes for the person
                 if (captchaAt > 0) deadline = Math.max(deadline, captchaAt + 300_000);
@@ -632,6 +638,7 @@ public final class VpnSvc extends VpnService {
             if (!mine()) return "";
             Diag.i(this, "bridge: in the call, but nothing comes back through it (the server's side of the bridge is not there?)");
             noData = true;
+            BridgeSync.stuck(this, p, "in the call, nothing comes back");  // the server restarts its side; the next try may work
             Diag.upload(this, true, true);  // the journal goes now, past the bridge
             if (BridgeSync.refreshNow(this)) {
                 Profile fresh = null;  // this service's bridge as the server has it now
@@ -668,9 +675,10 @@ public final class VpnSvc extends VpnService {
         }
     }
 
-    private void readBridge(Process proc, CountDownLatch up, String join, Thread owner) {
+    private void readBridge(Process proc, CountDownLatch up, String join, Thread owner, Profile p) {
         int[] n = new int[3];  // connections asked for, opened, given no answer by the far side
         long[] since = {SystemClock.elapsedRealtime()};
+        long[] silent = {0};  // when the server's side last left the tunnel unanswered (the relay rejoins then)
         try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
              Writer w = new OutputStreamWriter(proc.getOutputStream(), StandardCharsets.UTF_8)) {
             for (String line; (line = r.readLine()) != null; ) {
@@ -721,10 +729,16 @@ public final class VpnSvc extends VpnService {
                         lastError = st.toLowerCase().contains("not found") || st.contains("404")
                                 ? "Звонок моста не найден: попросите на сервере новую ссылку моста."
                                 : "Мост не подключился к звонку (" + service(profile) + ").";
+                        BridgeSync.stuck(this, p, st);  // («organizer not in the room»: the server's side is not in its call)
                         proc.destroy();  // a new try from the start
                     }
                 } else {
                     Diag.i(this, "relay: " + line);
+                    if (line.contains("has not answered the reliable tunnel")) {
+                        long now = SystemClock.elapsedRealtime();
+                        if (silent[0] > 0 && now - silent[0] < 5 * 60_000L) BridgeSync.stuck(this, p, "the server's side does not answer the tunnel");
+                        silent[0] = now;
+                    }
                 }
             }
         } catch (Exception ignored) {
@@ -934,6 +948,9 @@ public final class VpnSvc extends VpnService {
         }
     }
 
+    private long lastTrafficLog, lastPingLogAt;
+    private int lastPingLogged;
+
     /** The response time through the tunnel: the best of two quick requests; 0 when nothing came back. */
     private void ping() {
         int best = 0;
@@ -945,7 +962,12 @@ public final class VpnSvc extends VpnService {
         State.pingAt = System.currentTimeMillis();
         Profile p = profile;
         if (p != null) Speed.savePing(this, p, best);  // its row keeps it, also once another connection is in use
-        Diag.i(this, best > 0 ? "ping " + best + " ms" : "ping failed");
+        long now = SystemClock.elapsedRealtime();  // a steady one every 5 minutes; a change (half as much again) at once
+        if (best == 0 || lastPingLogged == 0 || Math.abs(best - lastPingLogged) * 2 > lastPingLogged || now - lastPingLogAt >= 5 * 60_000L) {
+            lastPingLogged = best;
+            lastPingLogAt = now;
+            Diag.i(this, best > 0 ? "ping " + best + " ms" : "ping failed");
+        }
         State.fire();
         update();
     }

@@ -24,6 +24,8 @@ type Family struct {
 	mu        sync.Mutex
 	Update    UpdateInfo
 	preparing bool
+	stuckAt   map[string]time.Time // a service's bridge last said to be stuck (Stuck)
+	journalAt time.Time            // the journal last sent
 }
 
 // UpdateInfo is the newest Winger for Windows the family server has.
@@ -318,6 +320,63 @@ func (f *Family) download(c *http.Client, url, want string) (string, error) {
 	return path, nil
 }
 
+// Stuck tells the family server this laptop's bridge of a service is in its call but the server's side does not answer:
+// the server restarts that bridge's own program (its call is kept, so the link stays). Past the VPN first (the bridge is
+// what does not work), then through it; at most once in 10 minutes for a service (the server keeps the same limit).
+func (f *Family) Stuck(platform, why string) {
+	f.mu.Lock()
+	if f.stuckAt == nil {
+		f.stuckAt = map[string]time.Time{}
+	}
+	if t, ok := f.stuckAt[platform]; ok && time.Since(t) < 10*time.Minute {
+		f.mu.Unlock()
+		return
+	}
+	f.stuckAt[platform] = time.Now()
+	f.mu.Unlock()
+	host, auth := f.st.HomeHost()
+	if host == "" || auth == "" {
+		return
+	}
+	if len(why) > 160 {
+		why = why[:160]
+	}
+	b, _ := json.Marshal(map[string]string{"auth": auth, "device": "laptop", "platform": platform, "why": Mask(why)})
+	for _, port := range []int{0, f.eng.ProbePort()} {
+		r, err := client(port, 25*time.Second).Post("https://"+host+":8443/api/winger_stuck", "application/json", bytes.NewReader(b))
+		if err != nil {
+			Logf("bridge %s: telling the server it is stuck: %v", platform, err)
+			continue
+		}
+		said, _ := io.ReadAll(io.LimitReader(r.Body, 512))
+		r.Body.Close()
+		Logf("bridge %s: the server was told it is stuck (%s) — %d %s", platform, why, r.StatusCode, strings.TrimSpace(string(said)))
+		return
+	}
+}
+
+// SendJournal sends the newest part of this laptop's journal to the family server (now, or at most every half hour): it
+// keeps it apart from the phone's, days of it, only from the owner's own laptop line; nothing secret is in it (masked).
+func (f *Family) SendJournal(now bool) {
+	f.mu.Lock()
+	if !now && time.Since(f.journalAt) < 30*time.Minute {
+		f.mu.Unlock()
+		return
+	}
+	f.journalAt = time.Now()
+	f.mu.Unlock()
+	_, auth := f.st.HomeHost()
+	text := JournalTail(96 << 10)
+	if auth == "" || text == "" {
+		return
+	}
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	f.post("/api/winger_log", map[string]string{"auth": auth, "log": text, "kind": "laptop", "device": "Windows",
+		"app": versionName}, &out)
+}
+
 // Loop: a minute after the start, then every hour; the bridges every 20 minutes while there is none yet (as the phone),
 // every 5 while the server makes the laptop's own.
 func (f *Family) Loop() {
@@ -336,6 +395,7 @@ func (f *Family) Loop() {
 			lastBridges = time.Now()
 			f.SyncBridges(0)
 		}
+		f.SendJournal(false)
 		time.Sleep(5 * time.Minute)
 	}
 }

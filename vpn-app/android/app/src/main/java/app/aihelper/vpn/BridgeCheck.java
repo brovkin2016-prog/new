@@ -271,7 +271,11 @@ final class BridgeCheck {
             o.put("join_ms", SystemClock.elapsedRealtime() - t0);
             if (!in) {
                 o.put("result", captcha[0] ? "captcha" : why[0] != null ? "error" : !alive(proc) ? "stopped" : "no_join");
-                if (why[0] != null) o.put("error", cut(why[0]));
+                if (why[0] != null) {
+                    o.put("error", cut(why[0]));
+                    BridgeSync.stuck(c, p, "check: " + why[0]);  // the call has nobody to take it: the server's side restarted
+                    o.put("restarting", true);
+                }
                 return o;
             }
             int best = 0;
@@ -279,7 +283,10 @@ final class BridgeCheck {
                 int ms = Speed.probe(socks, 10_000);
                 if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
             }
-            if (best == 0) return o.put("result", "no_data");
+            if (best == 0) {
+                BridgeSync.stuck(c, p, "check: in the call, nothing comes back");  // the server's side restarted
+                return o.put("result", "no_data").put("restarting", true);
+            }
             double[] s = Speed.download(socks);
             o.put("result", "ok").put("ping_ms", best).put("mbps", Math.round(s[0] * 10) / 10.0).put("first_byte_ms", Math.round(s[1]));
             if (carrier[0] != null) carrier[0].destroy();
@@ -501,6 +508,8 @@ final class BridgeCheck {
         return b.toString().trim();
     }
 
+    private static final String RESTARTING = " (сервер перезапускает этот мост — проверьте ещё раз через минуту)";
+
     private static String line(JSONObject o) {
         String n = "«" + o.optString("name") + "»";
         switch (o.optString("result")) {
@@ -511,11 +520,11 @@ final class BridgeCheck {
             case "captcha":
                 return "⚠️ " + n + " — VK просит «я не робот»: пройдите её, подключившись к мосту";
             case "no_data":
-                return "❌ " + n + " — в звонке, но данные не идут";
+                return "❌ " + n + " — в звонке, но данные не идут" + (o.optBoolean("restarting") ? RESTARTING : "");
             case "no_join":
                 return "❌ " + n + " — не вошёл в звонок";
             case "error":
-                return "❌ " + n + " — ошибка звонка";
+                return "❌ " + n + " — ошибка звонка" + (o.optBoolean("restarting") ? RESTARTING : "");
             default:
                 return "❌ " + n + " — не запустился";
         }

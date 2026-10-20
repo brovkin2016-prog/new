@@ -70,6 +70,7 @@ func serve(tun bool, stop <-chan struct{}) error {
 	eng := NewEngine(st, dir, relay, straight(), tun)
 	fam := &Family{st: st, eng: eng, dataDir: dir}
 	eng.fam = fam
+	OnStuck = fam.Stuck
 	go fam.Loop()
 	if st.Get().KeepOn {
 		_ = eng.Connect()

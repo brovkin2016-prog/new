@@ -23,6 +23,19 @@ type Relay struct {
 	mu        sync.Mutex
 	err       string
 	captchaAt time.Time // when VK last asked for a person
+	platform  string    // the bridge's service (telemost, wbstream, dion, bitrix, vk)
+	silentAt  time.Time // when the server's side last left the tunnel unanswered (the relay rejoins then)
+}
+
+// OnStuck: the bridge is in its call but the server's side of it does not answer (a call error such as «organizer not
+// in the room», or the tunnel left unanswered twice within 5 minutes) — the family server is told, it restarts that
+// bridge's own program there (set by the family client; nil in the tests).
+var OnStuck func(platform, why string)
+
+func (r *Relay) stuck(why string) {
+	if f := OnStuck; f != nil {
+		go f(r.platform, why)
+	}
 }
 
 // StartRelay runs the relay for this bridge; tunnel: "dc" or "video" for WB Stream and Bitrix24. onLink: the call lost
@@ -46,7 +59,7 @@ func StartRelay(path string, p *Profile, tunnel string, socksPort int, home stri
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	r := &Relay{cmd: cmd, connected: make(chan struct{}), ended: make(chan struct{})}
+	r := &Relay{cmd: cmd, connected: make(chan struct{}), ended: make(chan struct{}), platform: p.Platform}
 	ownChild(cmd.Process)
 	go r.read(stdout, stdin, join, onLink)
 	go func() {
@@ -132,10 +145,20 @@ func (r *Relay) read(out io.Reader, in io.Writer, join string, onLink func(up bo
 				} else {
 					r.setErr("Мост не подключился к звонку.")
 				}
+				r.stuck(st) // («organizer not in the room»: the server's side is not in its call)
 				r.Stop()
 			}
 		default:
 			Logf("relay: %s", line)
+			if strings.Contains(line, "has not answered the reliable tunnel") {
+				r.mu.Lock()
+				again := !r.silentAt.IsZero() && time.Since(r.silentAt) < 5*time.Minute
+				r.silentAt = time.Now()
+				r.mu.Unlock()
+				if again {
+					r.stuck("the server's side does not answer the tunnel")
+				}
+			}
 		}
 	}
 }

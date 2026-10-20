@@ -150,6 +150,50 @@ final class BridgeSync {
         }
     }
 
+    private static final java.util.Map<String, Long> stuckAt = new java.util.HashMap<>();  // service → when last said
+
+    /**
+     * The bridge got into its call but the server's side of it does not answer (nothing comes back, the call has nobody
+     * to take it): the family server is told, and it restarts that bridge's own program there — the call is kept, so
+     * the link stays and the next try may simply work. In the background, past the VPN first (the bridge is what does
+     * not work), at most once in 10 minutes for a service (the server keeps the same limit).
+     */
+    static void stuck(Context ctx, Profile p, String why) {
+        Context c = ctx.getApplicationContext();
+        String plat = p.platformOrDefault();
+        synchronized (stuckAt) {
+            Long at = stuckAt.get(plat);
+            if (at != null && System.currentTimeMillis() - at < 600_000L) return;
+            stuckAt.put(plat, System.currentTimeMillis());
+        }
+        String host = Profile.homeHost(c), auth = ownLogin(c, host);
+        if (auth == null) return;
+        String reason = why == null ? "" : why.length() > 160 ? why.substring(0, 160) : why;
+        new Thread(() -> {
+            for (boolean direct : new boolean[] {true, false}) {
+                try {
+                    HttpURLConnection h = Updater.open("https://" + host + ":8443/api/winger_stuck", direct);
+                    h.setConnectTimeout(10_000);
+                    h.setReadTimeout(20_000);
+                    h.setRequestMethod("POST");
+                    h.setDoOutput(true);
+                    h.setRequestProperty("Content-Type", "application/json");
+                    try (OutputStream o = h.getOutputStream()) {
+                        o.write(new JSONObject().put("auth", auth).put("platform", plat).put("why", Diag.mask(reason))
+                                .toString().getBytes(StandardCharsets.UTF_8));
+                    }
+                    int code = h.getResponseCode();
+                    String said = code == 200 ? read(h.getInputStream()) : "";
+                    h.disconnect();
+                    Diag.i(c, "bridge " + plat + ": the server was told it is stuck (" + why + ") — " + code + " " + said);
+                    return;
+                } catch (Exception e) {
+                    Diag.i(c, "bridge " + plat + ": telling the server it is stuck" + (direct ? " (direct)" : "") + ": " + e);
+                }
+            }
+        }, "bridge-stuck").start();
+    }
+
     /** The VPN login this phone has on the family server (name:key from its hysteria2:// link), or null. */
     static String ownLogin(Context c, String host) {
         if (host == null) return null;
