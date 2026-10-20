@@ -95,19 +95,18 @@ func startTray() {
 
 // api: the tray's own call to the service (with the window's key)
 func api(path string) ([]byte, error) {
-	req, _ := http.NewRequest(http.MethodPost, uiURL()+"/api/"+path, strings.NewReader("{}"))
-	if path == "state" {
-		req.Method, req.Body = http.MethodGet, nil
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: "wt", Value: token()})
+	req := uiRequest(uiURL(), path, token())
 	c := &http.Client{Timeout: map[bool]time.Duration{true: 60 * time.Second, false: 5 * time.Second}[path == "rescue"]}
 	r, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Body.Close()
-	return io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err == nil && r.StatusCode != http.StatusOK {
+		err = errStr(r.Status)
+	}
+	return b, err
 }
 
 var captchaInState = regexp.MustCompile(`"captcha":"(http://127\.0\.0\.1:[0-9]{2,5}/)"`)
@@ -242,9 +241,10 @@ func runTray() error {
 				case <-open.ClickedCh:
 					_ = openWindow()
 				case <-toggle.ClickedCh:
-					if b, _ := api("state"); strings.Contains(string(b), `"phase":"off"`) {
+					// (the service not answering: nothing is switched — once every click here went «off»)
+					if b, err := api("state"); err == nil && strings.Contains(string(b), `"phase":"off"`) {
 						_, _ = api("connect")
-					} else {
+					} else if err == nil {
 						_, _ = api("disconnect")
 					}
 				case <-other.ClickedCh:

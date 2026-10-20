@@ -261,6 +261,20 @@ func API(eng *Engine, fam *Family, st *Store, token string) http.Handler {
 	return guard(mux, files, token)
 }
 
+// uiRequest: the tray's and --replace's own call to the window's API with its key — «state» a plain GET, the rest a
+// JSON POST of «{}».
+func uiRequest(base, path, token string) *http.Request {
+	var req *http.Request
+	if path == "state" {
+		req, _ = http.NewRequest(http.MethodGet, base+"/api/state", nil)
+	} else {
+		req, _ = http.NewRequest(http.MethodPost, base+"/api/"+path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.AddCookie(&http.Cookie{Name: "wt", Value: token})
+	return req
+}
+
 // guard: only this computer's own window (its key in a cookie), only by the address it was opened at.
 func guard(api http.Handler, files http.Handler, token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

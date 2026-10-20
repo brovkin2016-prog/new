@@ -206,3 +206,31 @@ func TestUpdateBadVersionAndStuck(t *testing.T) {
 	f.CheckUpdate(true)
 	waitState(t, f, "failed: обновление ставится только на Windows")
 }
+
+// the tray's and --replace's own calls get through the window's guard: «state» as a GET (it once could not be sent at
+// all — a body length with no body — so the icon always said «off» and its «Включить VPN» switched the VPN off)
+func TestUIRequestPassesTheGuard(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"version":"x","method":%q}`, r.Method)
+	})
+	mux.HandleFunc("/api/connect", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"ok":true}`) })
+	srv := httptest.NewServer(guard(mux, http.NotFoundHandler(), "k3y"))
+	t.Cleanup(srv.Close)
+	base := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
+	for path, want := range map[string]string{"state": `"method":"GET"`, "connect": `"ok":true`} {
+		r, err := http.DefaultClient.Do(uiRequest(base, path, "k3y"))
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		b := make([]byte, 200)
+		n, _ := r.Body.Read(b)
+		r.Body.Close()
+		if r.StatusCode != 200 || !strings.Contains(string(b[:n]), want) {
+			t.Fatalf("%s: %d %s", path, r.StatusCode, b[:n])
+		}
+	}
+	if r, err := http.DefaultClient.Do(uiRequest(base, "state", "wrong")); err != nil || r.StatusCode != 403 {
+		t.Fatalf("a wrong key got in: %v %v", r, err)
+	}
+}

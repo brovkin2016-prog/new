@@ -136,8 +136,10 @@ UP1=$((CODE + 1)); UP2=$((CODE + 2))
 state() { curl -s -m 5 -b "wt=$T" http://127.0.0.1:47710/api/state; }
 # (by the program's name: the PowerShell asking has «--tray» in its own command line too)
 trays() { powershell -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { \$_.Name -like 'winger*' -and \$_.CommandLine -like '*--tray*' }).ProcessId" | tr -d '\r' | sort; }
-upfail() { cp /c/ProgramData/Winger/journal.log "$OUT/service-journal.log" 2>/dev/null; note "$OUT/update.txt"; fail "$@"; }
-"/c/Program Files/Winger/winger.exe" --tray &  # the icon by the clock, as after a sign-in (the old program's)
+# (an icon left running would hold this script's output open: the step would hang to its time limit)
+upfail() { cp /c/ProgramData/Winger/journal.log "$OUT/service-journal.log" 2>/dev/null; note "$OUT/update.txt"
+  for p in $(trays); do taskkill /pid "$p" /f > /dev/null 2>&1; done; fail "$@"; }
+"/c/Program Files/Winger/winger.exe" --tray > /dev/null 2>&1 &  # the icon by the clock, as after a sign-in (the old program's)
 sleep 8
 TRAY_OLD=$(trays)
 echo "icon before: $TRAY_OLD" | tee "$OUT/update.txt"
