@@ -790,8 +790,24 @@ public final class VpnSvc extends VpnService {
     }
 
     private void read(Process proc, CountDownLatch up) {
+        long v6Since = 0;
+        int v6 = 0;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
             for (String line; (line = r.readLine()) != null; ) {
+                // a site with an IPv6 address is tried that way first; a server without IPv6 says no at once and the
+                // app goes on by IPv4: one line a minute, not dozens
+                if (line.contains("dial tcp6") && line.contains("network is unreachable")) {
+                    long now = SystemClock.elapsedRealtime();
+                    if (v6 > 0 && now - v6Since < 60_000) {
+                        v6++;
+                        continue;
+                    }
+                    if (v6 > 1) Diag.i(this, "hy: " + (v6 - 1) + " more IPv6 tries in that minute");
+                    Diag.i(this, "hy: a site was asked by IPv6, the server has none: the apps go on by IPv4 (said once a minute)");
+                    v6Since = now;
+                    v6 = 1;
+                    continue;
+                }
                 Diag.i(this, "hy: " + line);
                 if (line.contains("connected to server")) up.countDown();
                 else if (line.contains("FATAL") || line.contains("ERROR")) lastError = plain(line);

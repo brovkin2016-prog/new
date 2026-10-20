@@ -66,6 +66,15 @@ final class WebAssets {
         String path = url.getPath() == null ? "" : url.getPath().replaceFirst("^/+", "");
         if (path.isEmpty()) path = "index.html";
         if (path.contains("..")) return notFound();
+        if (path.startsWith("camera/")) {  // a shot that came back after Android had closed the app (MainActivity.giveShot)
+            File shot = new File(new File(ctx.getCacheDir(), "camera"), path.substring(7));
+            if (!path.matches("camera/photo-[0-9]+\\.jpg") || !shot.isFile()) return notFound();
+            try {
+                return new WebResourceResponse("image/jpeg", null, new FileInputStream(shot));
+            } catch (Exception e) {
+                return notFound();
+            }
+        }
         String ext = path.contains(".") ? path.substring(path.lastIndexOf('.') + 1) : "";
         String mime = TYPES.containsKey(ext) ? TYPES.get(ext) : "application/octet-stream";
         try {

@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
     static final String MINIAPP = "miniapp";  // a mini-app's icon on the home screen: which one to open
     private String miniapp;  // to open once the page is there
     private boolean pageReady;
+    private String shot;  // a camera shot that came back after Android had closed the app: for the new page, once it is there
     private boolean away;  // gone to the camera, the files, the phone's lock or a permission: the page waits for what comes back
 
     @Override
@@ -86,6 +87,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 pageReady = true;
                 openMiniapp();
+                giveShot();
                 if (!BuildConfig.TEST_LOGIN.isEmpty() && !tested) {
                     tested = true;
                     selfTest();
@@ -259,10 +261,11 @@ public class MainActivity extends Activity {
             return;
         }
         if (fileCallback == null) {
-            // the phone closed the app while the camera was open (short of memory): the page that asked is a new one now
-            if (req == REQ_CAMERA && res == RESULT_OK) {
-                Toast.makeText(this, "Снимок не дошёл: телефон закрывал приложение, пока была открыта камера. Снимите ещё раз.",
-                        Toast.LENGTH_LONG).show();
+            // the phone closed the app while the camera was open (short of memory): the page that asked is a new one now;
+            // the shot goes to it (the section it was taken for) as soon as it is there
+            if (req == REQ_CAMERA && res == RESULT_OK && cameraUri != null && cameraUri.getLastPathSegment() != null) {
+                shot = cameraUri.getLastPathSegment();
+                if (pageReady) giveShot();
             }
             cameraUri = null;
             return;
@@ -291,6 +294,19 @@ public class MainActivity extends Activity {
         String id = miniapp;
         miniapp = null;
         web.evaluateJavascript("window.__aiMiniapp && window.__aiMiniapp(" + JSONObject.quote(id) + ")", null);
+    }
+
+    /** The page takes the shot (served from the cache as /camera/…), or says it could not. */
+    private void giveShot() {
+        if (shot == null || !shot.matches("photo-[0-9]+\\.jpg")) return;
+        String url = "https://" + WebAssets.ORIGIN_HOST + "/camera/" + shot;
+        shot = null;
+        web.evaluateJavascript("window.__aiShot ? (window.__aiShot(" + JSONObject.quote(url) + "), 1) : 0", r -> {
+            if (!"1".equals(r)) {
+                Toast.makeText(this, "Снимок не дошёл: телефон закрывал приложение, пока была открыта камера. Снимите ещё раз.",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     /** The camera's shots stay in the cache only while they are sent: those from yesterday and before go. */

@@ -525,13 +525,19 @@
       if ("vpn_soft" in d) scroll.append(vpnSoftCard(d.vpn_soft));
       scroll.append(storageCard(), bridgesCard(d), remoteCard());
     }
-    // ---- the VPN's programs: Hysteria and Xray as installed, the latest, the last nightly update's word (vpn-update) ----
+    // ---- the VPN's programs: Hysteria and Xray as installed, the approved ones, the last nightly update's word (vpn-update) ----
     function vpnSoftCard(v) {
       const card = el("div", { class: "card", style: "margin:0 0 12px" });
       if (!v) return card.append(el("small", { text: "🛡 Программы VPN: версии ещё не проверялись — появятся здесь в течение часа." })), card;
       const n = (s) => String(s || "").replace(/^app\//, "").replace(/^v/, "");
-      const one = (name, cur, latest, bad) => !cur ? "" : `${name} ${cur}` + (!latest || n(latest) === n(cur) ? " ✓ последняя"
-        : n(bad) === n(latest) ? ` — новая ${latest} не прошла проверку, оставлена рабочая` : ` — вышла ${latest}, обновится сама ночью`);
+      const newer = (a, b) => {  // "2.13.0" after "2.12.1"
+        const x = n(a).split(/[.-]/).map(Number), y = n(b).split(/[.-]/).map(Number);
+        for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d > 0; }
+        return false;
+      };
+      // latest: the version the server release approved (a week old, its sum pinned); only a newer one is installed
+      const one = (name, cur, latest, bad) => !cur ? "" : `${name} ${cur}` + (!latest || !newer(latest, cur) ? " ✓"
+        : n(bad) === n(latest) ? ` — новая ${latest} не прошла проверку, оставлена рабочая` : ` — проверенная ${latest} встанет сама ночью`);
       const parts = [one("Hysteria", v.hysteria, v.hysteria_latest, v.hysteria_bad), one("Xray", v.xray, v.xray_latest, v.xray_bad)].filter(Boolean);
       const recent = v.note && v.note_at && Date.now() / 1000 - v.note_at < 7 * 86400;
       const warn = recent && /^(↩️|⚠️)/.test(v.note);

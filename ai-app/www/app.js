@@ -421,6 +421,7 @@
     return urls.get(blob);
   }
   function pickFile(accept, capture) {
+    if (capture) store.set("shotTab", S.tab);  // Android may close the app while the camera is open: the shot comes here
     return new Promise((resolve) => {
       const inp = el("input", { type: "file", accept, capture: capture ? "environment" : null, class: "hidden" });
       inp.addEventListener("change", () => { resolve(inp.files && inp.files[0]); inp.remove(); });
@@ -798,6 +799,7 @@
     for (const v of Object.values(S.views)) S.viewsEl.append(v.root);
     show(tabsFor(S.me).some((t) => t[0] === S.tab) && S.tab !== "vpn" ? S.tab : "chat");
     maTry();  // an app's icon on the home screen brought the helper up: that app now
+    shotTry();
   }
   function show(tab) {
     // a notice belongs to the screen it was said on; the owner's code shows one and redraws the same tab right after
@@ -1114,6 +1116,10 @@
       async add(m) {
         m.thread = name;
         m.ts = Date.now();
+        // a photo from the phone is kept as big as it was sent (the photo tools take 3072 px), not as the camera made it
+        if (m.role === "me" && m.image instanceof Blob && m.image.size > 400000) {
+          m.image = await shrink(m.image, name === "photo" ? 3072 : 1600, 0.9);
+        }
         await DB.add(m);
         S.msgs[name].push(m);
         if (S.msgs[name].length > 400) { S.msgs[name] = S.msgs[name].slice(-300); DB.trim(name, 300); }
@@ -1127,8 +1133,8 @@
         if (S.busy[name]) { toast("Подождите, ещё отвечаю…"); return null; }
         S.busy[name] = true;
         // «🔄 Повторить» sends the same again with no new bubble of its own: the photo a clip is made from stays known
+        if (mine) { await api2.add(mine); api2.redraw(); }  // (first: the clip's poster is the photo as kept, not the camera's)
         last = { path, body, still: mine ? mine.image || null : last && last.body === body ? last.still : null };
-        if (mine) { await api2.add(mine); api2.redraw(); }
         const rid = newRid();
         // the request's number kept (and the request itself when it is small: a question, not a photo or a clip), so
         // that its answer is fetched — or it is sent again — even after the app was closed
@@ -1437,6 +1443,7 @@
     if (cur !== "main") openChat(cur);
     return {
       root, redraw: () => th.redraw(),
+      shot: (f) => { image = f; sync(); },  // a camera shot that came back after Android had closed the app
       // the answer mode first: a long chat title is the one cut short, never the mode
       sub: () => [S.me.mode !== "chat" ? S.me.modes[S.me.mode] : "",
         chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) : ""].filter(Boolean).join(" · "),
@@ -1546,7 +1553,7 @@
     };
     th.redraw();
     return {
-      root, th, redraw: th.redraw, solve,
+      root, th, redraw: th.redraw, solve, shot: (f) => solve(f),
       sub: gradeName,
       // «🧹 Очистить» only when there is something to clear (thread.add() puts it on top with the first message)
       buttons: () => (S.msgs.study.length ? [["🧹 Очистить", "Очистить", async () => {
@@ -1746,7 +1753,7 @@
     sync();
     th.redraw();
     return {
-      root, th, set, redraw: th.redraw,
+      root, th, set, redraw: th.redraw, shot: (f) => set(f),
       current: () => photo,  // the photo chosen now (null when none): «🎭 Я на фото» offers it for a face
       // a job started elsewhere (🎭 Я на фото) takes the choice away too: no «Что сделать с этим фото?» under its result
       drop() { photo = null; ownHint.classList.add("hidden"); sync(); },
@@ -2208,6 +2215,24 @@
     document.body.append(box);
   }
   window.__aiMiniapp = (id) => { maWanted = String(id || ""); maTry(); };  // the Android app: an app's icon was tapped
+  // a camera shot that came back after Android had closed the app (MainActivity.giveShot): to the section it was taken
+  // for — chat, «Учёба», «Фото» — once the screens are drawn (start() tries again at its end)
+  let shotWanted = "";
+  function shotTry() {
+    const tab = store.get("shotTab", "");
+    const v = shotWanted && S.views && S.views[tab];
+    if (!v) return;
+    const url = shotWanted;
+    shotWanted = "";
+    const lost = () => toast("Снимок не дошёл — снимите ещё раз.");
+    if (!v.shot) { lost(); return; }
+    fetch(url).then((r) => (r.ok ? r.blob() : null)).then((b) => {
+      if (!b || !b.size) { lost(); return; }
+      if (S.tab !== tab) show(tab);
+      v.shot(new File([b], "camera.jpg", { type: "image/jpeg" }));
+    }).catch(lost);
+  }
+  window.__aiShot = (url) => { shotWanted = String(url || ""); shotTry(); };
   function maTry() {
     if (!maWanted || !S.me) return;
     const id = maWanted;
