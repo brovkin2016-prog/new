@@ -119,7 +119,7 @@ grep -q 'reqAddr.*mozilla\.org' "$OUT/hysteria.log" || fail "the service's VPN d
 EDGE="/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
 if [ -x "$EDGE" ]; then
   for sc in 1 1.25 1.5; do
-    "$EDGE" --headless=new --disable-gpu --no-first-run --window-size=470,868 --force-device-scale-factor=$sc \
+    "$EDGE" --headless=new --disable-gpu --no-first-run --window-size=500,868 --force-device-scale-factor=$sc \
       --virtual-time-budget=6000 --user-data-dir="$(cygpath -w "$OUT/edge-$sc")" \
       --screenshot="$(cygpath -w "$OUT/window-$sc.png")" "http://127.0.0.1:47710/?t=$T" > /dev/null 2>&1 || true
     rm -rf "$OUT/edge-$sc"
@@ -144,6 +144,18 @@ echo "$P" | grep -i winger | head -5 > "$OUT/double-click.txt"
 sc query Winger | tee -a "$OUT/double-click.txt" | grep -q RUNNING || fail "after a double-click the service does not run"
 echo "$P" | grep -q -- "--tray" || fail "after a double-click there is no icon by the clock"
 echo "$P" | grep -q -- "--app=http://127.0.0.1:47710/?t=" || fail "after a double-click Winger's window did not open"
+# the real window on this computer's screen (a small one: it has to fit), as a person sees it: a picture, no test
+sleep 8
+cat > shot.ps1 <<'EOT'
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+$bmp.Save($args[0])
+"screen $($b.Width)x$($b.Height), work area $([System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea)"
+EOT
+timeout 60 powershell -NoProfile -ExecutionPolicy Bypass -File shot.ps1 "$(cygpath -w "$OUT/desktop.png")" > "$OUT/desktop.txt" 2>&1 || true
 taskkill /im msedge.exe /f >/dev/null 2>&1
 "/c/Program Files/Winger/winger.exe" --uninstall
 sleep 5

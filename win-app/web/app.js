@@ -299,7 +299,7 @@ const pingAll = () => call("pingall", {}).catch(() => {});
 pingAll();
 document.addEventListener("visibilitychange", () => { if (!document.hidden) pingAll(); });
 window.addEventListener("focus", pingAll);
-// Winger's own window (opened as «…#win») is 470×900; on a small laptop screen (or at 125–150 %) its bottom would be
+// Winger's own window (opened as «…#win») is 500×900; on a small laptop screen (or at 125–150 %) its bottom would be
 // past the screen's edge with no way to scroll to it: made to fit the screen above the taskbar
 function fitScreen() {
   if (location.hash !== "#win") return;

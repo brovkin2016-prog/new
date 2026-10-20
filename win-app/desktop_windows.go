@@ -69,7 +69,7 @@ func openWindow() error {
 		os.Getenv("LOCALAPPDATA") + `\Google\Chrome\Application\chrome.exe`,
 		os.Getenv("LOCALAPPDATA") + `\Yandex\YandexBrowser\Application\browser.exe`} {
 		if _, err := os.Stat(p); err == nil {
-			if exec.Command(p, "--app="+url, "--window-size=470,900", "--user-data-dir="+profile,
+			if exec.Command(p, "--app="+url, "--window-size=500,900", "--user-data-dir="+profile,
 				"--no-first-run", "--no-default-browser-check", "--disable-features=Translate").Start() == nil {
 				return nil
 			}
