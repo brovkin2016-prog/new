@@ -169,7 +169,7 @@ wait_since() { for _ in $(seq 1 "$2"); do since | grep -q "$1" && return 0; slee
 mark
 adb shell am start -n $ACT --es test_ai $AI --ez test_mapdns true --ez test_connect true >/dev/null
 wait_since "connected via" 60 || fail "no connection on the bridge's way (the AI helper's check)"
-since | grep "through the VPN: \[" | tail -1 | grep -q "$AI" || fail "the AI helper did not go through the bridge's way"
+since | grep "through the \(server\|bridge\): \[" | tail -1 | grep -q "$AI" || fail "the AI helper did not go through the bridge's way"
 since | grep -q "the AI helper goes through the bridge too" || fail "the AI helper's way through the bridge is not in the journal"
 mark
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
@@ -177,7 +177,7 @@ wait_since "stopped" 20 || fail "did not switch off (the AI helper's way)"
 mark
 adb shell am start -n $ACT --ez test_connect true >/dev/null
 wait_since "connected via" 60 || fail "no connection through the server after the bridge's way"
-L=$(since | grep "through the VPN: \[" | tail -1)
+L=$(since | grep "through the \(server\|bridge\): \[" | tail -1)
 [ -n "$L" ] || fail "no tunnel through the server after the bridge's way"
 echo "$L" | grep -q "$AI" && fail "the AI helper went through the server although not ticked"
 mark
