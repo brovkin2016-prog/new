@@ -5,6 +5,26 @@
   "use strict";
   const { Native, S, api, ask, blobOf, confirmBox, copyText, el, nativeCall, problem, refreshTop, shareBlob, sheet, store, stream, toast, urlOf, viewer } = A;
 
+  // ---------- the internet for the owner's mini-apps ----------
+  // A mini-app's frame reaches only the few sites that let any page read them (and none on a day without mobile
+  // internet); its fetch() then asks here («__maf», put into its page by the server) and the family server fetches the
+  // site for it. Only the mini-app on the screen is listened to; the server allows only public sites, no cookies.
+  if (!window.__maFetch) {
+    window.__maFetch = true;
+    window.addEventListener("message", async (e) => {
+      const d = e.data;
+      if (!d || d.__maf !== 1) return;
+      const frame = [...document.querySelectorAll(".ma-view iframe")].find((f) => f.contentWindow === e.source);
+      if (!frame) return;
+      const reply = (ok, v) => { try { e.source.postMessage({ __maf: 1, id: d.id, ok, v }, "*"); } catch (er) { /* closed */ } };
+      try {
+        const r = await api("/api/miniapps", { op: "miniapp_fetch", url: String(d.url || ""), method: String(d.method || "GET"),
+          headers: d.headers && typeof d.headers === "object" ? d.headers : {}, body: typeof d.body === "string" ? d.body : null });
+        if (r.t === "done") reply(true, r); else reply(false, r.text || "не открылось");
+      } catch (er) { reply(false, problem(er)); }
+    });
+  }
+
   // ---------- the owner's «Управление» tab: the server, VPN access and the app's people ----------
   function bytes(n) {
     n = +n || 0;

@@ -106,6 +106,48 @@ def fetch(url, method="GET", data=None, limit=PAGE_BYTES, redirects=5):
     raise Blocked("слишком много переадресаций")
 
 
+# what a page's own request may not set: the connection's (this side sets them) and the person's (no cookies are sent)
+RELAY_DROP = {"host", "connection", "content-length", "transfer-encoding", "te", "upgrade", "keep-alive", "accept-encoding",
+              "cookie", "origin", "referer", "proxy-authorization", "proxy-connection", "trailer", "expect"}
+
+
+def relay(url, method="GET", body=None, headers=None, limit=3 * 1024 * 1024, redirects=5):
+    """A request of the owner's mini-app passed on (the phone's frame cannot reach most sites: they do not allow other
+    pages to read them, and on a day without mobile internet nothing outside is reached): only public addresses, as
+    fetch(); every answer comes back, an error page too. → (status, reason, final url, content type, bytes)."""
+    hdrs = {str(k)[:100]: str(v)[:4000] for k, v in list((headers or {}).items())[:30]
+            if str(k).lower() not in RELAY_DROP and not str(k).lower().startswith(("sec-", "proxy-")) and not set("\r\n") & set(str(k) + str(v))}
+    if body is not None and not any(k.lower() == "content-type" for k in hdrs):
+        hdrs["Content-Type"] = "text/plain;charset=UTF-8"  # as a browser sends a text
+    for _ in range(redirects + 1):
+        conn, r = _request(url, method, body, hdrs)
+        try:
+            if r.status in (301, 302, 303, 307, 308) and r.getheader("Location"):
+                url = urljoin(url, r.getheader("Location"))
+                if r.status in (301, 302, 303) and method != "HEAD":
+                    method, body = "GET", None
+                    hdrs = {k: v for k, v in hdrs.items() if k.lower() != "content-type"}
+                continue
+            raw = r.read(limit + 1) if method != "HEAD" else b""
+            if len(raw) > limit:
+                raise Blocked(f"ответ больше {limit // (1024 * 1024)} МБ")
+            enc = (r.getheader("Content-Encoding") or "").lower()
+            if enc in ("gzip", "deflate") and raw:
+                wbits = 16 + zlib.MAX_WBITS if enc == "gzip" else zlib.MAX_WBITS
+                try:
+                    d = zlib.decompressobj(wbits)
+                    raw = d.decompress(raw, limit + 1)
+                except zlib.error:
+                    d = zlib.decompressobj(-zlib.MAX_WBITS)
+                    raw = d.decompress(raw, limit + 1)
+                if len(raw) > limit or d.unconsumed_tail:
+                    raise Blocked(f"ответ больше {limit // (1024 * 1024)} МБ")
+            return r.status, r.reason or "", url, (r.getheader("Content-Type") or ""), raw
+        finally:
+            conn.close()
+    raise Blocked("слишком много переадресаций")
+
+
 def decode(raw, ctype):
     m = re.search(r"charset=([\w-]+)", ctype) or re.search(rb"<meta[^>]+charset=[\"']?([\w-]+)", raw[:4096], re.I)
     charset = m.group(1) if m else "utf-8"
