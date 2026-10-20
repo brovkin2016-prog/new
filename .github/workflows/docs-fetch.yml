@@ -1,0 +1,23 @@
+name: docs-fetch
+# Reads public documentation pages this repository's tools are built against (the build machines can reach sites the
+# development sandbox cannot) and prints them into the job log. No secrets, nothing published.
+on:
+  push:
+    paths: [".github/workflows/docs-fetch.yml", ".github/docs-fetch.txt"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch
+        run: |
+          while read -r url; do
+            case "$url" in ""|\#*) continue ;; esac
+            echo "=================== $url"
+            curl -sSL -m 40 -A "Mozilla/5.0 docs-fetch" "$url" | sed -e 's/<[^>]*>//g' | grep -v '^\s*$' | head -c 60000
+            echo
+          done < .github/docs-fetch.txt
