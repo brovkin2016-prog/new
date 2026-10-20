@@ -422,12 +422,12 @@
       };
       const money = ` · $${(d.spent || 0).toFixed(2)} из $${Number(d.cap || 0).toFixed(2)} в месяц (половина предела $${d.month_cap || 20}; вторая — для спасательной консоли)`;
       const chip = (on, text, body) => el("button", { class: "chip" + (on ? " on" : ""), text, onclick: () => { if (!on) pick(body); } });
-      const engineRow = d.paid_key ? el("div", { class: "chips", style: "margin:0 0 6px" },
+      const engineRow = d.paid_key ? el("div", { class: "chips", style: "margin:0 0 6px;flex-wrap:wrap" },
         chip(!d.on_claude, "🆓 Бесплатные", { op: "agent_engine", engine: "free" }),
         chip(!!d.on_claude, "🟠 Claude", { op: "agent_engine", engine: "claude" })) : null;
-      const modelRow = d.paid_key && d.on_claude ? el("div", { class: "chips", style: "margin:0 0 6px" },
+      const modelRow = d.paid_key && d.on_claude ? el("div", { class: "chips", style: "margin:0 0 6px;flex-wrap:wrap" },
         chip((d.model || "auto") === "auto", "Авто", { op: "agent_model", model: "auto" }),
-        ...(d.models || []).map((m) => chip(d.model === m.id, m.name, { op: "agent_model", model: m.id }))) : null;
+        ...(d.models || []).map((m) => chip(d.model === m.id, m.name.replace(/\s+[\d.]+$/, ""), { op: "agent_model", model: m.id }))) : null;
       scroll.append(el("div", { style: "font-size:12px;color:var(--muted);margin:0 4px 12px" },
         engineRow || "", modelRow || "",
         d.paid_key && d.on_claude
