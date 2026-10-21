@@ -881,7 +881,7 @@
     // in Photo a picture opened full screen can be worked on again
     const again = (im, words) => (thread === "photo" ? [words, () => S.views.photo.set(im)] : null);
     if (m.image) b.append(el("img", { class: "thumb", src: urlOf(m.image), alt: "", onclick: () => viewer(m.image, "photo.jpg", again(m.image, "✏️ Изменить это фото")) }));
-    if (m.file) b.append(el("div", { class: "file-chip", text: "📄 " + m.file }));
+    if (m.file) b.append(el("div", { class: "file-chip", text: (m.file.startsWith("🎬 ") ? "" : "📄 ") + m.file }));
     if (m.result) {
       b.append(el("img", { class: "result", src: urlOf(m.result), alt: "", onclick: () => viewer(m.result, m.name || "picture.jpg", again(m.result, "✏️ Изменить ещё")) }));
     }
@@ -1302,7 +1302,7 @@
       attach.innerHTML = "";
       attach.classList.toggle("hidden", !(image || doc || S.idea));
       if (image) attach.append(el("img", { src: urlOf(image), alt: "" }));
-      if (doc) attach.append(el("div", { class: "chip", text: "📄 " + doc.name }));
+      if (doc) attach.append(el("div", { class: "chip", text: (doc.video ? "🎬 " : "📄 ") + doc.name }));
       if (S.idea) attach.append(el("div", { class: "chip on", text: S.me.ideas[S.idea][0] }));
       if (image || doc || S.idea) attach.append(el("button", { class: "x", text: "✕", "aria-label": "Убрать", onclick: () => { image = doc = null; S.idea = null; sync(); } }));
       ideaHint.textContent = S.idea ? S.me.ideas[S.idea][1] : "";
@@ -1332,7 +1332,7 @@
       const req = Object.assign({ text }, extra || {});
       if (S.idea) req.idea = S.idea;
       const shown = (extra && extra.op ? S.me.ai_ops[extra.op] + (text ? ": " + text : "") : "") || (S.idea ? S.me.ideas[S.idea][0] + ": " + text : text);
-      const mine = { role: "me", text: shown, image, file: doc ? doc.name : null };
+      const mine = { role: "me", text: shown, image, file: doc ? (doc.video ? "🎬 " : "") + doc.name : null };
       const im = image, d = doc;
       ta.value = "";
       ta.style.height = "auto";
@@ -1347,7 +1347,7 @@
       const t = THREADS.get(name) || thread(name, scroll, empty);
       t.ask = async (req, mine, im, d) => {
         if (S.busy[name]) { toast("Подождите, ещё отвечаю…"); return; }
-        touch((mine && mine.text) || (im ? "📷 Фото" : d ? "📄 " + d.name : ""));  // a photo with no words: named too
+        touch((mine && mine.text) || (im ? "📷 Фото" : d ? (d.video ? "🎬 " : "📄 ") + d.name : ""));  // a photo with no words: named too
         if (!im && !d && !req.op && !req.idea && !req.followup && req.text && REMIND_ASK.test(req.text)) {
           let tz = "";
           try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* Moscow then */ }
@@ -1356,7 +1356,8 @@
         }
         const body = Object.assign({ context: context(name) }, req);
         if (im) body.image = await b64(await shrink(im, 1600, 0.86));  // lighter on a weak line; models see less anyway
-        if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
+        if (d && d.video) body.video = { name: d.name, mime: d.type || "", data: await b64(d) };
+        else if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
         await t.run("/api/chat", body, mine);
       };
       if (th && th !== t) th.box.replaceWith(t.box); else if (!th) scroll.append(t.box);
@@ -1430,6 +1431,12 @@
       menu("Прикрепить", [
         ["📷", "Камера", async () => { const f = await pickFile("image/*", true); if (f) { image = f; sync(); } }],
         ["🖼️", "Фото из галереи", async () => { const f = await pickFile("image/*"); if (f) { image = f; sync(); } }],
+        ["🎬", "Видео: о чём оно", async () => {  // the server looks at a few pictures of it and hears what is said
+          const f = await pickFile("video/*");
+          if (!f) return;
+          if (f.size > 40 * 1024 * 1024) { toast("Видео больше 40 МБ — возьмите покороче (до 2–3 минут)", 5000); return; }
+          doc = f; doc.video = true; sync();
+        }],
         ["📄", "Документ: PDF, Word, текст", async () => {
           const f = await pickFile(".pdf,.docx,.pptx,.epub,.txt,.md,.csv,.json,.html,text/*,application/pdf");
           if (f) { if (f.size > 14e6) toast("Файл больше 14 МБ — возьмите поменьше"); else { doc = f; sync(); } }
