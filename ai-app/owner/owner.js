@@ -713,6 +713,9 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       claude.head = el("span", { text: d.title });
       scroll.append(el("div", { class: "ow-list" }, line("💬", claude.head, d.chats.length > 1 ? `Разговоров: ${d.chats.length} · выбрать` : "Один разговор — одна тема",
         el("button", { class: "ow-btn", text: "➕ Новый", onclick: (e) => { e.stopPropagation(); newChat(); } }), () => chatsSheet(d))));
+      // a long talk is read again with every answer: a new subject is quicker and cheaper in a new talk
+      if (d.history.length >= 30) scroll.append(el("p", { class: "ow-note long-talk", style: "margin-top:-4px",
+        text: "Длинный разговор: каждый ответ перечитывает всю историю — новую тему лучше начать в «➕ Новый» (быстрее и экономнее)." }));
       const box = claude.box = el("div", { class: "msgs", style: "padding:4px 2px 12px" });
       if (!d.history.length) box.append(claudeIntro());
       let asked = "";
