@@ -42,6 +42,68 @@
     return days === 0 ? "сегодня " + hm : days === 1 ? "вчера " + hm
       : d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "") + " " + hm;
   }
+  // the owner's tabs are lists of short rows: an icon, what it is with one small line under it, its value or button on
+  // the right; a tap on a row — its details and actions in a sheet
+  if (!document.getElementById("owner-css")) {
+    document.head.append(el("style", { id: "owner-css", text: `
+.seg.ow-seg { gap: 2px; }
+.seg.ow-seg button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  min-width: 0; padding: 5px 0; font-size: 11px; line-height: 1.15; overflow: hidden; }
+.seg.ow-seg button.on { font-weight: 500; }
+.seg.ow-seg .ow-segi { font-size: 18px; line-height: 1.1; }
+.ow-dot { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--danger);
+  color: #fff; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
+.ow-sec { display: flex; align-items: center; gap: 8px; margin: 14px 4px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.ow-sec .grow { flex: 1; min-width: 0; }
+.ow-list { background: var(--card); border-radius: var(--r); box-shadow: var(--shadow); padding: 0 12px; margin-bottom: 10px; }
+.ow-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 0; }
+.ow-row + .ow-row { border-top: 1px solid var(--line); }
+.ow-row[role=button] { cursor: pointer; }
+.ow-row[role=button]:active { opacity: .7; }
+.ow-ic { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; font-size: 16px; flex: none; background: var(--accent-soft); }
+.ow-ic.ok { background: rgba(31, 157, 107, .15); }
+.ow-ic.bad { background: rgba(200, 32, 63, .15); }
+.ow-ic.warn { background: rgba(234, 179, 8, .2); }
+.ow-ic.off { background: var(--line); }
+.ow-t { flex: 1; min-width: 0; font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+.ow-t small { display: block; color: var(--muted); font-size: 13px; line-height: 1.35; margin-top: 1px; }
+.ow-t small.bad { color: var(--danger-ink); }
+.ow-t small.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ow-v { flex: none; max-width: 46%; font-size: 14px; color: var(--muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ow-v.ok { color: var(--ok); }
+.ow-v.bad { color: var(--danger-ink); font-weight: 600; }
+.ow-go { flex: none; color: var(--muted); font-size: 20px; line-height: 1; }
+.ow-btn { flex: none; min-height: 40px; padding: 6px 12px; border-radius: 12px; font-size: 14px; font-weight: 500; background: var(--accent-soft); color: var(--accent); }
+.ow-btn.line { background: transparent; border: 1px solid var(--field); color: var(--ink); }
+.ow-btn.main { background: var(--accent); color: var(--accent-ink); }
+.ow-btn:disabled { opacity: .5; }
+.ow-bar { height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 5px; }
+.ow-bar > i { display: block; height: 100%; }
+.ow-status { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r); margin-bottom: 10px; font-size: 15px;
+  background: rgba(31, 157, 107, .12); }
+.ow-status.bad { background: rgba(200, 32, 63, .12); }
+.ow-status.off { background: var(--line); }
+.ow-note { margin: 6px 4px 10px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.ow-acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 10px; }
+.ow-acts > * { min-height: 44px; padding: 8px 10px; font-size: 14px; }
+.ow-foot { position: sticky; bottom: -16px; margin: 0 -12px 10px; padding: 10px 12px 14px; background: var(--bg); }
+.ow-model { display: block; width: 100%; min-height: 36px; margin: 0 0 10px; padding: 6px 4px; text-align: left; font-size: 13px; color: var(--muted); }
+details.ow-more > summary { list-style: none; cursor: pointer; }
+details.ow-more > summary::-webkit-details-marker { display: none; }
+details.ow-more > summary .ow-go { transition: transform .15s; }
+details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
+` }));
+  }
+  // a row: [icon, its tone] · title · small line (a string, or [text, "bad"]) · right side (a value, a button) · tap
+  function line(icon, title, sub, right, tap, tone) {
+    const small = Array.isArray(sub) ? el("small", { class: sub[1] || "", text: sub[0] }) : sub ? el("small", { text: sub }) : null;
+    return el("div", { class: "ow-row", role: tap ? "button" : null, tabindex: tap ? "0" : null, onclick: tap || null },
+      el("span", { class: "ow-ic" + (tone ? " " + tone : ""), text: icon }), el("div", { class: "ow-t" }, title, small),
+      right === undefined || right === null ? null : typeof right === "string" ? el("span", { class: "ow-v", text: right }) : right,
+      tap ? el("span", { class: "ow-go", text: "›" }) : null);
+  }
+  const value = (text, tone) => el("span", { class: "ow-v" + (tone ? " " + tone : ""), text });
+  const section = (text, right) => el("div", { class: "ow-sec" }, el("span", { class: "grow", text }), right || null);
   function badge(n) {  // a red count on the Управление tab
     const tab = document.querySelector('.tab[data-tab="vpn"]');
     if (!tab) return;
@@ -56,13 +118,16 @@
     const scroll = el("div", { class: "scroll" });
     root.append(scroll);
     let part = store.get("accessPart", "server"), open = false;
-    const cache = { server: null, vpn: null, app: null, claude: null };
-    const OPS = { server: "status", vpn: "users", app: "app_list", claude: "agent_state" };
-    let data = null;
+    const cache = { server: null, vpn: null, app: null, claude: null, patrol: null };
+    const OPS = { server: "status", vpn: "users", app: "app_list", claude: "agent_state", patrol: "agent_patrol_items" };
+    const TABS = [["server", "🖥", "Сервер"], ["vpn", "🛡", "VPN"], ["app", "🤖", "Помощник"], ["claude", "🛠", "Claude"], ["patrol", "🔍", "Дозор"]];
+    if (!TABS.some(([k]) => k === part)) part = "server";
+    let data = null, segDot = null;
     const panel = (body, onStatus) => stream("/api/panel", body, (ev) => { if (ev.t === "status" && onStatus) onStatus(ev.text); });
     function enter() {  // only the owner has this tab, on the owner's own phone: it opens at once, no fingerprint
       open = true;
       load();
+      if (part !== "patrol") panel({ op: OPS.patrol }).then((end) => { if (end.t === "done") { cache.patrol = end; dot(); } }).catch(() => {});
     }
     async function load() {
       if (!open) return;
@@ -72,6 +137,7 @@
         const body = want === "claude" ? { op: OPS.claude, chat: claude.chat || undefined } : { op: OPS[want] };
         const end = await panel(body);
         if (end.t !== "done" && want === "claude") { cache.claude = { t: "done", installed: false, why: end.text }; if (part === want) draw(); return; }
+        if (end.t !== "done" && want === "patrol") { cache.patrol = { t: "done", none: true, why: end.text }; if (part === want) draw(); return; }
         if (end.t !== "done") throw Object.assign(new Error(end.text || "Не получилось."), { said: true });
         cache[want] = end;
         if (part === want) draw();
@@ -80,62 +146,67 @@
         if (!cache[want]) { draw(); scroll.append(el("p", { class: "status", style: "padding:12px", text: why })); } else toast(why);
       }
     }
+    // the patrol's findings that wait for the owner: a red count on «🔍 Дозор»
+    const waiting = () => ((cache.patrol && cache.patrol.items) || []).filter((x) => x.status === "new").length;
+    function dot() {
+      if (!segDot) return;
+      const n = waiting();
+      segDot.textContent = n > 9 ? "9+" : String(n);
+      segDot.style.display = n ? "" : "none";
+    }
+    function go(k) { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); }
     function draw() {
+      const keep = part === draw.last ? scroll.scrollTop : 0;  // a redraw of the same tab stays where the owner was
+      draw.last = part;
+      clearTimeout(draw.tick);
       scroll.innerHTML = "";
       if (claude.composer) { claude.composer.remove(); claude.composer = null; }
-      const seg = el("div", { class: "seg", style: "margin-bottom:12px" });
-      for (const [k, v] of [["server", "🖥 Сервер"], ["vpn", "🛡 VPN"], ["app", "🤖 Помощник"], ["claude", "🛠 Claude"]]) {
-        seg.append(el("button", { class: k === part ? "on" : "", style: "padding:8px 4px", text: v, onclick: () => { part = k; store.set("accessPart", k); refreshTop(); draw(); load(); } }));
+      const seg = el("div", { class: "seg ow-seg", style: "margin-bottom:12px", role: "tablist" });
+      for (const [k, ic, name] of TABS) {
+        const b = el("button", { class: k === part ? "on" : "", role: "tab", "aria-selected": k === part ? "true" : "false", "data-part": k, onclick: () => go(k) },
+          el("span", { class: "ow-segi", "aria-hidden": "true", text: ic }), " ", el("span", { text: name }));
+        if (k === "patrol") { segDot = el("span", { class: "ow-dot", "aria-label": "ждут решения" }); b.append(segDot); }
+        seg.append(b);
       }
       scroll.append(seg);
+      dot();
       data = cache[part];
       if (!data) return;
-      if (part === "app") return drawApp(data);
-      if (part === "server") return drawServer(data);
-      if (part === "claude") return drawClaude(data);
+      if (part === "app") drawApp(data);
+      else if (part === "server") drawServer(data);
+      else if (part === "claude") return drawClaude(data);
+      else if (part === "patrol") drawPatrol(data);
+      else drawVpn(data);
+      if (keep) scroll.scrollTop = keep;
+    }
+    // «🛡 VPN»: who has it, the apps to give, the bridges
+    function drawVpn(data) {
       const on = data.users.filter((u) => u.online).length;
-      const head = el("div", { class: "card" },
-        el("div", { class: "row" }, el("div", { class: "grow" }, (data.vpn ? "🟢 VPN работает" : "🔴 VPN не работает") + " · " + data.host,
-          el("small", { text: data.stats ? `Людей: ${data.users.length}, сейчас в сети: ${on}` : `Людей: ${data.users.length}` }))));
-      scroll.append(head, diskRow(), el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
-        el("div", { class: "big-actions", style: "margin:0 0 12px" },
-          el("button", { class: "btn line", text: "📱 Winger для Android", onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }),
-          el("button", { class: "btn line", text: "💻 Winger для Windows", onclick: () => makeLink({ op: "dl_winapp" }, "Winger для Windows") })));
-      const list = el("div", { class: "card" }, el("h3", { text: "Кому выдан VPN" }));
+      scroll.append(el("div", { class: "ow-status" + (data.vpn ? "" : " bad") },
+        el("span", { class: "ow-ic " + (data.vpn ? "ok" : "bad"), text: data.vpn ? "🟢" : "🔴" }),
+        el("div", { class: "ow-t" }, data.vpn ? "VPN работает" : "VPN не работает",
+          el("small", { text: data.host + " · людей " + data.users.length + (data.stats ? ", в сети " + on : "") }))),
+        el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Выдать VPN", onclick: add }),
+        el("div", { class: "ow-acts" },
+          el("button", { class: "btn line", text: "📱 Winger Android", onclick: () => makeLink({ op: "dl_vpnapp" }, "Приложение Winger VPN") }),
+          el("button", { class: "btn line", text: "💻 Winger Windows", onclick: () => makeLink({ op: "dl_winapp" }, "Winger для Windows") })));
+      const list = el("div", { class: "ow-list" });
       for (const u of data.users) {
-        list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => card(u.name) },
-          el("span", { style: "font-size:20px", text: u.online ? "🟢" : "⚪" }),
-          el("div", { class: "grow" }, u.name + (u.owner ? " 👑" : ""),
-            el("small", { text: (u.online ? "в сети" : "не в сети") + (u.laptop ? (u.laptop.online ? " · 💻 в сети" : " · 💻") : "")
-              + (u.until ? " · ⏰ гость до " + when(u.until) : "") + (u.bridge ? " · 🌉 мост" : "") })),
-          u.owner ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delVpn(u.name); } }),
-          "›"));
+        const sub = [u.online ? "в сети" : "не в сети", u.laptop ? (u.laptop.online ? "💻 в сети" : "💻") : "",
+          u.until ? "⏰ гость до " + when(u.until) : "", u.bridge ? "🌉 мост" : ""].filter(Boolean).join(" · ");
+        list.append(line(u.online ? "🟢" : "⚪", u.name + (u.owner ? " 👑" : ""), sub, null, () => card(u.name), u.online ? "ok" : "off"));
       }
-      scroll.append(list);
-      // the bridges live with the VPN now (the server's list of them comes with its state)
+      scroll.append(section("Кому выдан VPN · " + data.users.length), list);
+      // the bridges live with the VPN (the server's list of them comes with its state)
       const br = el("div");
       scroll.append(br);
-      const putBridges = (st) => { br.innerHTML = ""; br.append(bridgesCard(st)); };
+      const putBridges = (st) => { br.innerHTML = ""; br.append(...bridgesCard(st)); };
       if (cache.server && cache.server.bridges) putBridges(cache.server);
       panel({ op: OPS.server }).then((end) => { if (end.t === "done") { cache.server = end; if (br.isConnected) putBridges(end); } }).catch(() => {});
     }
     // a temporary link (24 h) for downloading an app or connecting the VPN: copied and sent however the owner likes
     // ---- links that open everywhere in Russia: a folder on the owner's Yandex Disk, deleted after 24 hours ----
-    const diskRows = new Set();  // every «📦 Ссылки» row on screen: all of them change when the Disk is connected
-    function diskRow() {
-      const row = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "📦 Ссылки: проверяю…" }));
-      const fill = (d) => {
-        row.innerHTML = "";
-        row.append(el("div", { class: "row" },
-          el("div", { class: "grow" }, d.on ? "📦 Ссылки — через Яндекс Диск ✓" : "📦 Для ссылок подключите Яндекс Диск",
-            d.on ? null : el("small", { text: "Ссылки на 24 часа кладутся на ваш Яндекс Диск — так они открываются в любом браузере. Займёт минуту." })),
-          el("button", { class: "btn" + (d.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: d.on ? "Настроить" : "Подключить",
-            onclick: () => diskSetup(d, fill) })));
-      };
-      diskRows.add((d) => (row.isConnected ? fill(d) : null));
-      panel({ op: "disk_get" }).then((d) => (d.t === "done" ? fill(d) : row.remove())).catch(() => row.remove());
-      return row;
-    }
+    const diskRows = new Set();  // every «📦 Яндекс Диск» row on screen: all of them change when the Disk is connected
     function diskSetup(d, after) {
       sheet("📦 Яндекс Диск для ссылок", (box, close) => {
         const inp = el("input", { class: "input", placeholder: "Вставьте токен", autocomplete: "off", spellcheck: "false" });
@@ -223,85 +294,76 @@
         : Math.floor(sec / 86400) + " д " + Math.round(sec % 86400 / 3600) + " ч";
     }
     const UNIT = { failed: "остановился", inactive: "выключен", activating: "запускается", deactivating: "останавливается" };
-    // ---- new versions of the server: built elsewhere, encrypted for this server, installed by one tap ----
-    // part: "top" — the version and its buttons (on top when it needs the owner), "extras" — the night switch and the key
-    // (under «Подробнее»), "all" — both (under «Подробнее» when nothing waits)
-    function updateCard(u, part) {
-      if (part === "extras") return updateExtras(u, el("div", { class: "card" }, el("h3", { text: "🌙 Автообновление сервера" })));
-      const card = el("div", { class: "card" + (u.new ? " bad" : ""), style: "padding:12px 14px" });
+    // ---- new versions of the server: built elsewhere, encrypted for this server, installed by one tap. Two rows: the
+    // version (a new one — its button right there), the night switch; the details and «🔎 Проверить» a tap away ----
+    function updateRows(u) {
       const p = u.progress || {};
       const running = p.state === "running" && Date.now() / 1000 - (p.at || 0) < 3600;
-      const line = (text, sub) => card.append(el("div", { class: "row" }, el("div", { class: "grow" }, text, sub ? el("small", { text: sub }) : "")));
-      if (!u.ready) {
-        line("Обновления из приложения ещё не включены", "Нужна одна установка вручную — дальше обновления здесь.");
-        return card;
-      }
+      if (!u.ready) return [line("⬆️", "Версия сервера", "Обновления из приложения ещё не включены: нужна одна установка вручную — дальше здесь.", null, null, "off")];
+      const rows = [];
       if (running) {
-        line(`⏳ Обновляется до v${p.version}…`, "5–10 минут. VPN может переподключиться, приложение — ненадолго потерять связь. Экран обновится сам.");
-        // looks again every 20 s while the card is on screen; while the server restarts the app has no answer: try later
+        rows.push(line("⏳", `Обновляется до v${p.version}…`, "5–10 минут. VPN может переподключиться, приложение — ненадолго потерять связь. Экран обновится сам.", null, null, "warn"));
+        // looks again every 20 s while the row is on screen; while the server restarts the app has no answer: try later
         const tick = () => {
-          if (!card.isConnected) return;
+          if (!rows[0].isConnected) return;
           if (S.tab !== "vpn" || document.hidden) { setTimeout(tick, 20000); return; }
           panel({ op: "status" }).then((end) => (end.t === "done" ? load() : setTimeout(tick, 20000))).catch(() => setTimeout(tick, 20000));
         };
         setTimeout(tick, 20000);
+      } else {
+        const failed = p.state === "finished" && p.version && !p.ok;
+        const sub = u.foreign ? ["Новая версия собрана не для этого сервера — нажмите", "bad"]
+          : failed ? [`Обновление до v${p.version} не прошло — работает прежняя. Почему — спросите в «🛠 Claude».`, "bad"]
+          : u.new ? [`есть v${u.latest}` + (u.notes ? ": " + u.notes : ""), "clamp"] : u.checked ? "проверено " + when(u.checked) : "";
+        const right = u.new ? el("button", { class: "ow-btn main", text: `⬆️ v${u.latest}`, "aria-label": `Обновить до v${u.latest}`,
+          onclick: (e) => { e.stopPropagation(); doUpdate(u); } }) : value(`v${u.current} ✓`, "ok");
+        const r = line("⬆️", u.new ? `Версия v${u.current}` : "Версия сервера", sub, right, () => updateSheet(u), u.new || failed || u.foreign ? "bad" : "ok");
+        r.classList.add("update-row");
+        rows.push(r);
       }
-      else card.append(el("div", { class: "row" },
-        el("div", { class: "grow" }, el("small", { text: "⬆️ Версия сервера" }),
-          el("div", { style: "font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.1;margin:2px 0", text: "v" + u.current }),
-          el("small", { style: u.new ? "display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" : "",
-            text: u.new ? (u.notes || "") : u.checked ? "проверено " + new Date(u.checked * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "" })),
-        el("span", { class: "chip", style: "flex:none;padding:6px 12px;border-radius:999px;font-size:14px;font-weight:700;"
-          + (u.new ? "background:var(--danger-soft,#fde7e7);color:var(--danger-ink,#b42318)" : "background:var(--ok-soft,#e3f6ec);color:var(--ok-ink,#05603a)"),
-          text: u.new ? `есть v${u.latest}` : "последняя ✓" })));
-      if (!running && p.state === "finished" && p.version && !p.ok) line(`⚠️ Обновление до v${p.version} не прошло`, "Сервер работает на прежней версии. Почему — спросите в «🛠 Claude».");
-      if (u.foreign) line("Новая версия собрана не для этого сервера", "Пришлите ключ обновлений тому, кто её собирает (кнопка ниже).");
-      const row = el("div", { class: "big-actions", style: "margin-top:8px" });
-      if (u.new && !running) {
-        row.append(el("button", { class: "btn", text: `⬆️ Обновить до v${u.latest}`, onclick: async () => {
-          if (!(await confirmBox(`Обновить сервер до v${u.latest}? Займёт 5–10 минут, VPN может переподключиться. Если что-то пойдёт не так, останется прежняя версия.`, "Обновить"))) return;
-          try {
-            const end = await panel({ op: "server_update" });
-            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
-            toast("⏳ Обновление началось. Когда закончится — придёт уведомление.", 6000);
-            setTimeout(load, 4000);
-          } catch (e) { toast(problem(e)); }
-        } }));
-      }
-      if (!running) {
-        row.append(el("button", { class: "btn line", text: "🔎 Проверить", onclick: async () => {
-          try {
-            const end = await panel({ op: "server_check" }, (t) => toast(t, 30000));
-            document.querySelectorAll(".toast").forEach((t) => t.remove());
-            if (end.t !== "done") { toast("⚠️ " + end.text, 5000); return; }
-            const v = end.update || {};
-            toast(v.new ? `⬆️ Доступна v${v.latest}` : v.foreign ? "Новая версия собрана не для этого сервера" : `v${v.current} — последняя`, 4000);
-            load();
-          } catch (e) { toast(problem(e)); }
-        } }));
-      }
-      card.append(row);
-      return part === "all" ? updateExtras(u, card) : u.foreign ? updateExtras(u, card, true) : card;
-    }
-    function updateExtras(u, card, keyOnly) {
       // new versions go in by themselves at night (checked after, the old one back if anything is wrong)
-      if (!keyOnly) card.append(el("div", { class: "row", style: "margin-top:6px" },
-        el("div", { class: "grow" }, "🌙 Новые версии сами ночью", el("small", { text: u.auto ? "после — проверка, сбой — прежняя версия" : "выключено: только кнопкой" })),
+      rows.push(line("🌙", "Новые версии сами ночью", u.auto ? "после — проверка, сбой — прежняя версия" : "выключено: только кнопкой",
         el("button", { class: "toggle" + (u.auto ? " on" : ""), "aria-label": "Новые версии сами ночью", "aria-pressed": u.auto ? "true" : "false",
           onclick: async () => {
             const end = await panel({ op: "server_auto", on: !u.auto }).catch(() => null);
             if (end && end.t === "done") { toast(end.update && end.update.auto ? "🌙 Новые версии будут ставиться сами ночью" : "Новые версии — только кнопкой"); load(); }
             else toast("⚠️ " + ((end && end.text) || "не получилось"), 5000);
-          } })));
-      if (u.key && u.foreign) {  // only when a version came built for another server: its builder needs this server's key
-        card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "🔑 Ключ обновлений", onclick: () => sheet("🔑 Ключ обновлений", (box) => {
-          box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Открытый ключ этого сервера: им шифруются новые версии, "
-            + "чтобы поставить их мог только он. Ключ не секретный — один раз пришлите его тому, кто собирает обновления." }),
-          el("div", { style: "font:11px/1.35 ui-monospace,monospace;word-break:break-all;white-space:pre-wrap;background:var(--card);border-radius:12px;padding:10px;margin-bottom:12px", text: u.key }),
+          } }), null, u.auto ? "ok" : "off"));
+      return rows;
+    }
+    async function doUpdate(u) {
+      if (!(await confirmBox(`Обновить сервер до v${u.latest}? Займёт 5–10 минут, VPN может переподключиться. Если что-то пойдёт не так, останется прежняя версия.`, "Обновить"))) return;
+      try {
+        const end = await panel({ op: "server_update" });
+        if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+        toast("⏳ Обновление началось. Когда закончится — придёт уведомление.", 6000);
+        setTimeout(load, 4000);
+      } catch (e) { toast(problem(e)); }
+    }
+    function updateSheet(u) {
+      sheet("⬆️ Версия сервера", (box, close) => {
+        box.append(el("div", { style: "font-size:15px;margin:-6px 0 8px", text: u.new ? `Сейчас v${u.current}, есть v${u.latest}` : `v${u.current} — последняя ✓` }),
+          u.new && u.notes ? el("div", { class: "card", style: "font-size:14px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere", text: u.notes }) : "",
+          u.checked ? el("p", { class: "ow-note", style: "margin:0 2px 10px", text: "Проверено " + when(u.checked) + ". Новые версии сервер ищет сам." }) : "");
+        if (u.new) box.append(el("button", { class: "btn wide", text: `⬆️ Обновить до v${u.latest}`, onclick: () => { close(); doUpdate(u); } }));
+        box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: "🔎 Проверить", onclick: async (e) => {
+          const b = e.currentTarget;
+          busyBtn(b, "⏳ Проверяю…");
+          try {
+            const end = await panel({ op: "server_check" });
+            if (end.t !== "done") { toast("⚠️ " + end.text, 5000); freeBtn(b); return; }
+            const v = end.update || {};
+            toast(v.new ? `⬆️ Доступна v${v.latest}` : v.foreign ? "Новая версия собрана не для этого сервера" : `v${v.current} — последняя`, 4000);
+            close(); load();
+          } catch (x) { toast(problem(x)); freeBtn(b); }
+        } }));
+        if (u.key && u.foreign) {  // only when a version came built for another server: its builder needs this server's key
+          box.append(el("p", { class: "ow-note", style: "margin:14px 2px 8px", text: "Новая версия собрана не для этого сервера. Открытый ключ этого сервера: им шифруются "
+            + "новые версии, чтобы поставить их мог только он. Ключ не секретный — один раз пришлите его тому, кто собирает обновления." }),
+          el("div", { style: "font:11px/1.35 ui-monospace,monospace;word-break:break-all;white-space:pre-wrap;background:var(--card);border-radius:12px;padding:10px;margin-bottom:10px", text: u.key }),
           el("button", { class: "btn wide", text: "📋 Скопировать ключ", onclick: () => { copyText(u.key); toast("✅ Ключ скопирован — отправьте его"); } }));
-        }) }));
-      }
-      return card;
+        }
+      });
     }
     // ---------- «🛠 Claude»: the owner's chat with Claude Code on this server ----------
     // A message: Claude looks (files, services, journals) and answers; a change it only plans. «✅ Выполнить» carries the
@@ -353,7 +415,7 @@
     const html = (t) => (A.md ? A.md(t) : String(t || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])).replace(/\n/g, "<br>"));
     const stepLine = (icon, what) => el("div", { style: "font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 0;color:var(--muted)",
       text: icon + " " + what });
-    function claudeMsg(m, asked, last) {
+    function claudeMsg(m, asked, last, undoFor) {
       const wrap = el("div", { class: "msg " + (m.role === "me" ? "me" : "ai") });
       const b = el("div", { class: "bubble" + (m.err ? " err" : "") });
       if (m.role === "me") b.textContent = m.text; else b.innerHTML = html(m.text);
@@ -383,6 +445,9 @@
         wrap.append(det);
       }
       if (m.note) wrap.append(el("div", { style: "font-size:13px;margin:4px 4px 0;color:" + (m.note.startsWith("↩️") ? "#b45309" : "var(--muted)"), text: m.note }));
+      // the result of «Выполнить»: put back from here (only under it, while no new plan waits)
+      if (undoFor) wrap.append(el("div", { style: "margin:6px 4px 0" }, el("button", { class: "ow-btn line undo-btn", text: "↩️ Вернуть как было",
+        onclick: () => undo(undoFor) })));
       if (last && m.role !== "me" && m.text) {
         // the answer for the project's developer (the Claude chat that makes new versions): question, answer, files in one copy
         const forDev = () => ["Из «🛠 Claude» на сервере.", asked ? "Вопрос: " + asked : "", "Ответ:\n" + m.text,
@@ -426,17 +491,9 @@
         + "«Запомни: …» (его увидят все разговоры), «Забудь уроки» — стереть ваши правила." }),
         el("div", { class: "hints", style: "margin-top:8px" }, ...hints.map((t) => el("button", { class: "hint", text: t, onclick: () => send(t) }))));
     }
-    // «🔍 Дозор»: the agent that keeps looking over the server, VPN and bridges, protection, the app and new versions by
-    // itself; what it finds waits here as a list — ✓ Claude checks it and shows a plan, ✕ never offered again
-    function patrolCard(d) {
-      const o = d.patrol_open || {}, fix = o.fix || 0, idea = o.idea || 0;
-      const badge = (n, ic, bg) => el("span", { style: `flex:none;padding:4px 10px;border-radius:14px;font-size:14px;font-weight:600;background:${bg}`, text: `${ic} ${n}` });
-      const sub = !d.patrol_on ? "Выключен — включить ›" : fix + idea ? "Отметьте, что принять ›" : d.patrol ? "Проверяет сейчас…" : "Следит — новых замечаний нет ›";
-      return el("div", { class: "card patrol-card", style: "padding:6px 12px;cursor:pointer", role: "button", onclick: () => patrolSheet(d) },
-        el("div", { class: "row" }, el("span", { style: "font-size:24px", text: "🔍" }),
-          el("div", { class: "grow" }, el("b", { text: "Дозор" }), el("small", { text: sub })),
-          fix ? badge(fix, "🔴", "rgba(200,32,63,.14)") : "", idea ? badge(idea, "🟡", "rgba(234,179,8,.2)") : ""));
-    }
+    // ---------- «🔍 Дозор»: the agent that keeps looking over the server, VPN and bridges, protection, the app and new
+    // versions by itself. What it finds waits here: ✓ — Claude on the server checks it and shows a plan (🛠), or its text
+    // goes to the developer (👨‍💻: a change of the programs, it comes with a new version); ✕ — never offered again ----------
     // what the developer is given: the findings the owner accepted for him, and what the server's Claude already has (so
     // the two never do the same thing)
     const devText = (list, all) => {
@@ -453,138 +510,178 @@
         el("button", { class: "btn wide", text: "📋 Скопировать", onclick: () => { copyText(text); toast("✅ Скопировано — вставьте в чат с разработчиком", 5000); } }));
       });
     }
-    function patrolSheet(d) {
-      const pick = new Map();  // id → "yes" | "no": the owner's marks, sent together by the one button
-      const who = new Map();  // id → "server" | "dev": who does it (the server's Claude, or the developer)
-      let all = [];
-      sheet("🔍 Дозор", (box, close) => {
-        const body = el("div", {}, el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Загружаю список…" })));
-        const go = el("button", { class: "btn wide", disabled: true, text: "Отметьте ✓ или ✕" });
-        const foot = el("div", { class: "sheet-foot hidden" }, go);
-        box.append(el("small", { style: "display:block;color:var(--muted);margin:-4px 2px 8px;line-height:1.4",
-          text: "Дозор сам смотрит сервер, VPN и мосты, защиту, приложение и новые версии ИИ. ✓ на 🛠 — Claude на сервере проверит "
-            + "и покажет план (менять будет только после «✅ Выполнить»); ✓ на 👨‍💻 — текст для разработчика (правка программ, "
-            + "придёт с новой версией); ✕ — больше не предложит. Один пункт делает кто-то один — правки не пересекаются." }), body, foot);
-        const count = () => {
-          const ys = [...pick].filter(([, v]) => v === "yes"), n = pick.size - ys.length;
-          const dev = ys.filter(([k]) => who.get(k) === "dev").length, srv = ys.length - dev;
-          go.disabled = !pick.size;
-          go.textContent = !pick.size ? "Отметьте ✓ или ✕" : ys.length
-            ? "Отправить: " + [srv ? `🛠 Claude ${srv}` : "", dev ? `👨‍💻 разработчику ${dev}` : "", n ? `✕ ${n}` : ""].filter(Boolean).join(" · ")
-            : `Отклонить: ✕ ${n}`;
+    const patrolPick = new Map();  // id → "yes" | "no": the owner's marks, kept over the tab's redraws, sent together
+    const clean = (t) => String(t || "").replace(/`/g, "");
+    function drawPatrol(d) {
+      if (d.none) {
+        scroll.append(el("div", { class: "ow-status off" }, el("span", { class: "ow-ic off", text: "🔍" }),
+          el("div", { class: "ow-t" }, "Дозор недоступен", el("small", { text: d.why || "Он работает вместе с Claude на сервере." }))),
+          el("p", { class: "ow-note", text: "Дозор — это Claude на сервере, который сам проверяет сервер раз в час. Он ставится с новой версией сервера: "
+            + "«🖥 Сервер» → «Версия сервера»." }));
+        return;
+      }
+      const st = d.status || {}, items = d.items || [];
+      const open = items.filter((x) => x.status === "new");
+      for (const id of [...patrolPick.keys()]) if (!open.some((x) => x.id === id)) patrolPick.delete(id);
+      // how it goes: on or off, checking now, the last round and the next theme
+      const hm = (ts) => new Date(ts * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      const off = st.on === false;
+      const head = st.running ? "Проверяет: " + (st.theme || "сервер") + "…" : off ? "Выключен" : st.rest ? "Отдыхает до " + hm(st.rest) : "Следит";
+      const sub = off ? "сам не проверяет — только кнопкой ниже"
+        : [st.at ? "проверял " + when(st.at) : "ещё не проверял", st.running ? "" : "дальше: " + st.next].filter(Boolean).join(" · ");
+      const toggle = st.on === null || st.on === undefined ? null : el("button", { class: "toggle" + (off ? "" : " on"), "aria-label": "Дозор следит сам",
+        "aria-pressed": off ? "false" : "true", onclick: async (e) => {
+          const b = e.currentTarget;
+          b.disabled = true;
+          try {
+            const end = await panel({ op: "agent_patrol", on: off });
+            if (end.t !== "done") { toast("⚠️ " + end.text, 7000); return; }
+            cache.patrol = Object.assign({}, d, { status: end.status || Object.assign({}, st, { on: off }) });
+            if (cache.claude) cache.claude.patrol_on = off;
+            toast(off ? "🔍 Дозор снова следит сам" : "Дозор выключен — проверка только кнопкой", 4000);
+            draw();
+          } catch (x) { toast(problem(x)); } finally { b.disabled = false; }
+        } });
+      scroll.append(el("div", { class: "ow-status" + (off ? " off" : "") + " patrol-head" },
+        st.running ? el("span", { class: "ow-ic" }, el("span", { class: "spin" })) : el("span", { class: "ow-ic" + (off ? " off" : " ok"), text: "🔍" }),
+        el("div", { class: "ow-t" }, head, el("small", { text: sub })), toggle));
+      const now = el("button", { class: "btn line", text: st.running ? "⏳ Проверяет…" : "▶️ Проверить сейчас", disabled: st.running || st.busy || null,
+        onclick: async () => {
+          now.disabled = true;
+          try {
+            const end = await panel({ op: "agent_patrol_now" });
+            if (end.t !== "done") { toast("⚠️ " + end.text, 7000); now.disabled = false; return; }
+            if (!end.started) { toast("⏳ " + (end.text || "сейчас нельзя") + ".", 6000); now.disabled = false; return; }
+            toast("🔍 Дозор начал проверку — несколько минут. Что найдёт — появится здесь.", 6000);
+            cache.patrol = Object.assign({}, d, { status: end.status || Object.assign({}, st, { running: true }) });
+            draw();
+          } catch (x) { toast(problem(x)); now.disabled = false; }
+        } });
+      const reports = el("button", { class: "btn line", text: "📄 Отчёты", disabled: st.chat ? null : true, onclick: async () => {
+        claude.chat = st.chat;
+        store.set("claudeChat", st.chat);
+        try { await panel({ op: "agent_select", chat: st.chat }); } catch (e) { /* the chat opens all the same */ }
+        cache.claude = null;
+        go("claude");
+      } });
+      scroll.append(el("div", { class: "ow-acts" }, now, reports));
+      if (st.busy && !st.running) scroll.append(el("p", { class: "ow-note", style: "margin-top:-4px", text: "Claude сейчас выполняет вашу просьбу — Дозор проверит после." }));
+      // what waits for the owner's ✓ / ✕
+      const go_ = el("button", { class: "btn wide", disabled: true, text: "Отметьте ✓ или ✕" });
+      const count = () => {
+        const ys = [...patrolPick].filter(([, v]) => v === "yes"), n = patrolPick.size - ys.length;
+        const dev = ys.filter(([k]) => (open.find((x) => x.id === k) || {}).who === "dev").length, srv = ys.length - dev;
+        go_.disabled = !patrolPick.size;
+        go_.textContent = !patrolPick.size ? "Отметьте ✓ или ✕" : ys.length
+          ? "Отправить: " + [srv ? `🛠 ${srv}` : "", dev ? `👨‍💻 ${dev}` : "", n ? `✕ ${n}` : ""].filter(Boolean).join(" · ")
+          : `Отклонить: ✕ ${n}`;
+      };
+      const mark = (on, color) => "width:44px;min-height:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;"
+        + (on ? `background:${color};border-color:${color};color:#fff` : "");
+      const item = (x) => {
+        const [title, ...rest] = clean(x.text).split(/\s+—\s+/);
+        const meta = [x.who === "dev" ? "👨‍💻 разработчику" : "🛠 Claude", x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""]
+          .filter(Boolean).join(" · ");
+        const yes = el("button", { class: "chip", "aria-label": "Принять", title: "Принять", text: "✓" });
+        const no = el("button", { class: "chip", "aria-label": "Отклонить", title: "Отклонить", text: "✕" });
+        const words = el("div", { class: "ow-t" }, el("div", { style: "font-weight:500", text: title }),
+          rest.length ? el("small", { text: rest.join(" — ") }) : null, el("small", { style: "font-size:12px;margin-top:3px", text: meta }));
+        const row = el("div", { class: "ow-row patrol-item", "data-id": x.id, style: "align-items:flex-start" }, words,
+          el("div", { style: "display:flex;gap:6px;flex:none" }, yes, no));
+        const paint = () => {
+          const v = patrolPick.get(x.id);
+          yes.style.cssText = mark(v === "yes", "var(--ok)");
+          no.style.cssText = mark(v === "no", "var(--danger)");
+          yes.setAttribute("aria-pressed", v === "yes" ? "true" : "false");
+          no.setAttribute("aria-pressed", v === "no" ? "true" : "false");
+          words.style.opacity = v === "no" ? ".5" : "";
+          words.style.textDecoration = v === "no" ? "line-through" : "";
         };
-        const mark = (on, color) => "width:46px;min-height:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;"
-          + (on ? `background:${color};border-color:${color};color:#fff` : "");
-        const item = (x) => {
-          const [title, ...rest] = x.text.replace(/`/g, "").split(/\s+—\s+/);
-          who.set(x.id, x.who === "dev" ? "dev" : "server");
-          const meta = [x.who === "dev" ? "👨‍💻 разработчику" : "🛠 Claude на сервере", x.theme, when(x.first),
-            x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ");
-          const yes = el("button", { class: "chip", "aria-label": "Принять", title: "Принять", text: "✓" });
-          const no = el("button", { class: "chip", "aria-label": "Отклонить", title: "Отклонить", text: "✕" });
-          const words = el("div", { class: "grow" }, el("div", { style: "font-weight:600;line-height:1.35;overflow-wrap:anywhere", text: title }),
-            rest.length ? el("small", { style: "line-height:1.35;margin-top:2px;overflow-wrap:anywhere", text: rest.join(" — ") }) : "",
-            el("small", { style: "font-size:12px;margin-top:3px", text: meta }));
-          const row = el("div", { class: "row patrol-item", "data-id": x.id, style: "align-items:flex-start;padding:10px 0" }, words,
-            el("div", { style: "display:flex;gap:6px;flex:none" }, yes, no));
-          const paint = () => {
-            const v = pick.get(x.id);
-            yes.style.cssText = mark(v === "yes", "var(--ok)");
-            no.style.cssText = mark(v === "no", "var(--danger)");
-            words.style.opacity = v === "no" ? ".5" : "";
-            words.style.textDecoration = v === "no" ? "line-through" : "";
-          };
-          const flip = (v) => { if (pick.get(x.id) === v) pick.delete(x.id); else pick.set(x.id, v); paint(); count(); };
-          yes.onclick = () => flip("yes");
-          no.onclick = () => flip("no");
-          row.paint = paint;
-          paint();
-          return row;
-        };
-        const drawList = (items) => {
-          body.innerHTML = "";
-          const open = items.filter((x) => x.status === "new");
-          const rows = [];
-          for (const [kind, head] of [["fix", "🔴 Исправить"], ["idea", "🟡 Улучшить"]]) {
-            const these = open.filter((x) => x.kind === kind).sort((a, b) => b.first - a.first);
-            if (!these.length) continue;
-            const card = el("div", { class: "card", style: "padding:4px 12px;margin-bottom:10px" });
-            const mine = these.map(item);
-            rows.push(...mine);
-            card.append(el("div", { class: "row", style: "min-height:36px" }, el("b", { class: "grow", text: `${head} · ${these.length}` }),
-              el("button", { class: "hint", style: "min-height:36px;padding:6px 12px;font-size:14px", text: "✓ все", onclick: () => {
-                for (const x of these) pick.set(x.id, "yes");
-                mine.forEach((r) => r.paint());
-                count();
-              } })), ...mine);
-            body.append(card);
-          }
-          if (!open.length) {
-            body.append(el("div", { class: "card", style: "text-align:center;padding:18px 12px" },
-              el("div", { style: "font-size:28px", text: "✅" }), el("b", { text: "Новых замечаний нет" }),
-              el("small", { style: "display:block;color:var(--muted);margin-top:4px",
-                text: d.patrol_on ? "Дозор следит сам: что найдёт — появится здесь, о важном придёт уведомление." : "Дозор выключен." })));
-          }
-          for (const [status, head, ic] of [["sent", "Отправлено Claude на сервере", "⏳"], ["dev", "У разработчика", "👨‍💻"], ["done", "Исправлено", "✅"]]) {
-            const these = items.filter((x) => x.status === status);
-            if (!these.length) continue;
-            body.append(el("details", { class: "patrol-" + status, style: "margin:4px 4px 8px;font-size:14px" },
-              el("summary", { style: "color:var(--muted);min-height:32px", text: `${ic} ${head} · ${these.length}` }),
-              ...these.map((x) => el("div", { style: "margin:6px 0 0 18px;line-height:1.35;overflow-wrap:anywhere", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + x.text.replace(/`/g, "") })),
-              status === "dev" ? el("button", { class: "hint", style: "margin:8px 0 0 18px;min-height:36px;padding:6px 12px;font-size:14px",
-                text: "📋 Текст для разработчика", onclick: () => devSheet(devText(these, items)) }) : ""));
-          }
-          const turn = (on) => async () => {
-            try {
-              const end = await panel({ op: "agent_patrol", on });
-              if (end.t !== "done") return toast("⚠️ " + end.text, 7000);
-              close(); cache.claude = end; draw();
-            } catch (e) { toast(problem(e)); }
-          };
-          body.append(el("div", { class: "chips", style: "margin:10px 0 4px;flex-wrap:wrap" },
-            el("button", { class: "chip" + (d.patrol_on ? " on" : ""), text: "🔍 Дозор: следит", onclick: d.patrol_on ? null : turn(true) }),
-            el("button", { class: "chip" + (d.patrol_on ? "" : " on"), text: "Выключен", onclick: d.patrol_on ? turn(false) : null }),
-            d.patrol_chat ? el("button", { class: "chip", text: "📄 Отчёты полностью", onclick: async () => {
-              close(); claude.chat = d.patrol_chat;
-              try { await panel({ op: "agent_select", chat: d.patrol_chat }); } catch (e) { /* the list stays */ }
-              reloadClaude();
-            } }) : ""));
-          foot.classList.toggle("hidden", !open.length);
-          count();
-        };
-        go.onclick = async () => {
-          const ys = [...pick].filter(([, v]) => v === "yes").map(([k]) => k), no = [...pick].filter(([, v]) => v === "no").map(([k]) => k);
-          const dev = ys.filter((k) => who.get(k) === "dev"), yes = ys.filter((k) => who.get(k) !== "dev");
-          go.disabled = true;
-          let text = "";
-          if (dev.length) {  // the developer's first: kept as his (never asked of the server's Claude), their text to copy
-            try {
-              const end = await panel({ op: "agent_patrol_dev", ids: dev });
-              if (end.t !== "done") { go.disabled = false; return toast("⚠️ " + end.text, 7000); }
-              text = devText(all.filter((x) => dev.includes(x.id)), end.items || all);
-            } catch (e) { go.disabled = false; return toast(problem(e)); }
-          }
-          if (!yes.length) {
-            try {
-              if (no.length) {
-                const end = await panel({ op: "agent_patrol_pick", yes: [], no });
-                if (end.t !== "done") { go.disabled = false; return toast("⚠️ " + end.text, 7000); }
-                toast(`✕ ${end.declined} — Дозор больше не предложит`, 4000);
-              }
-              close(); reloadClaude();
-            } catch (e) { go.disabled = false; toast(problem(e)); return; }
-          } else {
-            close();
-            talk({ op: "agent_patrol_pick", chat: "new", yes, no }, `🔍 Из Дозора — принято: ${yes.length}`);
-          }
-          if (text) devSheet(text);
-        };
-        panel({ op: "agent_patrol_items" }).then((end) => {
-          if (end.t !== "done") { body.innerHTML = ""; body.append(el("p", { text: "⚠️ " + end.text })); return; }
-          all = end.items || [];
-          drawList(all);
-        }).catch((e) => { body.innerHTML = ""; body.append(el("p", { text: problem(e) })); });
-      });
+        const flip = (v) => { if (patrolPick.get(x.id) === v) patrolPick.delete(x.id); else patrolPick.set(x.id, v); paint(); count(); };
+        yes.onclick = () => flip("yes");
+        no.onclick = () => flip("no");
+        row.paint = paint;
+        paint();
+        return row;
+      };
+      if (open.length) {
+        scroll.append(el("p", { class: "ow-note", style: "margin-top:4px", text: "✓ — принять: 🛠 Claude на сервере покажет план, 👨‍💻 — текст "
+          + "разработчику. ✕ — больше не предлагать." }));
+        for (const [kind, head_] of [["fix", "🔴 Исправить"], ["idea", "🟡 Улучшить"]]) {
+          const these = open.filter((x) => x.kind === kind).sort((a, b) => b.first - a.first);
+          if (!these.length) continue;
+          const rows = these.map(item);
+          scroll.append(section(`${head_} · ${these.length}`, el("button", { class: "ow-btn line", style: "min-height:36px", text: "✓ все", onclick: () => {
+            for (const x of these) patrolPick.set(x.id, "yes");
+            rows.forEach((r) => r.paint());
+            count();
+          } })), el("div", { class: "ow-list patrol-" + kind }, ...rows));
+        }
+        scroll.append(el("div", { class: "ow-foot" }, go_));
+        count();
+      } else {
+        scroll.append(el("div", { class: "ow-list", style: "text-align:center;padding:16px 12px" },
+          el("div", { style: "font-size:26px", text: "✅" }), el("div", { style: "font-weight:500", text: "Новых замечаний нет" }),
+          el("small", { style: "display:block;color:var(--muted);margin-top:4px;font-size:13px",
+            text: off ? "Дозор выключен: проверит, только когда нажмёте «Проверить сейчас»." : "Что найдёт — появится здесь, о важном придёт уведомление." })));
+      }
+      // what is already in hand: at the server's Claude, at the developer, done
+      for (const [status, head_, ic, opened] of [["sent", "У Claude на сервере", "🛠", true], ["dev", "У разработчика", "👨‍💻", true], ["done", "Исправлено", "✅", false]]) {
+        const these = items.filter((x) => x.status === status);
+        if (!these.length) continue;
+        const det = el("details", { class: "ow-more patrol-" + status, open: opened && these.length <= 5 ? true : null },
+          el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `${ic} ${head_} · ${these.length}` }), el("span", { class: "ow-go", text: "›" })),
+          el("div", { class: "ow-list" }, ...these.slice().reverse().map((x) => el("div", { class: "ow-row", style: "min-height:40px" },
+            el("div", { class: "ow-t", style: "font-size:14px" }, (x.kind === "fix" ? "🔴 " : "🟡 ") + clean(x.text).split(/\s+—\s+/)[0],
+              el("small", { text: (x.theme ? x.theme + " · " : "") + when(x.first) }))))),
+          status === "dev" ? el("button", { class: "btn line wide", style: "margin:0 0 10px", text: "📋 Текст для разработчика",
+            onclick: () => devSheet(devText(these, items)) }) : null,
+          status === "sent" ? el("p", { class: "ow-note", style: "margin-top:-4px", text: "Планы по ним — в «🛠 Claude», в разговоре «🔍 Из Дозора»." }) : null);
+        scroll.append(det);
+      }
+      const themes = st.themes && st.themes.length ? st.themes : ["ошибки и службы", "VPN и мосты", "защита", "приложение", "новые версии ИИ"];
+      scroll.append(section("Темы по кругу"), el("div", { class: "chips patrol-themes", style: "flex-wrap:wrap;margin:0 2px 8px" },
+        ...[...new Set(themes)].map((t) => el("span", { class: "chip" + (t === st.next && !off ? " on" : ""), style: "min-height:32px;padding:5px 11px;font-size:13px",
+          title: t === st.next ? "следующая" : null, text: t }))),
+        el("p", { class: "ow-note", text: "По одной теме примерно раз в час, на бесплатных моделях; фото и видео — чаще всего. "
+          + "Ничего не меняет сам. Один пункт делает кто-то один — правки не пересекаются." }));
+      go_.onclick = async () => {
+        const ys = [...patrolPick].filter(([, v]) => v === "yes").map(([k]) => k), no = [...patrolPick].filter(([, v]) => v === "no").map(([k]) => k);
+        const isDev = (k) => (open.find((x) => x.id === k) || {}).who === "dev";
+        const dev = ys.filter(isDev), yes = ys.filter((k) => !isDev(k));
+        go_.disabled = true;
+        let text = "";
+        if (dev.length) {  // the developer's first: kept as his (never asked of the server's Claude), their text to copy
+          try {
+            const end = await panel({ op: "agent_patrol_dev", ids: dev });
+            if (end.t !== "done") { go_.disabled = false; return toast("⚠️ " + end.text, 7000); }
+            text = devText(items.filter((x) => dev.includes(x.id)), end.items || items);
+            if (end.items) cache.patrol = Object.assign({}, cache.patrol, { items: end.items });
+          } catch (e) { go_.disabled = false; return toast(problem(e)); }
+        }
+        dev.forEach((k) => patrolPick.delete(k));
+        if (!yes.length) {
+          try {
+            if (no.length) {
+              const end = await panel({ op: "agent_patrol_pick", yes: [], no });
+              if (end.t !== "done") { go_.disabled = false; return toast("⚠️ " + end.text, 7000); }
+              toast(`✕ ${end.declined} — Дозор больше не предложит`, 4000);
+            }
+            patrolPick.clear();
+            load();
+          } catch (e) { go_.disabled = false; toast(problem(e)); return; }
+        } else {  // the accepted for the server: Claude checks them in a new talk and shows a plan
+          patrolPick.clear();
+          cache.patrol = null;
+          cache.claude = null;
+          part = "claude"; store.set("accessPart", part); refreshTop();
+          await load();
+          if (part === "claude" && claude.box) talk({ op: "agent_patrol_pick", chat: "new", yes, no }, `🔍 Из Дозора — принято: ${yes.length}`);
+        }
+        if (text) devSheet(text);
+      };
+      // while it checks, the tab looks again by itself
+      if (st.running) draw.tick = setTimeout(() => { if (part === "patrol" && S.tab === "vpn" && !document.hidden) load(); }, 15000);
     }
     // the rescue console: Claude Code on the owner's Anthropic key and the repairs, in a browser, apart from this app
     function rescueCard() {
@@ -612,19 +709,17 @@
       }
       claude.chat = d.chat;
       store.set("claudeChat", d.chat);
-      scroll.append(rescueCard());
-      claude.head = el("b", { text: d.title });
-      scroll.append(el("div", { class: "card", style: "padding:8px 12px" },
-        el("div", { class: "row", style: "min-height:40px;cursor:pointer", onclick: () => chatsSheet(d) },
-          el("div", { class: "grow" }, claude.head, el("small", { text: d.chats.length > 1 ? `Разговоров: ${d.chats.length} · выбрать ›` : "Один разговор — одна тема" })),
-          el("button", { class: "btn soft", text: "➕ Новый", onclick: (e) => { e.stopPropagation(); newChat(); } }))));
+      // the talk: its name (a tap — the list of talks, the rescue console), a new one
+      claude.head = el("span", { text: d.title });
+      scroll.append(el("div", { class: "ow-list" }, line("💬", claude.head, d.chats.length > 1 ? `Разговоров: ${d.chats.length} · выбрать` : "Один разговор — одна тема",
+        el("button", { class: "ow-btn", text: "➕ Новый", onclick: (e) => { e.stopPropagation(); newChat(); } }), () => chatsSheet(d))));
       const box = claude.box = el("div", { class: "msgs", style: "padding:4px 2px 12px" });
       if (!d.history.length) box.append(claudeIntro());
       let asked = "";
       const lastAi = d.history.map((m) => m.role !== "me").lastIndexOf(true);
       const early = el("div", { class: "hidden" });
       d.history.forEach((m, i) => {
-        (i < d.history.length - 6 ? early : box).append(claudeMsg(m, asked, i === lastAi));
+        (i < d.history.length - 6 ? early : box).append(claudeMsg(m, asked, i === lastAi, i === d.undo_at ? d : null));
         if (m.role === "me") asked = m.text;
       });
       if (early.childNodes.length) {
@@ -632,42 +727,23 @@
           onclick: (e) => { early.classList.remove("hidden"); e.currentTarget.replaceWith(early); } }));
       }
       scroll.append(box);
-      const acts = el("div", { class: "big-actions", style: "margin:0 0 10px" });
       if (d.busy) {
         if (d.busy_chat === d.chat) follow(d.events);
-        else acts.append(el("div", { class: "status", text: "⏳ Claude сейчас работает в другом разговоре" }));
+        else scroll.append(el("p", { class: "ow-note", text: "⏳ Claude сейчас работает в другом разговоре" }));
       } else {
-        if (d.patrol) acts.append(el("div", { class: "status", text: "🔍 Дозор сейчас проверяет сервер — ваш вопрос его прервёт" }));
-        if (d.can_run) acts.append(el("button", { class: "btn", text: "✅ Выполнить", onclick: runPlan }));
-        if (d.can_undo) acts.append(el("button", { class: "btn line", text: "↩️ Вернуть как было", onclick: () => undo(d) }));
+        if (d.patrol) scroll.append(el("p", { class: "ow-note", text: "🔍 Дозор сейчас проверяет сервер — ваш вопрос его прервёт" }));
+        // a plan waits: carry it out (one tap) or turn it down
+        if (d.can_run) scroll.append(el("div", { class: "card plan-card", style: "padding:12px" },
+          el("div", { class: "ow-t" }, "📋 План готов", el("small", { text: "Перед правками сервер сделает снимок файлов, после — проверит себя; если что-то сломается — сам вернёт как было." })),
+          el("div", { class: "ow-acts", style: "margin:10px 0 0" },
+            el("button", { class: "btn", text: "✅ Выполнить", onclick: runPlan }),
+            el("button", { class: "btn line", text: "✕ Отклонить", onclick: rejectPlan }))));
       }
-      if (acts.childNodes.length) scroll.append(acts);
-      // (here, over the field: the chat opens scrolled to its end, so the patrol's list is in sight at once)
-      if (d.patrol_on === true || d.patrol_on === false) scroll.append(patrolCard(d));
-      // who answers here: the free models, or Claude itself on the owner's key (the month's cap less the console's reserve)
-      const pick = async (body) => {
-        const end = await panel(body);
-        if (end.t === "done") { cache.claude = end; draw(); } else toast("⚠️ " + end.text, 7000);
-      };
-      const money = ` · $${(d.spent || 0).toFixed(2)} из $${Number(d.cap || 0).toFixed(2)} в месяц (предел $${d.month_cap || 20}, из них $${d.reserve || 5} — запас для ремонта в спасательной консоли)`;
-      const chip = (on, text, body) => el("button", { class: "chip" + (on ? " on" : ""), text, onclick: () => { if (!on) pick(body); } });
-      const engineRow = d.paid_key ? el("div", { class: "chips", style: "margin:0 0 6px;flex-wrap:wrap" },
-        chip(!d.on_claude, "🆓 Бесплатные", { op: "agent_engine", engine: "free" }),
-        chip(!!d.on_claude, "🟠 Claude", { op: "agent_engine", engine: "claude" })) : null;
-      const modelRow = d.paid_key && d.on_claude ? el("div", { class: "chips", style: "margin:0 0 6px;flex-wrap:wrap" },
-        chip((d.model || "auto") === "auto", "Авто", { op: "agent_model", model: "auto" }),
-        ...(d.models || []).map((m) => chip(d.model === m.id, m.name.replace(/\s+[\d.]+$/, ""), { op: "agent_model", model: m.id }))) : null;
-      scroll.append(el("div", { style: "font-size:12px;color:var(--muted);margin:0 4px 12px" },
-        engineRow || "", modelRow || "",
-        d.paid_key && d.on_claude
-          ? el("span", { text: ((d.model || "auto") === "auto" ? "🟠 Отвечает Claude: Haiku смотрит вопрос и выбирает модель, «Выполнить» — не ниже Sonnet"
-              : "🟠 Все ответы — " + ((d.models || []).find((m) => m.id === d.model) || {}).name) + money })
-          : el("span", {}, "Модели: " + (d.engines.length ? d.engines.join(" → ") : "нет ключей — «Ещё» → «🔑 Ключи»"),
-            // when the free models' day is used up: Claude itself on the owner's key from the rescue console
-            el("br"), d.paid_key
-              ? el("a", { href: "#", text: (d.paid ? "💳 Кончились бесплатные — дальше Claude по вашему ключу: вкл" : "💳 Claude по вашему ключу, когда кончились бесплатные: выкл")
-                  + money, onclick: (e) => { e.preventDefault(); pick({ op: "agent_paid", on: !d.paid }); } })
-              : el("span", { text: "💳 Claude по вашему ключу (когда бесплатные кончатся или по вашему выбору): ключ Anthropic — «Ещё» → «🔑 Ключи»" }))));
+      // who answers here, in one line; a tap — the choice
+      const name = d.paid_key && d.on_claude
+        ? "🟠 Claude · " + ((d.model || "auto") === "auto" ? "авто" : (((d.models || []).find((m) => m.id === d.model) || {}).name || d.model))
+        : d.engines.length ? "🧠 " + d.engines[0] : "нет ключей — «Ещё» → «🔑 Ключи»";
+      scroll.append(el("button", { class: "ow-model", onclick: () => modelSheet(d) }, "Модель: " + name + " ›"));
       const ta = el("textarea", { rows: 1, placeholder: d.busy ? "Claude работает… можно написать следующее" : "Что проверить или сделать?" });
       ta.value = claude.draft;
       ta.addEventListener("input", () => { claude.draft = ta.value; ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
@@ -776,13 +852,55 @@
       }
       talk(body, text || "📎 Посмотри скриншот" + (pics.length > 1 ? "ы" : ""), pics.map(urlOf));
     }
-    async function runPlan() {
-      if (!(await confirmBox("Claude поменяет сервер по плану выше. Сначала сервер сделает снимок файлов, а после проверит себя: если что-то сломается — сам вернёт как было.", "✅ Выполнить"))) return;
+    function runPlan() {  // the plan card says what happens: one tap
       talk({ op: "agent_run", chat: claude.chat }, "✅ Выполнить");
     }
+    async function rejectPlan() {
+      try {
+        const end = await panel({ op: "agent_reject", chat: claude.chat });
+        if (end.t !== "done") return toast("⚠️ " + end.text, 6000);
+        cache.claude = end;
+        draw();
+        toast("План отклонён — сервер не менялся", 4000);
+      } catch (e) { toast(problem(e)); }
+    }
     async function undo(d) {
-      if (!(await confirmBox(`Вернуть файлы сервера, как они были до последнего «Выполнить» (${when(d.undo_ts)})?`, "↩️ Вернуть как было"))) return;
+      if (!(await confirmBox(`Вернуть файлы сервера, как они были до «Выполнить» (${when(d.undo_ts)})? Сервер после проверит себя.`, "Вернуть"))) return;
       talk({ op: "agent_undo", chat: claude.chat }, "↩️ Вернуть как было");
+    }
+    // «Модель: …»: who answers in this chat — the free models in turn, or Claude itself on the owner's key
+    function modelSheet(d) {
+      sheet("🧠 Модель", (box, close) => {
+        const pick = async (body) => {
+          try {
+            const end = await panel(body);
+            if (end.t === "done") { close(); cache.claude = end; draw(); } else toast("⚠️ " + end.text, 7000);
+          } catch (e) { toast(problem(e)); }
+        };
+        const chip = (on, text, body) => el("button", { class: "chip" + (on ? " on" : ""), text, "aria-pressed": on ? "true" : "false", onclick: () => { if (!on) pick(body); } });
+        if (d.paid_key) {
+          box.append(el("div", { class: "chips", style: "margin:0 0 10px;flex-wrap:wrap" },
+            chip(!d.on_claude, "🆓 Бесплатные", { op: "agent_engine", engine: "free" }), chip(!!d.on_claude, "🟠 Claude", { op: "agent_engine", engine: "claude" })));
+        }
+        if (d.paid_key && d.on_claude) {
+          box.append(el("div", { class: "chips", style: "margin:0 0 10px;flex-wrap:wrap" },
+            chip((d.model || "auto") === "auto", "Авто", { op: "agent_model", model: "auto" }),
+            ...(d.models || []).map((m) => chip(d.model === m.id, m.name.replace(/\s+[\d.]+$/, ""), { op: "agent_model", model: m.id }))),
+          el("p", { class: "ow-note", text: (d.model || "auto") === "auto" ? "Авто: модель по сложности вопроса, «Выполнить» — не ниже Sonnet." : "Все ответы — эта модель." }));
+          return;
+        }
+        const list = el("div", { class: "ow-list" });
+        d.engines.forEach((e, i) => list.append(line(i ? String(i + 1) : "🧠", e, i ? "если первая не ответит" : "отвечает сейчас", null, null, i ? "off" : "ok")));
+        if (d.engines.length) box.append(list);
+        else box.append(el("p", { class: "ow-note", text: "Нет ключей моделей — добавьте в «Ещё» → «🔑 Ключи»." }));
+        if (d.paid_key) {
+          box.append(el("div", { class: "ow-list" }, line("💳", "Кончились бесплатные — Claude по вашему ключу", d.paid ? "включено" : "выключено",
+            el("button", { class: "toggle" + (d.paid ? " on" : ""), "aria-label": "Claude по вашему ключу, когда кончились бесплатные",
+              "aria-pressed": d.paid ? "true" : "false", onclick: () => pick({ op: "agent_paid", on: !d.paid }) }))));
+        } else {
+          box.append(el("p", { class: "ow-note", text: "Claude по вашему ключу — добавьте ключ Anthropic в «Ещё» → «🔑 Ключи»." }));
+        }
+      });
     }
     async function stopClaude() {
       try { await panel({ op: "agent_stop" }); } catch (e) { toast(problem(e)); }
@@ -814,6 +932,7 @@
             reloadClaude();
           } })));
         }
+        box.append(el("div", { style: "margin-top:14px" }, rescueCard()));  // (under the list: for when this chat breaks)
       });
     }
     function drawServer(d) {
@@ -828,38 +947,36 @@
       if (d.disk[1] && d.disk[0] / d.disk[1] > 0.92) bad.push("диск почти заполнен");
       const host = d.hosting;
       if (host && host.set && host.days_left < 5) bad.push(`хостинг: осталось ${Math.floor(host.days_left)} дн., пополните`);
-      scroll.append(el("div", { class: "card hero" + (bad.length ? " bad" : "") },
-        el("div", { class: "emoji", text: bad.length ? "⚠️" : "✅" }),
-        el("div", { class: "grow" }, el("b", { text: bad.length ? "Есть проблемы" : "Всё работает" }),
+      scroll.append(el("div", { class: "ow-status server-head" + (bad.length ? " bad" : "") },
+        el("span", { class: "ow-ic " + (bad.length ? "bad" : "ok"), text: bad.length ? "⚠️" : "✅" }),
+        el("div", { class: "ow-t" }, bad.length ? "Есть проблемы" : "Всё работает",
           el("small", { text: bad.length ? bad.join(" · ") : `${d.host} · ${d.ip}` + (d.online !== null ? ` · в сети: ${d.online}` : "") }))));
-      // what the owner needs: the hosting's days left and the server's version (always), the bridges, remote desktop
-      const u = d.update;
-      if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
-      if (u) scroll.append(updateCard(u, "all"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить», the night switch
-      if ("vpn_soft" in d) scroll.append(vpnSoftCard(d.vpn_soft));
-      if ("backup" in d) scroll.append(backupCard(d.backup));
-      scroll.append(storageCard(), remoteCard());
+      // what the owner needs: the hosting's days left, the server's version, the VPN's programs; the backup, the disk, remote desktop
+      const main = el("div", { class: "ow-list" });
+      if (host) main.append(hostingRow(host));
+      if (d.update) main.append(...updateRows(d.update));
+      if (d.vpn_soft) main.append(vpnSoftRow(d.vpn_soft));  // (no versions read yet: nothing to show)
+      scroll.append(section("Сервер"), main, section("Обслуживание"),
+        el("div", { class: "ow-list" }, "backup" in d ? backupRow(d.backup) : null, storageRow(), line("🖥", "Удалённый доступ", "RustDesk для Windows и Android", null, remoteSheet)));
     }
     // ---- the last backup: when, made or not, where it went; one now by a tap ----
-    function backupCard(b) {
-      const now = el("button", { class: "btn soft", style: "flex:none;padding:10px 14px", text: "💾 Сейчас", onclick: async () => {
+    function backupRow(b) {
+      const now = el("button", { class: "ow-btn", text: "💾 Сейчас", onclick: async (e) => {
+        e.stopPropagation();
         now.disabled = true;
         try {
           const end = await panel({ op: "backup" });
           toast(end.t === "done" ? "💾 Копия делается — о ней придёт событие через пару минут" : "⚠️ " + end.text, 6000);
-        } catch (e) { toast(problem(e)); now.disabled = false; }
+        } catch (x) { toast(problem(x)); now.disabled = false; }
       } });
-      const words = !b ? el("small", { text: "Ещё не делалась: сервер делает её сам, когда меняется важное (люди VPN, ключи, мосты)." })
-        : el("small", { style: b.ok ? "" : "color:var(--danger-ink)", text: b.ok ? (b.where ? "Лежит " + b.where + "." : "Сделана.")
-          : String(b.text || "").replace(/^\S+\s*/, "") });
-      return el("div", { class: "card backup-card", style: "margin:0 0 12px;padding:10px 14px" },
-        el("div", { class: "row", style: "min-height:0" }, el("div", { class: "grow" },
-          b ? `🗂 Копия: ${when(b.ts)} ${b.ok ? "✓" : "✗"}` : "🗂 Копия", words), now));
+      const sub = !b ? "ещё не делалась — сервер сделает сам, когда изменится важное"
+        : b.ok ? (b.where ? "Лежит " + b.where + "." : "Сделана.") : [String(b.text || "").replace(/^\S+\s*/, ""), "bad"];
+      const r = line("🗂", b ? `Копия: ${when(b.ts)} ${b.ok ? "✓" : "✗"}` : "Резервная копия", sub, now, null, !b ? "off" : b.ok ? "ok" : "bad");
+      r.classList.add("backup-card");
+      return r;
     }
     // ---- the VPN's programs: Hysteria and Xray as installed, the approved ones, the last nightly update's word (vpn-update) ----
-    function vpnSoftCard(v) {
-      const card = el("div", { class: "card", style: "margin:0 0 12px" });
-      if (!v) return card.append(el("small", { text: "🛡 Программы VPN: версии ещё не проверялись — появятся здесь в течение часа." })), card;
+    function vpnSoftRow(v) {
       const n = (s) => String(s || "").replace(/^app\//, "").replace(/^v/, "");
       const newer = (a, b) => {  // "2.13.0" after "2.12.1"
         const x = n(a).split(/[.-]/).map(Number), y = n(b).split(/[.-]/).map(Number);
@@ -867,47 +984,51 @@
         return false;
       };
       // latest: the version the server release approved (a week old, its sum pinned); only a newer one is installed
-      const one = (name, cur, latest, bad) => !cur ? "" : `${name} ${cur}` + (!latest || !newer(latest, cur) ? " ✓"
-        : n(bad) === n(latest) ? ` — новая ${latest} не прошла проверку, оставлена рабочая` : ` — проверенная ${latest} встанет сама ночью`);
+      const one = (name, cur, latest, bad) => !cur ? "" : `${name} ${cur}` + (!latest || !newer(latest, cur) ? ""
+        : n(bad) === n(latest) ? ` (новая ${latest} не прошла проверку)` : ` (${latest} встанет ночью)`);
       const parts = [one("Hysteria", v.hysteria, v.hysteria_latest, v.hysteria_bad), one("Xray", v.xray, v.xray_latest, v.xray_bad)].filter(Boolean);
       const recent = v.note && v.note_at && Date.now() / 1000 - v.note_at < 7 * 86400;
       const warn = recent && /^(↩️|⚠️)/.test(v.note);
-      card.append(el("div", { class: "grow" }, "🛡 Программы VPN",
-        el("small", { text: (parts.join(" · ") || "версии не прочитались") + (v.at ? `. Проверено ${ago(v.at)} назад.` : "") }),
-        recent ? el("small", { style: "display:block;margin-top:4px" + (warn ? ";color:var(--danger-ink)" : ""),
-          text: `Последнее обновление (${ago(v.note_at)} назад): ` + v.note.replace(/^\S+\s*VPN:\s*/, "") }) : ""));
-      return card;
+      const sub = (parts.join(" · ") || "версии не прочитались") + (warn ? ". " + v.note.replace(/^\S+\s*VPN:\s*/, "") : "");
+      const r = line("🛡", "Программы VPN", [sub, warn ? "bad" : ""], value(warn ? "⚠️" : "✓", warn ? "bad" : "ok"), null, warn ? "bad" : "ok");
+      r.classList.add("vpn-soft");
+      return r;
     }
-    // ---- the disk: how full it is, what the templates take, how fast it is (the last test), what the last cleanup freed ----
-    function storageCard() {
-      // only what matters: free and taken, and the clean-up of the server's leftovers under it
-      const card = el("div", { class: "card", style: "padding:12px 14px" }, el("small", { text: "💾 Диск: проверяю…" }));
-      const gb = (v) => String(Math.round((+v || 0) * 10) / 10).replace(".", ",") + " ГБ";
+    // ---- the disk: free and taken; the clean-up of the server's leftovers a tap away ----
+    const gb = (v) => String(Math.round((+v || 0) * 10) / 10).replace(".", ",") + " ГБ";
+    function storageRow() {
+      let cur = line("💾", "Диск", "проверяю…", null, null, "off");
       const fill = (s) => {
-        const c = s.clean, d = s.disk, pct = d.total ? Math.min(100, Math.round(d.used / d.total * 100)) : 0;
-        card.innerHTML = "";
-        card.append(el("small", { text: "💾 Диск" }),
-          el("div", { style: "font-size:24px;font-weight:800;white-space:nowrap;margin:2px 0", text: "свободно " + gb(d.free) }),
-          el("small", { text: `занято ${gb(d.used)} из ${gb(d.total)}` }),
-          el("div", { style: "height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:6px 0 2px" },
-            el("div", { style: `height:100%;width:${pct}%;background:${pct > 90 ? "var(--danger,#d92d20)" : pct > 75 ? "#f79009" : "var(--accent,#0e9f6e)"}` })));
-        const btn = el("button", { class: "btn line wide", style: "margin-top:10px", text: "🧹 Очистить сервер", onclick: async () => {
-          if (!(await confirmBox("Убрать с сервера мусор: старые пакеты и ядра, кэши, временные файлы, старые журналы и копии установщика? "
-            + "Резервные копии, ключи и данные людей не трогаются.", "Очистить"))) return;
-          btn.disabled = true; btn.textContent = "⏳ Чищу в фоне…";
-          try {
-            const end = await panel({ op: "storage_clean" });
-            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); btn.disabled = false; btn.textContent = "🧹 Очистить сервер"; return; }
-            toast("🧹 Чистка идёт в фоне, 1–5 минут. Итог появится здесь.", 6000);
-            setTimeout(() => panel({ op: "storage" }).then((r) => r.t === "done" && card.isConnected && fill(r)).catch(() => {}), 180000);
-          } catch (e) { toast(problem(e)); btn.disabled = false; btn.textContent = "🧹 Очистить сервер"; }
-        } });
-        card.append(btn);
-        if (c) card.append(el("small", { style: "display:block;margin-top:6px;color:var(--muted)", text: `Последняя чистка ${when(c.ts)}: освобождено `
-          + (c.freed_mb >= 100 ? gb(c.freed_mb / 1024) : (c.freed_mb || 0) + " МБ") }));
+        const d = s.disk, pct = d.total ? Math.min(100, Math.round(d.used / d.total * 100)) : 0;
+        const r = line("💾", "Диск · свободно " + gb(d.free), [`занято ${gb(d.used)} из ${gb(d.total)}`, pct > 90 ? "bad" : ""], null,
+          () => storageSheet(s, fill), pct > 90 ? "bad" : pct > 75 ? "warn" : "ok");
+        r.classList.add("storage-row");
+        r.querySelector(".ow-t").append(el("div", { class: "ow-bar" },
+          el("i", { style: `width:${pct}%;background:${pct > 90 ? "var(--danger)" : pct > 75 ? "#f79009" : "var(--ok)"}` })));
+        if (cur.isConnected) cur.replaceWith(r);
+        cur = r;
       };
-      panel({ op: "storage" }).then((s) => (s.t === "done" ? fill(s) : card.remove())).catch(() => card.remove());
-      return card;
+      panel({ op: "storage" }).then((s) => (s.t === "done" ? fill(s) : cur.remove())).catch(() => cur.remove());
+      return cur;
+    }
+    function storageSheet(s, fill) {
+      sheet("💾 Диск", (box, close) => {
+        const c = s.clean, d = s.disk;
+        box.append(el("div", { style: "font-size:15px;margin:-6px 0 6px", text: `Свободно ${gb(d.free)} · занято ${gb(d.used)} из ${gb(d.total)}` }),
+          el("p", { class: "ow-note", style: "margin:0 2px 12px", text: c ? `Последняя чистка ${when(c.ts)}: освобождено `
+            + (c.freed_mb >= 100 ? gb(c.freed_mb / 1024) : (c.freed_mb || 0) + " МБ") + "." : "Чистки ещё не было." }),
+          el("button", { class: "btn line wide", text: "🧹 Очистить сервер", onclick: async (e) => {
+            if (!(await confirmBox("Убрать с сервера мусор: старые пакеты и ядра, кэши, временные файлы, старые журналы и копии установщика? "
+              + "Резервные копии, ключи и данные людей не трогаются.", "Очистить"))) return;
+            close();
+            try {
+              const end = await panel({ op: "storage_clean" });
+              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); return; }
+              toast("🧹 Чистка идёт в фоне, 1–5 минут. Итог появится в «Диске».", 6000);
+              setTimeout(() => panel({ op: "storage" }).then((r) => r.t === "done" && fill(r)).catch(() => {}), 180000);
+            } catch (x) { toast(problem(x)); }
+          } }));
+      });
     }
     // the bridges: what they are for in one line, each one's state (a tap: its link, a restart), and one way to add more
     const BRIDGES = [
@@ -916,20 +1037,22 @@
       ["dion", "DION", "Нужна бесплатная учётная запись на dion.vc (почта и пароль)."],
       ["bitrix", "Битрикс24", "Нужен свой бесплатный портал на bitrix24.ru (почта не Gmail)."],
     ];
+    // the bridges: each one's state and whether Winger gets it (a tap: its link, a restart), and one way to add more
+    const WINGER = { yes: "в Winger ✓", copy: "у человека", nolink: "в Winger не попал: нет ссылки звонка", spare: "запасной: в Winger мост этого сервиса уже есть" };
     function bridgesCard(d) {
-      const card = el("div", { class: "card" }, el("h3", { text: "🌉 Мосты" }),
-        el("small", { style: "color:var(--muted);display:block;margin:-4px 0 6px", text: "Winger получает мосты сам. Мост — его ссылки и перезапуск; "
-          + "кому дать мост — в карточке человека выше («🌉 Мост»)." }));
+      const list = el("div", { class: "ow-list bridges" });
       for (const b of d.bridges) {
-        card.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => bridgeSheet(b) },
-          el("span", { style: "font-size:18px", text: b.ok ? "🟢" : "🔴" }),
-          el("div", { class: "grow" }, b.label, el("small", { text: (b.ok ? "работает " + dur(b.since) : UNIT[b.state] || b.state) + (+b.restarts ? ` · перезапусков: ${b.restarts}` : "") })),
-          "›"));
+        const w = b.winger || (bridgeKind(b) ? "" : "nolink");
+        const sub = [(b.ok ? "работает " + dur(b.since) : UNIT[b.state] || b.state) + (+b.restarts ? `, перезапусков: ${b.restarts}` : ""), WINGER[w] || ""]
+          .filter(Boolean).join(" · ");
+        list.append(line(b.ok ? "🟢" : "🔴", b.label, [sub, b.ok && w !== "nolink" ? "" : "bad"], null, () => bridgeSheet(b), b.ok ? "ok" : "bad"));
       }
-      if (!d.bridges.length) card.append(el("div", { class: "row" }, el("div", { class: "grow", text: "Мостов пока нет" })));
+      if (!d.bridges.length) list.append(line("🌉", "Мостов пока нет", "Мост нужен, когда сервер напрямую не открывается (белые списки).", null, null, "off"));
       const missing = BRIDGES.filter(([p]) => !d.bridges.some((b) => b.id.startsWith(p + "-")));
-      if (missing.length) card.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "➕ Добавить мост", onclick: () => addBridge(d, missing) }));
-      return card;
+      if (missing.length) list.append(line("➕", "Добавить мост", "не подключены: " + missing.map(([, name]) => name.replace(/^\S+\s(?=WB)/, "")).join(", "),
+        null, () => addBridge(d, missing)));
+      return [section("🌉 Мосты · " + d.bridges.length), list,
+        el("p", { class: "ow-note", style: "margin-top:-4px", text: "Winger берёт мосты сам, по одному на сервис. Кому дать мост — в карточке человека («🌉 Мост»)." })];
     }
     // a bridge of the server as a Winger link, with its service's best settings ("" when its call is not there)
     // dual: Telemost's two-track trial (the screenshare as a second track) — a link of its own beside the usual one
@@ -995,31 +1118,26 @@
       ["💻", "RustDesk для Windows", "https://github.com/rustdesk/rustdesk/releases/download/1.5.0/rustdesk-1.5.0-x86_64.exe"],
       ["📱", "RustDesk для Android", "https://github.com/rustdesk/rustdesk/releases/download/1.5.0/rustdesk-1.5.0-universal-signed.apk"],
     ];
-    function remoteCard() {
-      const card = el("div", { class: "card" }, el("h3", { text: "🖥 Удалённый доступ" }));
-      for (const [icon, name, url] of RUSTDESK) {
-        card.append(el("div", { class: "row" }, el("span", { style: "font-size:20px", text: icon }), el("div", { class: "grow", text: name }),
-          el("a", { class: "btn line", href: url, style: "flex:none;padding:8px 14px;text-decoration:none", text: "⬇️ Скачать" }),
-          el("button", { class: "icon-btn", title: "Скопировать ссылку", text: "📋", onclick: () => { copyText(url); toast("✅ Ссылка скопирована"); } })));
-      }
-      return card;
+    function remoteSheet() {
+      sheet("🖥 Удалённый доступ", (box) => {
+        box.append(el("p", { class: "ow-note", style: "margin:-6px 2px 10px", text: "RustDesk — экран ноутбука с телефона. Поставьте на оба устройства." }));
+        const list = el("div", { class: "ow-list" });
+        for (const [icon, name, url] of RUSTDESK) {
+          list.append(line(icon, name, null, el("span", { style: "display:flex;gap:6px;flex:none" },
+            el("a", { class: "ow-btn", href: url, style: "text-decoration:none;display:inline-flex;align-items:center", text: "⬇️ Скачать" }),
+            el("button", { class: "ow-btn line", title: "Скопировать ссылку", "aria-label": "Скопировать ссылку", text: "📋", onclick: () => { copyText(url); toast("✅ Ссылка скопирована"); } }))));
+        }
+        box.append(list);
+      });
     }
-    // the hosting: how many days the balance lasts, and when to pay (the balance is entered after a top-up)
-    function drawHosting(h) {
+    // the hosting: how many days the balance lasts, and when to pay (the balance is entered after a top-up, or taken from
+    // the hoster's account by the app itself)
+    function hostingRow(h) {
       const day = (t) => new Date(t * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
       const sign = { EUR: " €", USD: " $", RUB: " ₽" }[h.currency] || " €";
       const eur = (v) => v.toFixed(2).replace(".", ",") + sign;
       const n = h.set ? Math.floor(h.days_left) : 0;
       const auto = Native && Native.hostingBalance, linked = !!(auto && store.get("hostvds", false));
-      // the one thing that matters: how many days the money lasts; the details (balance, tariff) a tap away
-      const card = el("div", { class: "card" + (h.set && n < 5 ? " bad" : ""), style: "padding:12px 14px" },
-        el("div", { class: "row", style: "cursor:pointer", onclick: () => hostingSheet(h, eur, day) },
-          el("div", { class: "grow" }, el("small", { text: "💳 Хостинг " + h.provider }),
-            el("div", { style: "font-size:28px;font-weight:800;line-height:1.15;margin:2px 0", text: !h.set ? "—" : n > 0 ? `на ${n} дн.` : "баланс 0" }),
-            el("small", { text: !h.set ? "Баланс не введён — нажмите" : n > 0 ? "пополнить до " + day(h.pay_by) : "пополните сейчас, иначе сервер остановят" })),
-          el("span", { style: "font-size:30px", text: !h.set ? "➖" : n < 5 ? "⚠️" : n < 10 ? "🟡" : "🟢" })));
-      const st = el("small", { style: "display:block;margin-top:6px;color:var(--muted)", text: linked
-        ? "🔗 Автопроверка: баланс берётся из кабинета сам" + (h.source === "auto" && h.at ? " · " + ago(h.at) + " назад" : "") : "" });
       if (linked && Date.now() - store.get("hostvdsAt", 0) > 30 * 60000) {  // not on every redraw: at most every half hour
         store.set("hostvdsAt", Date.now());
         nativeCall("hostingBalance").then(async (r) => {
@@ -1027,29 +1145,23 @@
           try { js = JSON.parse(r.text); } catch (e) { /* nothing */ }
           if (js.ok) {
             const end = await panel({ op: "hosting_set", balance: String(js.balance), currency: js.currency, source: "auto" }).catch(() => null);
-            if (end && end.t === "done") { st.textContent = "🔗 Автопроверка: баланс обновлён только что"; setTimeout(load, 500); }
+            if (end && end.t === "done") setTimeout(load, 500);
           } else if (js.why === "login") {
             store.set("hostvds", false);
-            st.textContent = "🔗 Вход в кабинет истёк — включите автопроверку снова";
+            toast("🔗 Вход в кабинет хостинга истёк — включите автопроверку снова («Хостинг»)", 6000);
           }
         });
       }
-      const row = el("div", { class: "big-actions", style: "margin-top:8px" },
-        el("a", { class: "btn line", href: h.panel, style: "text-decoration:none;text-align:center", text: "🌐 Кабинет" }));
-      if (auto) row.append(el("button", { class: "btn" + (linked ? " line" : ""), text: linked ? "🔗 Автопроверка ✓" : "🔗 Автопроверка", onclick: async () => {
-        if (linked) {
-          if (!(await confirmBox("Выключить автопроверку? Приложение забудет вход в кабинет, баланс — вручную.", "Выключить"))) return;
-          Native.hostingLogout(); store.set("hostvds", false); draw(); return;
-        }
-        const r = await nativeCall("hostingLogin");
-        if (!r.ok) return;
-        store.set("hostvds", true); store.set("hostvdsAt", 0);
-        toast("✅ Кабинет подключён — беру баланс…"); draw();
-      } }));
-      card.append(row, st);
-      scroll.append(card);
+      const sub = !h.set ? "Баланс не введён — нажмите" : (n > 0 ? "пополнить до " + day(h.pay_by) : "пополните сейчас, иначе сервер остановят")
+        + (linked ? " · 🔗 из кабинета" + (h.source === "auto" && h.at ? " " + ago(h.at) + " назад" : "") : "");
+      const r = line("💳", "Хостинг " + h.provider, [sub, h.set && n < 5 ? "bad" : ""],
+        value(!h.set ? "—" : n > 0 ? `на ${n} дн.` : "баланс 0", h.set && n < 5 ? "bad" : h.set && n >= 10 ? "ok" : ""),
+        () => hostingSheet(h, eur, day), !h.set ? "off" : n < 5 ? "bad" : n < 10 ? "warn" : "ok");
+      r.classList.add("hosting-row");
+      return r;
     }
     function hostingSheet(h, eur, day) {
+      const auto = Native && Native.hostingBalance, linked = !!(auto && store.get("hostvds", false));
       sheet("💳 Хостинг " + h.provider, (box, close) => {
         if (h.set) box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 12px",
           text: `На балансе ≈ ${eur(h.balance)} · тариф ${eur(h.monthly)} в месяц (≈ ${eur(h.per_day)} в день). Баланс ${h.source === "auto" ? "из кабинета" : "введён"} ${day(h.at)}; за 5 дн. до конца напомню.` }));
@@ -1057,7 +1169,20 @@
           close();
           const v = await ask("Баланс HostVDS, €", "Например 12,40 — как в кабинете HostVDS → Биллинг");
           if (v) act({ op: "hosting_set", balance: v }, null, (r) => toast(`✅ Хватит примерно на ${Math.floor(r.hosting.days_left)} дн.`, 4000));
-        } }), el("button", { class: "btn line wide", style: "margin-top:8px", text: `⚙️ Тариф: ${eur(h.monthly)} в месяц`, onclick: async () => {
+        } }), el("a", { class: "btn line wide", href: h.panel, style: "margin-top:8px;text-decoration:none;text-align:center", text: "🌐 Кабинет хостинга" }));
+        if (auto) box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: linked ? "🔗 Автопроверка ✓ — выключить" : "🔗 Автопроверка баланса",
+          onclick: async () => {
+            close();
+            if (linked) {
+              if (!(await confirmBox("Выключить автопроверку? Приложение забудет вход в кабинет, баланс — вручную.", "Выключить"))) return;
+              Native.hostingLogout(); store.set("hostvds", false); draw(); return;
+            }
+            const r = await nativeCall("hostingLogin");
+            if (!r.ok) return;
+            store.set("hostvds", true); store.set("hostvdsAt", 0);
+            toast("✅ Кабинет подключён — беру баланс…"); draw();
+          } }));
+        box.append(el("button", { class: "btn line wide", style: "margin-top:8px", text: `⚙️ Тариф: ${eur(h.monthly)} в месяц`, onclick: async () => {
           close();
           const v = await ask("Сколько стоит сервер в месяц, €", "Сейчас " + eur(h.monthly) + " (HostVDS-4)", String(h.monthly).replace(".", ","));
           if (v) act({ op: "hosting_set", monthly: v }, null, () => toast("✅ Тариф сохранён"));
@@ -1187,39 +1312,95 @@
     }
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      // the main job first (people), then the services the helper uses
+      // the main job first (people); then how the helper is doing: its models, a check of it all, the trends, the keys
       scroll.append(el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
-        el("button", { class: "btn line wide", style: "margin:0 0 12px", text: "🔗 Приложение помощника — ссылка",
+        el("button", { class: "btn line wide", style: "margin:0 0 4px", text: "🔗 Ссылка на приложение помощника",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
-      const list = el("div", { class: "card" }, el("h3", { text: "Кто пользуется помощником" }));
+      const list = el("div", { class: "ow-list people" });
       for (const u of d.users) {
         const now = u.seen && Date.now() / 1000 - u.seen < 900;
-        list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => person(u.id) },
-          el("span", { style: "font-size:20px", text: u.off ? "⏸" : now ? "🟢" : "⚪" }),
-          el("div", { class: "grow" }, u.name + (u.id === d.me ? " · вы" : ""),
-            el("small", { text: u.off ? "доступ отключён" : !u.seen ? "ещё не входил(а)" + (u.codes ? " · код создан — отправьте ссылку из карточки" : "")
-              : (now ? "сейчас в приложении" : "был(а) " + ago(u.seen) + " назад") + (u.devices > 1 ? ` · телефонов: ${u.devices}` : "") })),
-          u.id === d.me ? null : el("button", { class: "icon-btn", title: "Удалить", text: "🗑", onclick: (e) => { e.stopPropagation(); delPerson(u); } }),
-          "›"));
+        list.append(line(u.off ? "⏸" : now ? "🟢" : "⚪", u.name + (u.id === d.me ? " · вы" : ""),
+          u.off ? "доступ отключён" : !u.seen ? "ещё не входил(а)" + (u.codes ? " · код создан — отправьте ссылку из карточки" : "")
+            : (now ? "сейчас в приложении" : "был(а) " + ago(u.seen) + " назад") + (u.devices > 1 ? ` · телефонов: ${u.devices}` : ""),
+          null, () => person(u.id), u.off ? "off" : now ? "ok" : "off"));
       }
-      scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), diskRow(), videoCard(), trendsCard(), searchCard());
-      if (d.models && d.models.length) scroll.append(modelsCard(d.models));
+      scroll.append(section("Кто пользуется · " + d.users.length), list, section("Помощник"),
+        el("div", { class: "ow-list" }, line("🩺", "Проверить помощника", "модели, поиск, ссылки, видео, тренды и ключи — разом", null, () => helperCheck(d)),
+          trendsRow(), line("🔑", "Ключи и подключения", "модели, Яндекс Диск, видео из фото, поиск", null, allKeys)));
+      if (d.models && d.models.length) scroll.append(...modelsCard(d.models));
+      panel({ op: "hf_get" }).then((v) => { if (v.t === "done") video = v; }).catch(() => {});  // (the people's «🎬 Видео» says what they get)
     }
     // ---- «🧠 Модели»: which of the helper's models answer, and the last word of those that do not ----
+    const failing = (m) => m.err_at && (!m.ok || m.err_at > m.ok);
     function modelsCard(models) {
-      const card = el("div", { class: "card models-card", style: "margin:0 0 12px" }, el("h3", { text: "🧠 Модели" }));
+      const list = el("div", { class: "ow-list models-card" });
       for (const m of models) {
-        const failing = m.err_at && (!m.ok || m.err_at > m.ok);
-        const ic = m.closed ? "⛔" : failing ? "🔴" : m.ok ? "🟢" : "⚪";
+        const bad = failing(m);
+        const ic = m.closed ? "⛔" : bad ? "🔴" : m.ok ? "🟢" : "⚪";
         const say = m.closed ? "закрыта для бесплатных ключей — пропускается до завтра"
-          : failing ? String(m.err || "").replace(/^[^:]{1,30}:\s*/, "") + " · " + ago(m.err_at) + " назад"
+          : bad ? String(m.err || "").replace(/^[^:]{1,30}:\s*/, "") + " · " + ago(m.err_at) + " назад"
           : m.ok ? "отвечала " + ago(m.ok) + " назад" : "ещё не спрашивали";
-        card.append(el("div", { class: "row", style: "min-height:40px" }, el("span", { style: "font-size:16px;flex:none;width:24px;text-align:center", text: ic }),
-          el("div", { class: "grow" }, m.name.replace(/^\S+\s/, ""), el("small", { text: say + (m.no_images ? " · фото не принимает" : "") }))));
+        list.append(line(ic, m.name.replace(/^\S+\s/, ""), say + (m.no_images ? " · фото не принимает" : ""), null, null,
+          m.closed || bad ? "bad" : m.ok ? "ok" : "off"));
       }
-      card.append(el("small", { style: "display:block;color:var(--muted);margin-top:6px",
-        text: "Помощник сам берёт следующую модель, когда эта не отвечает. Ключи — «Ещё» → «🔑 Ключи»." }));
-      return card;
+      const up = models.filter((m) => m.ok && !failing(m) && !m.closed).length;
+      return [section("🧠 Модели · отвечают " + up + " из " + models.length), list,
+        el("p", { class: "ow-note", style: "margin-top:-4px", text: "Помощник сам берёт следующую модель, когда эта не отвечает." })];
+    }
+    // «🩺 Проверить помощника»: what the helper needs, looked at together — each line fills as its answer comes
+    function helperCheck(d) {
+      sheet("🩺 Проверка помощника", (box) => {
+        const list = el("div", { class: "ow-list helper-check" });
+        box.append(list);
+        const step = (icon, title) => {
+          let r = line(icon, title, "проверяю…", el("span", { class: "spin" }), null, "off");
+          list.append(r);
+          return (ok, sub, tap) => {
+            const n = line(icon, title, [sub, ok === false ? "bad" : ""], value(ok === false ? "⚠️" : ok ? "✓" : "—", ok === false ? "bad" : ok ? "ok" : ""),
+              tap || null, ok === false ? "bad" : ok ? "ok" : "off");
+            n.dataset.ok = ok === false ? "no" : ok ? "yes" : "off";
+            r.replaceWith(n);
+            r = n;
+          };
+        };
+        const ms = d.models || [];
+        const up = ms.filter((m) => m.ok && !failing(m) && !m.closed);
+        const down = ms.filter((m) => m.closed || failing(m)).map((m) => m.name.replace(/^\S+\s/, ""));
+        step("🧠", "Модели")(!ms.length || (!up.length && !down.length) ? null : up.length > 0, !ms.length ? "нет ключей моделей"
+          : !up.length && !down.length ? "ещё не спрашивали — с последнего перезапуска не было вопросов"
+          : `отвечают ${up.length} из ${ms.length}` + (down.length ? " · не отвечают: " + down.join(", ") : ""));
+        const keys = step("🔑", "Ключи"), disk = step("📦", "Ссылки на 24 часа"), video = step("🎬", "Видео из фото"), trends = step("🔥", "Тренды"),
+          search = step("🌐", "Поиск в интернете");
+        const ask = (op) => panel({ op }).catch((e) => ({ t: "error", text: problem(e) }));
+        ask("agent_keys").then((r) => {
+          if (r.t !== "done") return keys(false, r.text || "список ключей не открылся");
+          const on = r.keys.filter((k) => k.on), unk = on.filter((k) => k.test === "unknown").map((k) => k.name);
+          keys(unk.length ? false : true, `подключено ${on.length} из ${r.keys.length}` + (unk.length ? " · при проверке не ответили: " + unk.join(", ") : ""), allKeys);
+        });
+        ask("disk_get").then((v) => (v.t !== "done" ? disk(false, v.text || "не ответил")
+          : disk(v.on ? true : null, v.on ? "Яндекс Диск подключён" + (v.free_gb !== undefined ? ` · свободно ${v.free_gb} ГБ` : "") : "Яндекс Диск не подключён — ссылки не делаются",
+            () => diskSetup(v))));
+        ask("hf_get").then((v) => {
+          if (v.t !== "done") return video(false, v.text || "не ответил");
+          if (!v.on) return video(null, "не подключено", () => videoSetup(v, () => {}));
+          const sp = spaceState(v);
+          video(!/danger/.test(sp.color), sp.short.replace(/\.$/, ""), () => videoSetup(v, () => {}));
+        });
+        ask("trends_get").then((v) => (v.t !== "done" ? trends(false, v.text || "не ответил")
+          : trends(v.error ? false : (v.top || []).length ? true : null, v.error ? "последняя проверка: " + v.error
+            : ((v.top || []).length ? `в топе: ${v.top.length}` : "подтверждённых трендов пока нет") + (v.at ? " · проверено " + ago(v.at) + " назад" : ""),
+            () => trendsSheet(v, () => {}))));
+        ask("search_get").then((v) => {
+          if (v.t !== "done" || !v.on) return search(null, "поиск выключен");
+          ask("search_test").then((r) => {  // (up to a minute: the search, a page, the weather, a table)
+            if (r.t !== "done") return search(false, r.text || "не ответил");
+            const k = r.check || {};
+            search(!!(k.pages && k.weather && k.table), k.error ? "поиск не ответил" : `найдено ${k.results}, страниц ${k.pages} · погода ${k.weather ? "✓" : "⚠️"} · таблица ${k.table ? "✓" : "⚠️"}`,
+              () => searchSheet(r, () => {}));
+          });
+        });
+        box.append(el("p", { class: "ow-note", text: "Ничего не меняет и ключи не убирает. Нажмите строку — подробности и настройка." }));
+      });
     }
     async function delPerson(u) {
       if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
@@ -1246,25 +1427,6 @@
     let video = null;
     const busyBtn = (b, text) => { b.disabled = true; b.dataset.was = b.textContent; b.textContent = text; };
     const freeBtn = (b) => { b.disabled = false; b.textContent = b.dataset.was || b.textContent; };
-    function videoCard() {
-      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🎬 Видео из фото: проверяю…" }));
-      const fill = (v) => {
-        video = v;
-        card.innerHTML = "";
-        const n = (v.people || []).length;
-        const sp = v.on ? spaceState(v) : null;
-        card.append(el("div", { class: "row" },
-          el("div", { class: "grow" }, "🎬 Видео из фото" + (v.on ? " ✓" : ""),
-            el("small", { text: v.on ? `Hugging Face${v.name ? " «" + v.name + "»" : ""}. Вам — сразу; другим — переключатель «🎬 Видео» в карточке человека (список ниже)`
-              + (n ? `: включено у ${n}` : "") + "."
-              : "Короткое видео из фото («оживи») и «Я в ролике» в HD на бесплатных минутах Hugging Face." }),
-            sp ? el("small", { style: "display:block;margin-top:4px;color:" + sp.color, text: sp.short }) : null),
-          v.env ? null : el("button", { class: "btn" + (v.on ? " line" : ""), style: "flex:none;padding:8px 14px", text: v.on ? "Настроить" : "Подключить",
-            onclick: () => videoSetup(v, fill) })));
-      };
-      panel({ op: "hf_get" }).then((v) => (v.t === "done" ? fill(v) : card.remove())).catch(() => card.remove());
-      return card;
-    }
     // «Я в ролике» в HD: the own face-swap service on Hugging Face's GPUs (the server makes it with a Write token).
     // short: for the card (Russian, one line); long: for the sheet (the server's own words too)
     function spaceState(v) {
@@ -1326,39 +1488,45 @@
           } }) : "");
       });
     }
-    // ---- «🌐 Поиск в интернете»: how each source answered the chat last, and a check from the server now ----
-    function searchCard() {
-      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🌐 Поиск: проверяю…" }));
-      const fill = (v) => {
-        card.innerHTML = "";
-        const seen = (v.engines || []).filter((e) => e.at);
-        const g = v.groq || {};
-        const parts = seen.map((e) => e.name + (e.ok ? " ✓" : " ⚠️ " + e.why));
-        if (g.key) parts.push("Groq" + (!g.at || g.ok ? " ✓" : " ⚠️ " + g.why));
-        const c = v.check || {};
-        const checked = c.at ? "Проверка " + ago(c.at) + " назад: " + (c.error ? "⚠️ поиск не ответил"
-          : `найдено ${c.results}, прочитано страниц ${c.pages}`) + " · погода " + (c.weather ? "✓" : "⚠️") + " · таблица РПЛ "
-          + (c.table ? "✓" : "⚠️") + (c.sec ? ` (за ${c.sec} с)` : "") + "." : "Проверки ещё не было.";
-        const bad = c.at && (c.error || !c.pages || !c.weather || !c.table);
-        card.append(el("div", { class: "row" },
-          el("div", { class: "grow" }, "🌐 Поиск в интернете",
-            el("small", { text: (parts.length ? "Последние ответы: " + parts.join(" · ") + ". " : "С последнего перезапуска сервера в интернете ещё не искали. ") }),
-            el("small", { style: "display:block;margin-top:4px" + (bad ? ";color:var(--danger-ink)" : ""), text: checked })),
-          el("button", { class: "btn line", style: "flex:none;padding:8px 14px", text: "Проверить", onclick: async (e) => {
-            const b = e.currentTarget;
-            busyBtn(b, "⏳ До минуты");
-            try {
-              const end = await panel({ op: "search_test" });
-              if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
-              fill(end);
-              const k = end.check || {};
-              toast(k.pages && k.weather && k.table ? "🌐 Поиск работает: страницы читаются, погода и таблица приходят"
-                : "⚠️ Поиск ответил не полностью — подробности в карточке", 6000);
-            } catch (x) { toast(problem(x)); freeBtn(b); }
-          } })));
-      };
-      panel({ op: "search_get" }).then((v) => (v.t === "done" && v.on ? fill(v) : card.remove())).catch(() => card.remove());
-      return card;
+    // ---- «🌐 Поиск в интернете» (in «🔑 Ключи»): how each source answered the chat last, and a check from the server now ----
+    function searchWords(v) {
+      const seen = (v.engines || []).filter((e) => e.at);
+      const g = v.groq || {};
+      const parts = seen.map((e) => e.name + (e.ok ? " ✓" : " ⚠️ " + e.why));
+      if (g.key) parts.push("Groq" + (!g.at || g.ok ? " ✓" : " ⚠️ " + g.why));
+      const c = v.check || {};
+      const checked = c.at ? "Проверка " + ago(c.at) + " назад: " + (c.error ? "⚠️ поиск не ответил"
+        : `найдено ${c.results}, прочитано страниц ${c.pages}`) + " · погода " + (c.weather ? "✓" : "⚠️") + " · таблица РПЛ "
+        + (c.table ? "✓" : "⚠️") + (c.sec ? ` (за ${c.sec} с)` : "") + "." : "Проверки ещё не было.";
+      return { last: parts.length ? "Последние ответы: " + parts.join(" · ") + "." : "С последнего перезапуска сервера в интернете ещё не искали.",
+        checked, bad: !!(c.at && (c.error || !c.pages || !c.weather || !c.table)) };
+    }
+    function searchSheet(v, after) {
+      sheet("🌐 Поиск в интернете", (box) => {
+        const body = el("div");
+        const fill = (x) => {
+          const w = searchWords(x);
+          body.innerHTML = "";
+          body.append(el("p", { class: "ow-note", style: "margin:-6px 2px 8px", text: "Помощник сам ищет в интернете, когда вопросу нужны свежие факты. "
+            + "Ключи Groq и Exa — в списке ключей ниже." }),
+          el("div", { class: "card search-card", style: "font-size:14px;line-height:1.45" }, el("div", { text: w.last }),
+            el("div", { style: "margin-top:6px" + (w.bad ? ";color:var(--danger-ink)" : ""), text: w.checked })));
+        };
+        fill(v);
+        box.append(body, el("button", { class: "btn line wide", text: "🔎 Проверить сейчас", onclick: async (e) => {
+          const b = e.currentTarget;
+          busyBtn(b, "⏳ До минуты");
+          try {
+            const end = await panel({ op: "search_test" });
+            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
+            fill(end); freeBtn(b);
+            if (after) after(end);
+            const k = end.check || {};
+            toast(k.pages && k.weather && k.table ? "🌐 Поиск работает: страницы читаются, погода и таблица приходят"
+              : "⚠️ Поиск ответил не полностью — подробности выше", 6000);
+          } catch (x) { toast(problem(x)); freeBtn(b); }
+        } }));
+      });
     }
 
     // ---- «🔑 Ключи»: every key of the helper and Claude in one place — which are in, which are not, what each is for ----
@@ -1376,44 +1544,81 @@
       coverr: ["coverr_set", "coverr_off", "key"], viggle: ["viggle_set", "viggle_off", "key"] };
     let keysNow = null, testedNow = null;  // the list and its last check, as the server last said them
     function allKeys() {
-      sheet("🔑 Ключи", (box) => {
+      sheet("🔑 Ключи и подключения", (box) => {
+        const conn = el("div", { class: "ow-list keys-conn" }, diskKeyRow(), searchKeyRow());
         const list = el("div", {}, el("div", { class: "status", style: "padding:12px" }, el("span", { class: "spin" }), "Загружаю…"));
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text:
-          "Все ключи помощника и Claude в одном месте: ✅ — подключён, ➖ — нет. Нажмите строку — там написано, для чего ключ "
-          + "и где его взять; там же его подключают, меняют и убирают. Ключи хранятся только на сервере — в чаты их не присылайте." }), list);
+        box.append(el("p", { class: "ow-note", style: "margin:-6px 2px 8px", text: "Нажмите строку — там написано, для чего это и где взять ключ; "
+          + "там же его подключают, меняют и убирают. Ключи хранятся только на сервере — в чаты их не присылайте." }),
+          section("Подключения"), conn, list);
+        let hf = null;  // «🎬 Видео из фото»: its own sheet (the HD service's state, who has it)
+        const openHf = async (k, fill) => {
+          if (!hf) hf = await panel({ op: "hf_get" }).catch(() => null);
+          if (hf && hf.t === "done") videoSetup(hf, (end) => { hf = end; video = end; panel({ op: "agent_keys" }).then((r) => r.t === "done" && fill(r.keys)).catch(() => {}); });
+          else keyOne(k, fill);
+        };
         const fill = (keys, tested) => {
           keysNow = keys;
           if (tested !== undefined) testedNow = tested;
           list.innerHTML = "";
-          list.append(el("div", { style: "font-size:14px;margin:0 2px 6px", text: `Подключено ${keys.filter((k) => k.on).length} из ${keys.length}` }));
+          const rows = el("div", { class: "ow-list keys-list" });
           for (const k of keys) {
-            list.append(el("div", { class: "row", style: "cursor:pointer", onclick: () => keyOne(k, fill) },
-              el("span", { style: "font-size:18px;width:26px;flex:none;text-align:center", text: k.on ? "✅" : "➖" }),
-              el("div", { class: "grow" }, k.name, el("small", { text: k.use + (k.test === "unknown" ? " · ⚠️ при проверке не ответил" : "") })),
-              el("span", { class: "muted", style: "font-size:22px", text: "›" })));
+            const r = line(k.on ? "✅" : "➖", k.id === "hf" ? "Видео из фото (Hugging Face)" : k.name,
+              [k.use + (k.test === "unknown" ? " · ⚠️ при проверке не ответил" : ""), k.test === "unknown" ? "bad" : ""], null,
+              () => (k.id === "hf" ? openHf(k, fill) : keyOne(k, fill)), k.on ? "ok" : "off");
+            r.dataset.key = k.id;
+            rows.append(r);
           }
           const t = testedNow;
-          list.append(el("div", { style: "font-size:13px;color:var(--muted);margin:10px 2px 0", text: t
-            ? `🧪 Проверено ${ago(t.ts)} назад${t.auto ? " (само, после обновления)" : ""}`
-              + (t.removed.length ? ` · убраны как не принятые: ${t.removed.join(", ")}` : " · не принятых не было")
-            : "🧪 Все ключи ещё не проверялись разом." }),
-          el("button", { class: "btn line wide", style: "margin-top:8px", text: "🧪 Проверить все ключи", onclick: async (e) => {
-            const b = e.currentTarget;
-            busyBtn(b, "⏳ Пробую каждый ключ… до двух минут");
-            try {
-              const r = await panel({ op: "agent_testkeys" });
-              if (r.t !== "done") { toast("⚠️ " + r.text, 7000); freeBtn(b); return; }
-              fill(r.keys, r.tested); toast(r.text, 9000);
-            } catch (x) { toast(problem(x)); freeBtn(b); }
-          } }));
+          list.append(section(`Ключи · подключено ${keys.filter((k) => k.on).length} из ${keys.length}`), rows,
+            el("p", { class: "ow-note", text: t
+              ? `🧪 Проверено ${ago(t.ts)} назад${t.auto ? " (само, после обновления)" : ""}`
+                + (t.removed.length ? ` · убраны как не принятые: ${t.removed.join(", ")}` : " · не принятых не было")
+              : "🧪 Все ключи ещё не проверялись разом." }),
+            el("button", { class: "btn line wide", text: "🧪 Проверить все ключи", onclick: async (e) => {
+              const b = e.currentTarget;
+              busyBtn(b, "⏳ Пробую каждый ключ… до двух минут");
+              try {
+                const r = await panel({ op: "agent_testkeys" });
+                if (r.t !== "done") { toast("⚠️ " + r.text, 7000); freeBtn(b); return; }
+                fill(r.keys, r.tested); toast(r.text, 9000);
+              } catch (x) { toast(problem(x)); freeBtn(b); }
+            } }));
         };
-        panel({ op: "agent_keys" }).then((r) => {
-          if (r.t === "done") return fill(r.keys, r.tested || null);
+        const failed = (why) => {  // the list's service away: video and trends still have their own sheets
           list.innerHTML = "";
-          list.append(el("p", { class: "status", style: "padding:8px 0", text: "⚠️ " + (r.text || "Список ключей не открылся.")
-            + " Список ведёт служба «🛠 Claude» — если она не отвечает, ключи поиска, видео и трендов есть в их карточках («🤖 Помощник»)." }));
-        }).catch((e) => { list.innerHTML = ""; list.append(el("p", { class: "status", style: "padding:8px 0", text: problem(e) })); });
+          list.append(el("p", { class: "status", style: "padding:8px 2px", text: "⚠️ " + why + " Список ключей ведёт служба «🛠 Claude»." }),
+            el("div", { class: "ow-list" }, line("🎬", "Видео из фото (Hugging Face)", "токен и HD-сервис", null, () => openHf({ id: "hf", name: "Hugging Face" }, () => {})),
+              line("🔥", "Тренды и Coverr", "ключ Coverr — в «Тренды»", null, () => panel({ op: "trends_get" }).then((v) => v.t === "done" && trendsSheet(v, () => {})).catch(() => {}))));
+        };
+        panel({ op: "agent_keys" }).then((r) => (r.t === "done" ? fill(r.keys, r.tested || null) : failed(r.text || "Список ключей не открылся.")))
+          .catch((e) => failed(problem(e)));
       });
+    }
+    // «📦 Ссылки на 24 часа» lie on the owner's Yandex Disk (they open anywhere in Russia, with VPN and without)
+    function diskKeyRow() {
+      let cur = line("📦", "Яндекс Диск для ссылок", "проверяю…", null, null, "off");
+      const fill = (d) => {
+        const r = line("📦", "Яндекс Диск для ссылок", d.on ? "ссылки на 24 часа кладутся на ваш Диск" + (d.login ? " · " + d.login : "")
+          : "не подключён: ссылки на приложения и VPN не делаются", value(d.on ? "✓" : "➖", d.on ? "ok" : ""), () => diskSetup(d, fill), d.on ? "ok" : "off");
+        r.classList.add("disk-row");
+        if (cur.isConnected) cur.replaceWith(r);
+        cur = r;
+      };
+      diskRows.add((d) => (cur.isConnected ? fill(d) : null));
+      panel({ op: "disk_get" }).then((d) => (d.t === "done" ? fill(d) : cur.remove())).catch(() => cur.remove());
+      return cur;
+    }
+    function searchKeyRow() {
+      let cur = line("🌐", "Поиск в интернете", "проверяю…", null, null, "off");
+      const fill = (v) => {
+        const w = searchWords(v);
+        const r = line("🌐", "Поиск в интернете", [w.checked, w.bad ? "bad" : ""], value(w.bad ? "⚠️" : "✓", w.bad ? "bad" : "ok"), () => searchSheet(v, fill), w.bad ? "bad" : "ok");
+        r.classList.add("search-row");
+        if (cur.isConnected) cur.replaceWith(r);
+        cur = r;
+      };
+      panel({ op: "search_get" }).then((v) => (v.t === "done" && v.on ? fill(v) : cur.remove())).catch(() => cur.remove());
+      return cur;
     }
     async function keySave(k, key) {  // checked where it is used and kept; "" takes it away. The list as it is after
       const op = APP_KEY_OP[k.id];
@@ -1469,22 +1674,22 @@
       });
     }
 
-    function trendsCard() {
-      const card = el("div", { class: "card", style: "margin:0 0 12px" }, el("small", { text: "🔥 Тренды: проверяю…" }));
+    // «🔥 Тренды»: the Instagram trends the family's «Я в ролике» and «Я на фото» put first; the server finds them once a day
+    function trendsRow() {
+      let cur = line("🔥", "Тренды для «Я в ролике»", "проверяю…", null, null, "off");
       const fill = (v) => {
-        card.innerHTML = "";
-        const top = v.top || [];
-        const when = v.at ? "Проверено " + ago(v.at) + " назад" : "Ещё не проверялось";
-        const c = v.coverr || {};
-        card.append(el("div", { class: "row" },
-          el("div", { class: "grow" }, "🔥 Тренды Instagram" + (top.length ? " · " + top.length : ""),
-            el("small", { text: (top.length ? top.map((t) => t.title).join(", ") + ". " : "Пока нет подтверждённых трендов. ") + when + "."
-              + (coverrBad(c) ? " ⚠️ Coverr: нужен новый ключ." : c.on ? " Новые ролики — с Coverr." : "") }),
-            v.error ? el("small", { style: "display:block;margin-top:4px;color:var(--danger-ink)", text: "⚠️ Последняя проверка: " + v.error }) : null),
-          el("button", { class: "btn line", style: "flex:none;padding:8px 14px", text: "Подробнее", onclick: () => trendsSheet(v, fill) })));
+        const top = v.top || [], c = v.coverr || {};
+        const sub = v.error ? ["последняя проверка: " + v.error, "bad clamp"]
+          : (top.length ? top.map((t) => t.title).join(", ") : "подтверждённых трендов пока нет") + (v.at ? " · " + ago(v.at) + " назад" : "")
+            + (coverrBad(c) ? " · ⚠️ Coverr: нужен новый ключ" : "");
+        const r = line("🔥", "Тренды для «Я в ролике»", Array.isArray(sub) ? sub : [sub, "clamp"], top.length ? value(String(top.length)) : null,
+          () => trendsSheet(v, fill), v.error || coverrBad(c) ? "bad" : top.length ? "ok" : "off");
+        r.classList.add("trends-row");
+        if (cur.isConnected) cur.replaceWith(r);
+        cur = r;
       };
-      panel({ op: "trends_get" }).then((v) => (v.t === "done" ? fill(v) : card.remove())).catch(() => card.remove());
-      return card;
+      panel({ op: "trends_get" }).then((v) => (v.t === "done" ? fill(v) : cur.remove())).catch(() => cur.remove());
+      return cur;
     }
     function trendsSheet(v, fill) {
       sheet("🔥 Тренды Instagram", (box, close) => {
@@ -1817,7 +2022,8 @@
     // the tab has no count of its own any more: a count left from an older version goes
     function peek() { badge(0); }
     return { root, peek, keys: allKeys, redraw: () => open && draw(),
-      sub: () => ({ server: "состояние, мосты, удалённый доступ", vpn: "выдача VPN: ссылки и QR", app: "кто пользуется помощником", claude: "Claude Code на вашем сервере" })[part],
+      sub: () => ({ server: "хостинг, версия, копии, диск", vpn: "выдача VPN и мосты", app: "люди, модели, проверка", claude: "Claude Code на вашем сервере",
+        patrol: "сам проверяет сервер" })[part],
       buttons: () => (open ? [["🔄", "Обновить", load]] : []),
       onShow: () => (open ? load() : enter()) };
   }
