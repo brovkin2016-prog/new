@@ -1958,23 +1958,39 @@
     let theme = "", aspect = "3:4";
     sheet("📸 Фотосессия", (box, close) => {
       const why = el("div", { class: "why" });
-      const own = el("input", { class: "input hidden", placeholder: "Своя тема: например, «на яхте в Монако»", maxlength: "300" });
-      // the themes in one row that scrolls sideways (as the templates' gallery): the people's rows stay in sight at 360×640
-      const tchips = el("div", { class: "chips", style: "margin:0 0 6px" });
+      // (v29) one's own words first — the server's art director makes a whole scene of them; the themes as tiles under
+      // it (a few in sight, the rest a tap away): a tile alone is a ready scene, a tile with words — the theme with one's wishes
+      const own = el("textarea", { class: "input", rows: 2, maxlength: "300", style: "resize:none;min-height:64px",
+        placeholder: "Опишите фотосессию: например, «мы на яхте в Монако на закате» или «я в образе боярыни зимой»" });
+      own.addEventListener("input", () => { if (why.textContent.startsWith("Выберите")) why.textContent = ""; });
+      const SHOWN = 6;  // two rows in sight: the people's photos stay on the screen of a small phone
+      let allThemes = false;
+      const tchips = el("div", { class: "shoot-themes", style: "display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 6px" });
       const paintThemes = () => {
-        const x = tchips.scrollLeft;  // the row stays where it was scrolled to
         tchips.innerHTML = "";
-        for (const [k, v] of Object.entries(themes).concat([["", "✍️ Своя тема"]])) {
-          tchips.append(el("button", { class: "chip" + (k === theme && (k || !own.classList.contains("hidden")) ? " on" : ""), text: v, onclick: () => {
-            theme = k;
-            own.classList.toggle("hidden", !!k);
-            if (!k) own.focus();
-            if (why.textContent.startsWith("Выберите")) why.textContent = "";
-            paintThemes();
-          } }));
+        const list = Object.entries(themes);
+        for (const [k, v] of allThemes ? list : list.slice(0, SHOWN)) {
+          tchips.append(el("button", { class: "chip" + (k === theme ? " on" : ""), "aria-pressed": k === theme ? "true" : "false",
+            style: "white-space:normal;line-height:1.2;padding:8px 4px;font-size:13px;min-height:48px;text-align:center", text: v, onclick: () => {
+              theme = theme === k ? "" : k;
+              if (why.textContent.startsWith("Выберите")) why.textContent = "";
+              paintThemes();
+            } }));
         }
-        tchips.scrollLeft = x;
+        if (list.length > SHOWN) tchips.append(el("button", { class: "chip", style: "grid-column:span 2;min-height:44px;font-size:14px",
+          text: allThemes ? "Свернуть темы ▴" : `Ещё темы (${list.length - SHOWN}) ▾`, onclick: () => { allThemes = !allThemes; paintThemes(); } }));
+        tchips.append(surprise);
       };
+      const surprise = el("button", { class: "chip", style: "min-height:44px;font-size:14px;padding:6px 4px", text: "🎲 Удиви", "aria-label": "Удиви меня: случайная тема", onclick: () => {
+        const keys = Object.keys(themes).filter((k) => k !== theme);
+        if (!keys.length) return;
+        theme = keys[Math.floor(Math.random() * keys.length)];
+        const i = Object.keys(themes).indexOf(theme);
+        if (i >= SHOWN) allThemes = true;
+        if (why.textContent.startsWith("Выберите")) why.textContent = "";
+        paintThemes();
+        toast("Тема: " + themes[theme] + " — можно дописать пожелания", 3000);
+      } });
       const rows = el("div");
       const addBtn = el("button", { class: "btn line wide", style: "margin:4px 0 10px", text: "+ Ещё человек", onclick: () => { photos.push(null); paintRows(); } });
       const take = async (i, camera) => {
@@ -2008,7 +2024,7 @@
       const goBtn = el("button", { class: "btn wide", text: "📸 Сделать фотосессию", onclick: async () => {
         const text = own.value.trim();
         const set = photos.filter(Boolean);
-        if (!theme && !text) { why.textContent = "Выберите тему или напишите свою."; return; }
+        if (!theme && !text) { why.textContent = "Опишите фотосессию или выберите тему."; return; }
         if (!set.length) { why.textContent = "Добавьте хотя бы одно фото."; return; }
         if (!check.checked) { why.textContent = set.length === 1 ? "Поставьте галочку: фото ваше или человек согласен." : "Поставьте галочку: фото ваши или люди согласны."; return; }
         goBtn.disabled = true;
@@ -2026,16 +2042,17 @@
         if (!goBtn.isConnected) return;
         close();
         if (S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
-        const title = theme ? themes[theme] : "📸 " + text;
-        await th.run("/api/shoot", { theme: theme || undefined, text: theme ? undefined : text, images, aspect, consent: true },
+        const title = theme ? themes[theme] + (text ? ": " + text : "") : "📸 " + text;
+        await th.run("/api/shoot", { theme: theme || undefined, text: text || undefined, images, aspect, consent: true },
           { role: "me", image: set[0], text: title + (set.length > 1 ? " · 👥 " + set.length : "") });
       } });
       paintThemes();
       paintRows();
       paintAspect();
-      box.append(el("p", { class: "muted", style: "margin:0 0 8px;font-size:15px", text: "Выберите тему и добавьте фото — до трёх человек. Придут 2 снимка, обычно за 1–2 минуты." }),
-        el("div", { class: "menu-sec", text: "Тема" }), tchips, own,
-        el("div", { class: "menu-sec", style: "margin-top:10px", text: "Кто на фото" }), rows, addBtn,
+      box.append(el("p", { class: "muted", style: "margin:0 0 8px;font-size:15px", text: "Опишите, какую фотосессию хотите, или выберите тему, и добавьте фото — до трёх человек. Придут 2 снимка, обычно за 1–2 минуты." }),
+        el("div", { class: "menu-sec", text: "Кто на фото" }), rows, addBtn,
+        el("div", { class: "menu-sec", text: "Какую фотосессию хотите" }), own,
+        el("div", { class: "menu-sec", style: "margin-top:8px", text: "Или тема (можно вместе с описанием)" }), tchips,
         el("div", { class: "menu-sec", text: "Формат" }), achips,
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: "Это мои фото, или люди на них согласны" })), why, goBtn));
