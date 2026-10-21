@@ -1431,12 +1431,6 @@
       menu("Прикрепить", [
         ["📷", "Камера", async () => { const f = await pickFile("image/*", true); if (f) { image = f; sync(); } }],
         ["🖼️", "Фото из галереи", async () => { const f = await pickFile("image/*"); if (f) { image = f; sync(); } }],
-        ["🎬", "Видео: о чём оно", async () => {  // the server looks at a few pictures of it and hears what is said
-          const f = await pickFile("video/*");
-          if (!f) return;
-          if (f.size > 40 * 1024 * 1024) { toast("Видео больше 40 МБ — возьмите покороче (до 2–3 минут)", 5000); return; }
-          doc = f; doc.video = true; sync();
-        }],
         ["📄", "Документ: PDF, Word, текст", async () => {
           const f = await pickFile(".pdf,.docx,.pptx,.epub,.txt,.md,.csv,.json,.html,text/*,application/pdf");
           if (f) { if (f.size > 14e6) toast("Файл больше 14 МБ — возьмите поменьше"); else { doc = f; sync(); } }
