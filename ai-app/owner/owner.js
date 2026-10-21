@@ -796,7 +796,24 @@
       if (host) drawHosting(host);  // how many days the hosting's money lasts: always in sight
       if (u) scroll.append(updateCard(u, "all"));  // the version, «🔎 Проверить обновление», «⬆️ Обновить», the night switch
       if ("vpn_soft" in d) scroll.append(vpnSoftCard(d.vpn_soft));
+      if ("backup" in d) scroll.append(backupCard(d.backup));
       scroll.append(storageCard(), remoteCard());
+    }
+    // ---- the last backup: when, made or not, where it went; one now by a tap ----
+    function backupCard(b) {
+      const now = el("button", { class: "btn soft", style: "flex:none;padding:10px 14px", text: "💾 Сейчас", onclick: async () => {
+        now.disabled = true;
+        try {
+          const end = await panel({ op: "backup" });
+          toast(end.t === "done" ? "💾 Копия делается — о ней придёт событие через пару минут" : "⚠️ " + end.text, 6000);
+        } catch (e) { toast(problem(e)); now.disabled = false; }
+      } });
+      const words = !b ? el("small", { text: "Ещё не делалась: сервер делает её сам, когда меняется важное (люди VPN, ключи, мосты)." })
+        : el("small", { style: b.ok ? "" : "color:var(--danger-ink)", text: b.ok ? (b.where ? "Лежит " + b.where + "." : "Сделана.")
+          : String(b.text || "").replace(/^\S+\s*/, "") });
+      return el("div", { class: "card backup-card", style: "margin:0 0 12px;padding:10px 14px" },
+        el("div", { class: "row", style: "min-height:0" }, el("div", { class: "grow" },
+          b ? `🗂 Копия: ${when(b.ts)} ${b.ok ? "✓" : "✗"}` : "🗂 Копия", words), now));
     }
     // ---- the VPN's programs: Hysteria and Xray as installed, the approved ones, the last nightly update's word (vpn-update) ----
     function vpnSoftCard(v) {
@@ -1145,6 +1162,23 @@
           "›"));
       }
       scroll.append(list, el("h3", { style: "margin:18px 2px 8px", text: "Подключения" }), diskRow(), videoCard(), trendsCard(), searchCard());
+      if (d.models && d.models.length) scroll.append(modelsCard(d.models));
+    }
+    // ---- «🧠 Модели»: which of the helper's models answer, and the last word of those that do not ----
+    function modelsCard(models) {
+      const card = el("div", { class: "card models-card", style: "margin:0 0 12px" }, el("h3", { text: "🧠 Модели" }));
+      for (const m of models) {
+        const failing = m.err_at && (!m.ok || m.err_at > m.ok);
+        const ic = m.closed ? "⛔" : failing ? "🔴" : m.ok ? "🟢" : "⚪";
+        const say = m.closed ? "закрыта для бесплатных ключей — пропускается до завтра"
+          : failing ? String(m.err || "").replace(/^[^:]{1,30}:\s*/, "") + " · " + ago(m.err_at) + " назад"
+          : m.ok ? "отвечала " + ago(m.ok) + " назад" : "ещё не спрашивали";
+        card.append(el("div", { class: "row", style: "min-height:40px" }, el("span", { style: "font-size:16px;flex:none;width:24px;text-align:center", text: ic }),
+          el("div", { class: "grow" }, m.name.replace(/^\S+\s/, ""), el("small", { text: say + (m.no_images ? " · фото не принимает" : "") }))));
+      }
+      card.append(el("small", { style: "display:block;color:var(--muted);margin-top:6px",
+        text: "Помощник сам берёт следующую модель, когда эта не отвечает. Ключи — «Ещё» → «🔑 Ключи»." }));
+      return card;
     }
     async function delPerson(u) {
       if (await confirmBox(`Удалить «${u.name}» из приложения? Доступ и память помощника о нём пропадут. VPN не затрагивается.`, "Удалить"))
