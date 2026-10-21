@@ -1358,7 +1358,7 @@
         if (im) body.image = await b64(await shrink(im, 1600, 0.86));  // lighter on a weak line; models see less anyway
         if (d && d.video) body.video = { name: d.name, mime: d.type || "", data: await b64(d) };
         else if (d) body.doc = { name: d.name, mime: d.type || "", data: await b64(d) };
-        await t.run("/api/chat", body, mine);
+        await t.run(d && d.video ? "/api/chat_video" : "/api/chat", body, mine);  // (a video: a bigger body allowed)
       };
       if (th && th !== t) th.box.replaceWith(t.box); else if (!th) scroll.append(t.box);
       th = t;
