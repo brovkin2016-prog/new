@@ -437,25 +437,49 @@
           el("div", { class: "grow" }, el("b", { text: "Дозор" }), el("small", { text: sub })),
           fix ? badge(fix, "🔴", "rgba(200,32,63,.14)") : "", idea ? badge(idea, "🟡", "rgba(234,179,8,.2)") : ""));
     }
+    // what the developer is given: the findings the owner accepted for him, and what the server's Claude already has (so
+    // the two never do the same thing)
+    const devText = (list, all) => {
+      const atClaude = all.filter((x) => x.status === "sent").slice(-10);
+      return "Из «🔍 Дозора» сервера — для разработчика (владелец принял; на сервере их не трогают):\n"
+        + list.map((x, i) => `${i + 1}. ${x.kind === "fix" ? "🔴" : "🟡"} ${x.text}`).join("\n")
+        + (atClaude.length ? "\n\nУ Claude на сервере (не делай повторно):\n" + atClaude.map((x) => "— " + x.text).join("\n") : "");
+    };
+    function devSheet(text) {
+      sheet("👨‍💻 Для разработчика", (box) => {
+        box.append(el("small", { style: "display:block;color:var(--muted);margin:-4px 2px 8px;line-height:1.4",
+          text: "Скопируйте и отправьте в чат с разработчиком — он сделает это в новой версии сервера. Claude на сервере эти пункты не трогает." }),
+        el("div", { class: "card", style: "white-space:pre-wrap;font-size:14px;line-height:1.4;overflow-wrap:anywhere", text }),
+        el("button", { class: "btn wide", text: "📋 Скопировать", onclick: () => { copyText(text); toast("✅ Скопировано — вставьте в чат с разработчиком", 5000); } }));
+      });
+    }
     function patrolSheet(d) {
       const pick = new Map();  // id → "yes" | "no": the owner's marks, sent together by the one button
+      const who = new Map();  // id → "server" | "dev": who does it (the server's Claude, or the developer)
+      let all = [];
       sheet("🔍 Дозор", (box, close) => {
         const body = el("div", {}, el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: "Загружаю список…" })));
         const go = el("button", { class: "btn wide", disabled: true, text: "Отметьте ✓ или ✕" });
         const foot = el("div", { class: "sheet-foot hidden" }, go);
         box.append(el("small", { style: "display:block;color:var(--muted);margin:-4px 2px 8px;line-height:1.4",
-          text: "Дозор сам смотрит сервер, VPN и мосты, защиту, приложение и новые версии ИИ. ✓ — Claude проверит и покажет план "
-            + "(менять будет только после «✅ Выполнить»), ✕ — больше не предложит." }), body, foot);
+          text: "Дозор сам смотрит сервер, VPN и мосты, защиту, приложение и новые версии ИИ. ✓ на 🛠 — Claude на сервере проверит "
+            + "и покажет план (менять будет только после «✅ Выполнить»); ✓ на 👨‍💻 — текст для разработчика (правка программ, "
+            + "придёт с новой версией); ✕ — больше не предложит. Один пункт делает кто-то один — правки не пересекаются." }), body, foot);
         const count = () => {
-          const y = [...pick.values()].filter((v) => v === "yes").length, n = pick.size - y;
+          const ys = [...pick].filter(([, v]) => v === "yes"), n = pick.size - ys.length;
+          const dev = ys.filter(([k]) => who.get(k) === "dev").length, srv = ys.length - dev;
           go.disabled = !pick.size;
-          go.textContent = !pick.size ? "Отметьте ✓ или ✕" : y ? `Отправить Claude: ✓ ${y}` + (n ? ` · ✕ ${n}` : "") : `Отклонить: ✕ ${n}`;
+          go.textContent = !pick.size ? "Отметьте ✓ или ✕" : ys.length
+            ? "Отправить: " + [srv ? `🛠 Claude ${srv}` : "", dev ? `👨‍💻 разработчику ${dev}` : "", n ? `✕ ${n}` : ""].filter(Boolean).join(" · ")
+            : `Отклонить: ✕ ${n}`;
         };
         const mark = (on, color) => "width:46px;min-height:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;"
           + (on ? `background:${color};border-color:${color};color:#fff` : "");
         const item = (x) => {
           const [title, ...rest] = x.text.replace(/`/g, "").split(/\s+—\s+/);
-          const meta = [x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ");
+          who.set(x.id, x.who === "dev" ? "dev" : "server");
+          const meta = [x.who === "dev" ? "👨‍💻 разработчику" : "🛠 Claude на сервере", x.theme, when(x.first),
+            x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ");
           const yes = el("button", { class: "chip", "aria-label": "Принять", title: "Принять", text: "✓" });
           const no = el("button", { class: "chip", "aria-label": "Отклонить", title: "Отклонить", text: "✕" });
           const words = el("div", { class: "grow" }, el("div", { style: "font-weight:600;line-height:1.35;overflow-wrap:anywhere", text: title }),
@@ -501,11 +525,14 @@
               el("small", { style: "display:block;color:var(--muted);margin-top:4px",
                 text: d.patrol_on ? "Дозор следит сам: что найдёт — появится здесь, о важном придёт уведомление." : "Дозор выключен." })));
           }
-          for (const [status, head, ic] of [["sent", "Отправлено Claude", "⏳"], ["done", "Исправлено", "✅"]]) {
+          for (const [status, head, ic] of [["sent", "Отправлено Claude на сервере", "⏳"], ["dev", "У разработчика", "👨‍💻"], ["done", "Исправлено", "✅"]]) {
             const these = items.filter((x) => x.status === status);
             if (!these.length) continue;
-            body.append(el("details", { style: "margin:4px 4px 8px;font-size:14px" }, el("summary", { style: "color:var(--muted);min-height:32px", text: `${ic} ${head} · ${these.length}` }),
-              ...these.map((x) => el("div", { style: "margin:6px 0 0 18px;line-height:1.35;overflow-wrap:anywhere", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + x.text.replace(/`/g, "") }))));
+            body.append(el("details", { class: "patrol-" + status, style: "margin:4px 4px 8px;font-size:14px" },
+              el("summary", { style: "color:var(--muted);min-height:32px", text: `${ic} ${head} · ${these.length}` }),
+              ...these.map((x) => el("div", { style: "margin:6px 0 0 18px;line-height:1.35;overflow-wrap:anywhere", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + x.text.replace(/`/g, "") })),
+              status === "dev" ? el("button", { class: "hint", style: "margin:8px 0 0 18px;min-height:36px;padding:6px 12px;font-size:14px",
+                text: "📋 Текст для разработчика", onclick: () => devSheet(devText(these, items)) }) : ""));
           }
           const turn = (on) => async () => {
             try {
@@ -526,22 +553,36 @@
           count();
         };
         go.onclick = async () => {
-          const yes = [...pick].filter(([, v]) => v === "yes").map(([k]) => k), no = [...pick].filter(([, v]) => v === "no").map(([k]) => k);
+          const ys = [...pick].filter(([, v]) => v === "yes").map(([k]) => k), no = [...pick].filter(([, v]) => v === "no").map(([k]) => k);
+          const dev = ys.filter((k) => who.get(k) === "dev"), yes = ys.filter((k) => who.get(k) !== "dev");
           go.disabled = true;
+          let text = "";
+          if (dev.length) {  // the developer's first: kept as his (never asked of the server's Claude), their text to copy
+            try {
+              const end = await panel({ op: "agent_patrol_dev", ids: dev });
+              if (end.t !== "done") { go.disabled = false; return toast("⚠️ " + end.text, 7000); }
+              text = devText(all.filter((x) => dev.includes(x.id)), end.items || all);
+            } catch (e) { go.disabled = false; return toast(problem(e)); }
+          }
           if (!yes.length) {
             try {
-              const end = await panel({ op: "agent_patrol_pick", yes, no });
-              if (end.t !== "done") { go.disabled = false; return toast("⚠️ " + end.text, 7000); }
-              close(); toast(`✕ ${end.declined} — Дозор больше не предложит`, 4000); reloadClaude();
-            } catch (e) { go.disabled = false; toast(problem(e)); }
-            return;
+              if (no.length) {
+                const end = await panel({ op: "agent_patrol_pick", yes: [], no });
+                if (end.t !== "done") { go.disabled = false; return toast("⚠️ " + end.text, 7000); }
+                toast(`✕ ${end.declined} — Дозор больше не предложит`, 4000);
+              }
+              close(); reloadClaude();
+            } catch (e) { go.disabled = false; toast(problem(e)); return; }
+          } else {
+            close();
+            talk({ op: "agent_patrol_pick", chat: "new", yes, no }, `🔍 Из Дозора — принято: ${yes.length}`);
           }
-          close();
-          talk({ op: "agent_patrol_pick", chat: "new", yes, no }, `🔍 Из Дозора — принято: ${yes.length}`);
+          if (text) devSheet(text);
         };
         panel({ op: "agent_patrol_items" }).then((end) => {
           if (end.t !== "done") { body.innerHTML = ""; body.append(el("p", { text: "⚠️ " + end.text })); return; }
-          drawList(end.items || []);
+          all = end.items || [];
+          drawList(all);
         }).catch((e) => { body.innerHTML = ""; body.append(el("p", { text: problem(e) })); });
       });
     }
