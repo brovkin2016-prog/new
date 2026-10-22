@@ -636,8 +636,8 @@ public final class VpnSvc extends VpnService {
                 int ms = probe(10_000);
                 if (ms > 0) {
                     Diag.i(this, "bridge: data flows, " + ms + " ms");
-                    // the bridge that really carried: the first one tried next time the server does not answer
-                    getSharedPreferences("vpn", MODE_PRIVATE).edit().putString("goodBridge", profile.link)
+                    // the bridge that really carried (this one, still the worker's): first next time the server does not answer
+                    if (mine()) getSharedPreferences("vpn", MODE_PRIVATE).edit().putString("goodBridge", p.link)
                             .putLong("goodBridgeAt", System.currentTimeMillis()).apply();
                     return null;
                 }

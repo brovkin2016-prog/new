@@ -583,8 +583,9 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           devSheet(end.text, end.found);
         } catch (x) { toast(problem(x)); } finally { notes.disabled = false; }
       } });
-      const wipe = el("button", { class: "btn line", text: "🧹 Очистить", disabled: open.length ? null : true, onclick: async () => {
-        if (!(await confirmBox("Убрать находки с экрана? Сначала отправьте их разработчику («📋 Разработчику»): после очистки в текст попадёт только новое.", "Очистить", true))) return;
+      const wipe = el("button", { class: "btn line", text: "🧹 Очистить", onclick: async () => {  // (the reports and the bridges' journal too)
+        if (!(await confirmBox("Отправили текст разработчику («📋 Разработчику»)? После очистки в нём будет только новое: находки, отчёты, журнал мостов. "
+          + "Поломки на сервере (🔴 с «🛠 Починить») останутся, пока их не починят.", "Очистить", true))) return;
         wipe.disabled = true;
         try {
           const end = await panel({ op: "agent_devclear" });
