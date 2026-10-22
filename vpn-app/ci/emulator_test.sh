@@ -323,7 +323,7 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (the connection's button)"
 echo "connection buttons: the server's and the bridge's shown, the server's switches on through it"
 
-# «🔀 Сам переходить на рабочий мост» on (v32, the default): the chosen server does not answer → after it failed twice
+# «🔀 Сам выбирать мост» on (v32, the default): the chosen server does not answer → after it failed twice
 # Winger moves to a bridge by itself (the scout's ranking; here the test's bridge, which has no call: it fails too)
 step "by itself on (v32): the chosen server does not answer twice → the next one that may carry"
 DEAD='hysteria2://family:test-pass-123@10.0.2.2:4999/?sni=vpn.test.local&insecure=1#Запасной'
@@ -476,7 +476,7 @@ adb shell cat /sdcard/ui.xml | grep -qE 'МостПроверка» — (не в
 adb exec-out screencap -p > "$OUT/9-check.png"
 adb shell input keyevent KEYCODE_BACK
 
-# before connecting (v32): «🔎 Какие подключения работают здесь» — the servers asked, each bridge (not VK) in a short call
+# before connecting (v32): «🔎 Что работает здесь» — the servers asked, each bridge (not VK) in a short call
 # with one request; each one's button then says it in words, no numbers
 step "before connecting: which work here (v32): a quick look, each one's button says it in words"
 adb logcat -c
@@ -489,9 +489,20 @@ grep -qE "quick look: [0-9]+ carry here, [1-9][0-9]* do not" "$OUT/quick.log" ||
 sleep 2
 dump /sdcard/ui.xml
 adb shell cat /sdcard/ui.xml > "$OUT/quick.xml"
-grep -q 'text="Здесь не работает"' "$OUT/quick.xml" || fail "the bridge's button does not say it does not work here"
+grep -q 'text="Здесь не работает' "$OUT/quick.xml" || fail "the bridge's button does not say it does not work here"
 grep -qE '[0-9] мс · [0-9]{2}:[0-9]{2}|Мбит/с' "$OUT/quick.xml" && fail "numbers on the connections' buttons"
 adb exec-out screencap -p > "$OUT/9a-quick.png"
+# the whole screen for a look at it (the settings below, the dark theme): pictures only, nothing checked
+read -r SW SH <<< "$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1 | tr x ' ')"
+UP="$((SW / 2)) $((SH * 8 / 10)) $((SW / 2)) $((SH * 2 / 10))"; DOWN="$((SW / 2)) $((SH * 2 / 10)) $((SW / 2)) $((SH * 8 / 10))"
+adb shell input swipe $UP 400; sleep 1
+adb exec-out screencap -p > "$OUT/9b-settings.png"
+adb shell input swipe $DOWN 400; sleep 1
+adb shell cmd uimode night yes >/dev/null 2>&1; sleep 3
+adb exec-out screencap -p > "$OUT/9c-dark.png"
+adb shell input swipe $UP 400; sleep 1
+adb exec-out screencap -p > "$OUT/9d-dark-settings.png"
+adb shell cmd uimode night no >/dev/null 2>&1; sleep 2
 echo "quick look: the servers and the bridge looked at, the buttons say it in words"
 adb shell "am start -n $ACT --es test_remove МостПроверка" >/dev/null; sleep 1
 echo "bridge check: a call of its own tried, sites looked at, the result shown"

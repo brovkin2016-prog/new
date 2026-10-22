@@ -63,12 +63,11 @@ public class MainActivity extends Activity implements State.Listener {
     private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal, scoutVal;
     private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow, scoutRow;
     private boolean checkAsked;  // the button here started the check: its result is shown here when it is done
-    private long quickAsked;  // (v32) when «🔎 Какие подключения работают здесь» was pressed: its word is told once done
+    private long quickAsked;  // (v32) when «🔎 Что работает здесь» was pressed: its word is told once done
     private String connsKey = "";
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
     private final List<TextView> connNotes = new ArrayList<>();
-    private final List<TextView> connChips = new ArrayList<>();
     private final List<View> connDots = new ArrayList<>();
     private int line;  // the thin lines between a list's rows
 
@@ -220,7 +219,7 @@ public class MainActivity extends Activity implements State.Listener {
         // (v32) before connecting: which of them carry on this network now — each one's button then says so, no numbers
         LinearLayout scoutCard = list();
         scoutVal = label("", 13, muted, false);
-        scoutRow = setting("🔎", "Какие подключения работают здесь", scoutVal, v -> startCheck(BridgeCheck.QUICK, true));
+        scoutRow = setting("🔎", "Что работает здесь", scoutVal, v -> startCheck(BridgeCheck.QUICK, true));
         addTo(scoutCard, scoutRow);
         LinearLayout.LayoutParams scoutAt = new LinearLayout.LayoutParams(-1, -2);
         scoutAt.topMargin = dp(10);
@@ -233,23 +232,23 @@ public class MainActivity extends Activity implements State.Listener {
         appsName = label("", 13, muted, false);
         appsName.setSingleLine(true);
         appsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        appsName.setMaxWidth(dp(120));  // «Через сервер» stays on one line on a narrow phone
+        appsName.setMaxWidth(valueWidth());  // «Через сервер» stays on one line on a narrow phone
         appsCard = setting("🧩", "Через сервер", appsName, v -> chooseApps(false));
         addTo(settings, appsCard);
         bridgeAppsName = label("", 13, muted, false);
         bridgeAppsName.setSingleLine(true);
         bridgeAppsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        bridgeAppsName.setMaxWidth(dp(120));  // «Через сервер» stays on one line on a narrow phone
+        bridgeAppsName.setMaxWidth(valueWidth());
         bridgeAppsCard = setting("🌉", "Через мост", bridgeAppsName, v -> chooseApps(true));
         addTo(settings, bridgeAppsCard);
         // (v32) a bridge that carries here now, by itself, when the connection in use stops carrying
         TextView autoName = label(Apps.autoBridge(this) ? "вкл." : "выкл.", 13, muted, false);
-        addTo(settings, setting("🔀", "Сам переходить на рабочий мост", autoName, v -> {
+        addTo(settings, setting("🔀", "Сам выбирать мост", autoName, v -> {
             boolean on = !Apps.autoBridge(this);
             Apps.setAutoBridge(this, on);
             autoName.setText(on ? "вкл." : "выкл.");
             Toast.makeText(this, on ? "Если подключение перестанет работать, Winger сам перейдёт на мост, который работает в этой сети"
-                    : "Winger останется на выбранном подключении; на мост — кнопкой «Через мост»", Toast.LENGTH_LONG).show();
+                    : "Winger останется на выбранном подключении; на мост — нажав на него в списке", Toast.LENGTH_LONG).show();
         }));
         addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
         addTo(settings, addRow);
@@ -316,6 +315,11 @@ public class MainActivity extends Activity implements State.Listener {
             list.addView(sep, lp);
         }
         list.addView(row, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    /** The widest a settings row's value may be: a third of the screen (its name keeps one line on a narrow phone). */
+    private int valueWidth() {
+        return Math.min(dp(160), getResources().getDisplayMetrics().widthPixels * 3 / 10);
     }
 
     /** A settings row: its sign, its name, what it is now (grey, on the right), and ›. */
@@ -385,7 +389,8 @@ public class MainActivity extends Activity implements State.Listener {
         boolean canScout = false;  // two ways or more, one of them a bridge to look at (VK is not), and Winger off
         for (Profile x : Profile.all(this)) canScout |= x.bridge && !"vk".equals(x.platformOrDefault());
         setRow(scoutRow, canScout && Profile.all(this).size() > 1 && (State.phase == State.Phase.OFF || quickAsked > 0));
-        String sv = quickAsked > 0 && BridgeCheck.running.get() ? (BridgeCheck.progress.isEmpty() ? "идёт…" : BridgeCheck.progress) : "";
+        java.util.regex.Matcher pm = java.util.regex.Pattern.compile("\\((\\d+ из \\d+)\\)").matcher(BridgeCheck.progress);
+        String sv = quickAsked > 0 && BridgeCheck.running.get() ? (pm.find() ? pm.group(1) : "идёт…") : "";
         if (!sv.contentEquals(scoutVal.getText())) scoutVal.setText(sv);
         if (quickAsked > 0 && BridgeCheck.quickAt > quickAsked && !BridgeCheck.running.get()) {
             quickAsked = 0;
@@ -757,9 +762,14 @@ public class MainActivity extends Activity implements State.Listener {
                 .setPositiveButton("Понятно", null).show();
     }
 
+    /** A bridge's service, short: «Телемост», «WB Stream», «DION», «Битрикс24», «VK». */
+    private static String platformName(Profile p) {
+        return "telemost".equals(p.platformOrDefault()) ? "Телемост" : VpnSvc.service(p);
+    }
+
     /** The connections' rows: made again only when the list changes; their mark, line and state follow the VPN. Each row:
-     *  a mark (filled: the one in use), its sign, its name, one short line (a server, or what a bridge goes
-     *  through), on the right what it is doing now or whether it carries here (v32: words, no numbers), and ⚡ for its speed. A long press removes it. */
+     *  a mark (filled: the one in use), its sign, its name, under it one short line (what it is doing now or whether it
+     *  carries here, in words, and what it is), and ⚡ for its speed. A long press removes it. */
     private void showConns(List<Profile> all) {
         StringBuilder key = new StringBuilder();
         for (Profile p : all) key.append(p.bridge ? "b|" : "s|").append(p.name).append('\n');
@@ -768,7 +778,6 @@ public class MainActivity extends Activity implements State.Listener {
             conns.removeAllViews();
             connRows.clear();
             connNotes.clear();
-            connChips.clear();
             connDots.clear();
             for (int i = 0; i < all.size(); i++) {
                 Profile p = all.get(i);
@@ -803,16 +812,12 @@ public class MainActivity extends Activity implements State.Listener {
                 note.setGravity(Gravity.START);
                 note.setSingleLine(true);
                 note.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                col.addView(note, new LinearLayout.LayoutParams(-2, -2));
+                LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-2, -2);
+                np.topMargin = dp(1);
+                col.addView(note, np);
                 LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -2, 1f);
                 cp.leftMargin = dp(4);
                 row.addView(col, cp);
-                TextView chip = label("", 12, accent, true);
-                chip.setPadding(dp(9), dp(3), dp(9), dp(3));
-                chip.setSingleLine(true);
-                LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
-                hp.leftMargin = dp(6);
-                row.addView(chip, hp);
                 // its speed check: a small round button
                 TextView fast = label("⚡", 16, text, false);
                 fast.setGravity(Gravity.CENTER);
@@ -825,7 +830,6 @@ public class MainActivity extends Activity implements State.Listener {
                 addTo(conns, row);
                 connRows.add(row);
                 connNotes.add(note);
-                connChips.add(chip);
                 connDots.add(dot);
             }
         }
@@ -856,18 +860,20 @@ public class MainActivity extends Activity implements State.Listener {
                 chip = here ? "Работает здесь" : "Здесь не работает";
                 chipColor = here ? 0xFF16A34A : muted;
             }
-            // its line: what it is (a bridge: what it goes through); the response time and speed are not shown here (v32)
-            String note = p.bridge ? "мост через " + VpnSvc.service(p) : "сервер";
+            // its line under the name (v32: the name is never cut for it): what it is doing now, or whether it carries here,
+            // in its colour, then what it is — no response time or speed here (those are at the top and under ⚡)
+            String what = p.bridge ? platformName(p) : "сервер";
+            String note = chip.isEmpty() ? (p.bridge ? "мост · " + what : what) : chip + " · " + what;
             TextView n = connNotes.get(i);
-            TextView c = connChips.get(i);
-            if (!note.contentEquals(n.getText()) || !chip.contentEquals(c.getText())) {
-                Log.i("AIVPN", "button «" + p.name + "»: " + (chip.isEmpty() ? "" : chip + " · ") + note);
+            if (!note.contentEquals(n.getText())) {
+                Log.i("AIVPN", "button «" + p.name + "»: " + note);
+                android.text.SpannableString line = new android.text.SpannableString(note);
+                if (!chip.isEmpty()) {
+                    line.setSpan(new android.text.style.ForegroundColorSpan(chipColor), 0, chip.length(), 0);
+                    line.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, chip.length(), 0);
+                }
+                n.setText(line);
             }
-            n.setText(note);
-            c.setText(chip);
-            c.setVisibility(chip.isEmpty() ? View.GONE : View.VISIBLE);
-            c.setTextColor(chipColor);
-            c.setBackground(round((chipColor & 0x00FFFFFF) | 0x22000000, 12, 0));
             View dot = connDots.get(i);
             Object was = dot.getTag();
             int mark = ring * 31 + width;

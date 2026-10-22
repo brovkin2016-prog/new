@@ -183,7 +183,7 @@ final class Apps {
     }
 
     /**
-     * «🔀 Сам переходить на рабочий мост» (v32, on unless switched off): when the connection in use stops carrying
+     * «🔀 Сам выбирать мост» (v32, on unless switched off): when the connection in use stops carrying
      * (twice, and a server only after real answers — a white-list lets its handshake through), Winger moves to a bridge
      * the scout saw carrying on this network, never round and round (Scout, VpnSvc.nextChoice). Off: the chosen one stays,
      * and a tap (or «Через мост» in the notification) moves — as it was from 13.10 (the owner: it ran over all of them).

@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * the morning is not the evening's Wi-Fi). The bridge in use is counted too. When the connection in use stops carrying,
  * the next one is a bridge that carries here now (VpnSvc.nextChoice), never first one just seen failing here. VK asks a
  * person to prove they are one at every join: it is not looked at, and it comes last. Before connecting, the button
- * «🔎 Какие подключения работают здесь» looks at all of them at once (BridgeCheck, QUICK); each connection's button
+ * «🔎 Что работает здесь» looks at all of them at once (BridgeCheck, QUICK); each connection's button
  * then says «Работает здесь» or «Здесь не работает» — no numbers.
  */
 final class Scout {
