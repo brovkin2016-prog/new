@@ -153,7 +153,7 @@ final class BridgeCheck {
                 progress = "Сервер «" + p.name + "»";
                 State.fire();
                 JSONObject o = new JSONObject().put("name", p.name);
-                if (inUse(p)) o.put("result", "in_use").put("ping_ms", State.pingMs);
+                if (inUse(c, p)) o.put("result", "in_use").put("ping_ms", State.pingMs);
                 else if (quick) {
                     int ms = Speed.pingOne(c, p);
                     o.put("result", ms > 0 ? "ok" : "no_answer").put("ping_ms", ms);
@@ -220,8 +220,12 @@ final class BridgeCheck {
         return n;
     }
 
-    private static boolean inUse(Profile p) {
-        return State.phase != State.Phase.OFF && p.link.equals(State.activeLink);
+    /** The connection in use, or its twin in the same call (the server keeps one of them in it: a look would throw it out). */
+    private static boolean inUse(Context c, Profile p) {
+        if (State.phase == State.Phase.OFF || State.activeLink == null) return false;
+        if (p.link.equals(State.activeLink)) return true;
+        for (Profile x : Profile.all(c)) if (x.link.equals(State.activeLink)) return Scout.sameCall(x, p);
+        return false;
     }
 
     /** One site straight from this phone: its answer and time, or why not (no name, no answer, a certificate not its own). */
@@ -267,7 +271,7 @@ final class BridgeCheck {
     private static JSONObject bridge(Context c, Profile p, File dir, Process[] carrier, int[] carrierPort, boolean light) throws Exception {
         String tunnel = p.tunnelMode.isEmpty() ? "dc" : p.tunnelMode;
         JSONObject o = new JSONObject().put("name", p.name).put("platform", p.platformOrDefault()).put("mode", p.modeLabel(tunnel));
-        if (inUse(p)) {
+        if (inUse(c, p)) {
             return o.put("result", "in_use").put("phase", State.phase.name()).put("ping_ms", State.pingMs)
                     .put("note", State.note);
         }
@@ -299,8 +303,10 @@ final class BridgeCheck {
                 o.put("result", captcha[0] ? "captcha" : why[0] != null ? "error" : !alive(proc) ? "stopped" : "no_join");
                 if (why[0] != null) {
                     o.put("error", cut(why[0]));
-                    BridgeSync.stuck(c, p, "check: " + why[0]);  // the call has nobody to take it: the server's side restarted
-                    o.put("restarting", true);
+                    if (!light) {  // (a quick look: on a white-list it may be the network, not the bridge — no restart for that)
+                        BridgeSync.stuck(c, p, "check: " + why[0]);  // the call has nobody to take it: the server's side restarted
+                        o.put("restarting", true);
+                    }
                 }
                 return o;
             }
@@ -310,6 +316,7 @@ final class BridgeCheck {
                 if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
             }
             if (best == 0) {
+                if (light) return o.put("result", "no_data");  // (as above: no restart from a quick look)
                 BridgeSync.stuck(c, p, "check: in the call, nothing comes back");  // the server's side restarted
                 return o.put("result", "no_data").put("restarting", true);
             }

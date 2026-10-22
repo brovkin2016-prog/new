@@ -106,6 +106,7 @@ public final class VpnSvc extends VpnService {
         int my;
         synchronized (lock) {
             if (!again && wanted && profile != null && profile.link.equals(p.link)) {
+                wake = true;  // (waiting after a round with nothing carrying: once more now)
                 update();  // already on with it: the notification says «Подключаюсь…» from foreground() above, put back how it is
                 return START_STICKY;
             }
@@ -210,6 +211,8 @@ public final class VpnSvc extends VpnService {
     }
 
     /** This thread is the current worker and the VPN is still wanted. */
+    private static final String NEW_CALL = "Мост на сервере сменил звонок — подключаюсь к новому.";
+    private volatile boolean wake;  // pressed again while it waits after a round with nothing carrying: try at once
     private volatile boolean carried;  // the connection in use has carried a request (not just shaken hands)
 
     /** How many ways one turn has: the servers and the bridges, the chosen one included. */
@@ -281,6 +284,7 @@ public final class VpnSvc extends VpnService {
             }
             if (NET_CHANGED.equals(err)) {  // not a failure: straight back on the new network
                 fails = 0;
+                autoMisses = 0;  // another network: the ways are new again
                 Diag.i(this, "reconnecting on the new network");
                 State.set(State.Phase.RETRYING, "Сеть сменилась — переподключаюсь…");
                 update();
@@ -310,15 +314,24 @@ public final class VpnSvc extends VpnService {
                         : "bridge: the data channel does not carry, trying the video");
                 continue;
             }
-            if (profile.bridge && fails >= 1) Scout.record(this, profile, noData ? "no_data" : "error", 0);  // (this network's word)
             Profile next = fails >= 2 ? nextChoice() : null;
+            // (this network's word, once the next one is chosen: put last now, the failed bridge would bring the dead chosen
+            // server back between each two bridges; a new call from the server has not been tried yet)
+            if (profile.bridge && fails >= 1 && !NEW_CALL.equals(err)) Scout.record(this, profile, noData ? "no_data" : "error", 0);
             if (next != null && ++autoMisses > autoLimit()) {
-                // every way tried in turn and none carried: no running round and round — a longer wait, then once more
+                // every way tried in turn and none carried: no running round and round — a longer wait, then once more (at
+                // once on another network, or when the connection is pressed again)
                 autoMisses = 0;
                 Diag.i(this, "auto: nothing carries here now — waiting 5 minutes before trying again");
                 State.set(State.Phase.RETRYING, "Сейчас не работает ни одно подключение — попробую снова через 5 минут…");
                 update();
-                if (!sleep(5 * 60_000L)) break;
+                netChanged = false;
+                wake = false;
+                long until = SystemClock.elapsedRealtime() + 5 * 60_000L;
+                boolean on = true;
+                while (on && !netChanged && !wake && SystemClock.elapsedRealtime() < until) on = sleep(2000);
+                if (!on) break;
+                if (netChanged || wake) Diag.i(this, netChanged ? "auto: the network changed — trying again now" : "auto: pressed again — trying again now");
                 fails = 0;
                 continue;
             }
@@ -402,7 +415,7 @@ public final class VpnSvc extends VpnService {
                 Diag.upload(this, false);  // now and then the journal goes to the family server
                 Updater.background(this, profile.bridge);  // a newer Winger: fetched now and then, put in while the screen is off
                 BridgeCheck.poll(this);  // the family server's Claude may want the bridges checked from this phone (the owner's)
-                if (State.pingMs > 0) Scout.maybe(this, profile.link);  // (v32) which other bridges carry here now
+                if (State.pingMs > 0) Scout.maybe(this, profile);  // (v32) which other bridges carry here now
                 if (!mine()) return "";  // switched off while it was pinging: the screen says «off», not «retrying»
                 TProxyService t = hev;
                 if (t == null || !t.TProxyIsRunning()) {
@@ -706,7 +719,7 @@ public final class VpnSvc extends VpnService {
                     State.activeLink = fresh.link;
                     Diag.i(this, "bridge: the server gave a new call, trying it");
                     noData = false;  // not the way's fault: another call
-                    return "Мост на сервере сменил звонок — подключаюсь к новому.";
+                    return NEW_CALL;
                 }
             }
             return "Звонок есть, но мост на сервере не отвечает.";

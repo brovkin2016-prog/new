@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * then says «Работает здесь» or «Здесь не работает» — no numbers.
  */
 final class Scout {
-    static final long EVERY = 30 * 60_000L;  // each bridge looked at again after this long
+    static final long EVERY = 30 * 60_000L;  // each bridge looked at again after this long (an hour once it said the same twice)
     static final long FRESH = 60 * 60_000L;  // what one said counts for this long
     private static final AtomicBoolean running = new AtomicBoolean();
     private static volatile long lastAt;
@@ -45,11 +45,18 @@ final class Scout {
     }
 
     /** What a bridge did here: "ok" with its response time, or why not (no_data, no_join, error, captcha, stopped). */
-    static synchronized void record(Context c, Profile p, String result, int ms) {
+    static void record(Context c, Profile p, String result, int ms) {
+        record(c, net(c), p, result, ms);
+    }
+
+    /** ... on that network (the one there was when the look began: a look that ends on another network is not its word). */
+    static synchronized void record(Context c, String key, Profile p, String result, int ms) {
         try {
-            String key = net(c);
             JSONObject all = new JSONObject(prefs(c).getString(key, "{}"));
-            all.put(String.valueOf(p.link.hashCode()), new JSONObject().put("r", result).put("ms", ms).put("at", System.currentTimeMillis()));
+            String id = String.valueOf(p.link.hashCode());
+            JSONObject was = all.optJSONObject(id);
+            int same = was != null && result.equals(was.optString("r")) ? was.optInt("n") + 1 : 0;  // the same word again
+            all.put(id, new JSONObject().put("r", result).put("ms", ms).put("at", System.currentTimeMillis()).put("n", same));
             prefs(c).edit().putString(key, all.toString()).apply();
         } catch (Exception ignored) {
             // nothing kept: the next look says it again
@@ -72,9 +79,17 @@ final class Scout {
 
     /** For a connection's button: true — it carried here lately, false — it did not, null — not looked at (or VK). */
     static Boolean carries(Context c, Profile p) {
+        return carries(p, seen(c, p));
+    }
+
+    private static Boolean carries(Profile p, JSONObject s) {
         if (p.bridge && "vk".equals(p.platformOrDefault())) return null;
-        JSONObject s = seen(c, p);
         return s == null ? null : "ok".equals(s.optString("r"));
+    }
+
+    /** The same call (a bridge and its twin with other settings, say «2 трека»): the server keeps one of them in it. */
+    static boolean sameCall(Profile a, Profile b) {
+        return a.link.equals(b.link) || a.bridge && b.bridge && a.joinLink != null && a.joinLink.equals(b.joinLink);
     }
 
     /** The quickest connection that carried here lately, other than this one (VK aside); null: none. */
@@ -82,8 +97,9 @@ final class Scout {
         Profile best = null;
         int bestMs = Integer.MAX_VALUE;
         for (Profile p : Profile.all(c)) {
-            if (p.link.equals(not.link) || !Boolean.TRUE.equals(carries(c, p))) continue;
-            int ms = seen(c, p).optInt("ms", Integer.MAX_VALUE);
+            JSONObject s = seen(c, p);  // (once: it may go stale or the network change between two looks)
+            if (p.link.equals(not.link) || !Boolean.TRUE.equals(carries(p, s))) continue;
+            int ms = s.optInt("ms", Integer.MAX_VALUE);
             if (ms <= 0) ms = Integer.MAX_VALUE - 1;
             if (best == null || ms < bestMs) {
                 best = p;
@@ -105,16 +121,19 @@ final class Scout {
      */
     static List<Profile> rank(Context c, List<Profile> bridges, String good) {
         List<Profile> ok = new ArrayList<>(), unknown = new ArrayList<>(), bad = new ArrayList<>(), vk = new ArrayList<>();
+        java.util.Map<Profile, Integer> ms = new java.util.HashMap<>();  // (taken once: the sort does not look again)
         for (Profile p : bridges) {
             JSONObject s = seen(c, p);
             if ("vk".equals(p.platformOrDefault())) vk.add(p);
             else if (s == null) {
                 if (p.link.equals(good)) unknown.add(0, p);
                 else unknown.add(p);
-            } else if ("ok".equals(s.optString("r"))) ok.add(p);
-            else bad.add(p);
+            } else if ("ok".equals(s.optString("r"))) {
+                ok.add(p);
+                ms.put(p, s.optInt("ms"));
+            } else bad.add(p);
         }
-        java.util.Collections.sort(ok, (a, b) -> Integer.compare(seen(c, a).optInt("ms"), seen(c, b).optInt("ms")));
+        java.util.Collections.sort(ok, (a, b) -> Integer.compare(ms.get(a), ms.get(b)));
         List<Profile> out = new ArrayList<>(ok);
         out.addAll(unknown);
         out.addAll(bad);
@@ -122,27 +141,35 @@ final class Scout {
         return out;
     }
 
-    /** Every 20 s while a connection holds: one bridge that is due looked at in the background (at most one a minute). */
-    static void maybe(Context c, String activeLink) {
+    /**
+     * Every 20 s while a connection holds and the screen is on (a phone in a pocket needs no ranking, and each look is a
+     * call): one bridge that is due looked at in the background, at most one a minute — never the one in use nor its
+     * twin in the same call (the server keeps one of them in it: the look would throw the connection out).
+     */
+    static void maybe(Context c, Profile active) {
+        android.os.PowerManager pm = (android.os.PowerManager) c.getSystemService(Context.POWER_SERVICE);
         if (!Apps.autoBridge(c) || BridgeCheck.running.get() || System.currentTimeMillis() - lastAt < 60_000L
-                || !running.compareAndSet(false, true)) return;
+                || pm != null && !pm.isInteractive() || !running.compareAndSet(false, true)) return;
         Context app = c.getApplicationContext();
         new Thread(() -> {
             try {
                 Profile due = null;
                 long oldest = Long.MAX_VALUE;
                 for (Profile p : Profile.all(app)) {
-                    if (!p.bridge || p.link.equals(activeLink) || "vk".equals(p.platformOrDefault())) continue;
+                    if (!p.bridge || sameCall(p, active) || "vk".equals(p.platformOrDefault())) continue;
                     JSONObject s = raw(app, p);
                     long at = s == null ? 0 : s.optLong("at");
-                    if (System.currentTimeMillis() - at >= EVERY && at < oldest) {
+                    long every = s != null && s.optInt("n") >= 2 ? 2 * EVERY : EVERY;  // the same word again and again: less often
+                    if (System.currentTimeMillis() - at >= every && at < oldest) {
                         oldest = at;
                         due = p;
                     }
                 }
                 if (due == null) return;
+                String key = net(app);
                 JSONObject r = BridgeCheck.scoutOne(app, due);
-                record(app, due, r.optString("result", "error"), r.optInt("ping_ms"));
+                String res = r.optString("result", "error");
+                if (!"in_use".equals(res) && key.equals(net(app))) record(app, key, due, res, r.optInt("ping_ms"));
             } catch (Exception e) {
                 Diag.i(app, "scout: " + e);
             } finally {
