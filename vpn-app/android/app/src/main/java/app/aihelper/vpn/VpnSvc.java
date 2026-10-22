@@ -210,6 +210,8 @@ public final class VpnSvc extends VpnService {
     }
 
     /** This thread is the current worker and the VPN is still wanted. */
+    private volatile boolean carried;  // the connection in use has carried a request (not just shaken hands)
+
     private boolean mine() {
         synchronized (lock) {
             return wanted && worker == Thread.currentThread();
@@ -242,7 +244,10 @@ public final class VpnSvc extends VpnService {
                     killClient(own[0]);
                     break;
                 }
-                fails = 0;
+                // a bridge is «in» only once data came back through it; the server's handshake alone proves nothing (a
+                // white-list lets it through and then nothing more): its failures are forgotten only after a real answer
+                if (profile.bridge) fails = 0;
+                carried = false;
                 if (!profile.bridge && returnedAt > 0 && SystemClock.elapsedRealtime() - returnedAt > 30 * 60_000L) {
                     backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;  // the chosen server held for a while: the usual wait again
                 }
@@ -251,6 +256,7 @@ public final class VpnSvc extends VpnService {
                 Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + profile.modeLabel(tunnel) + ")" : ""));
                 ping();
                 err = watch(own[0]);
+                if (carried) fails = 0;  // it did carry: its failure now is a new one, not the same again
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
             captchaDone();  // its program is gone: so is the check page it showed
@@ -469,8 +475,9 @@ public final class VpnSvc extends VpnService {
             String host = p.host;
             if (!host.matches("[0-9.]+") && !host.contains(":")) host = InetAddress.getByName(host).getHostAddress();
             File cfg = new File(dir, "probe.yaml");
+            int port = freePort();
             try (FileOutputStream out = new FileOutputStream(cfg)) {
-                out.write(clientConfig(p, host, freePort()).getBytes(StandardCharsets.UTF_8));
+                out.write(clientConfig(p, host, port).getBytes(StandardCharsets.UTF_8));
             }
             ProcessBuilder pb = new ProcessBuilder(getApplicationInfo().nativeLibraryDir + "/libhysteria.so", "client", "-c",
                     cfg.getAbsolutePath()).directory(dir).redirectErrorStream(true);
@@ -487,8 +494,10 @@ public final class VpnSvc extends VpnService {
                     // the probe ended
                 }
             }, "probe-log").start();
-            boolean up = ok.await(12, TimeUnit.SECONDS);
-            Diag.i(this, "auto: «" + p.name + "» " + (up ? "answers again" : "still does not answer"));
+            // the handshake, then a request through it: a white-list lets the first through and stops the rest
+            boolean shook = ok.await(12, TimeUnit.SECONDS);
+            boolean up = shook && Speed.probe(port, 8000) > 0;
+            Diag.i(this, "auto: «" + p.name + "» " + (up ? "answers again" : shook ? "shakes hands but carries nothing" : "still does not answer"));
             return up;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -965,6 +974,7 @@ public final class VpnSvc extends VpnService {
             int ms = probe(8000);
             if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
         }
+        if (best > 0) carried = true;
         State.pingMs = best;
         State.pingAt = System.currentTimeMillis();
         Profile p = profile;
