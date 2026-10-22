@@ -51,6 +51,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class BridgeCheck {
     static final AtomicBoolean running = new AtomicBoolean();
+    static final String QUICK = "quick";    // (v32) the button before connecting: which carry here, no speed, no report
+    static volatile long quickAt;           // when the last quick look ended
     static volatile String progress = "";  // what it is doing now, for the notification
     static volatile boolean fresh;         // a report came since the screen last showed one
     static long joinMs = 50_000;            // how long a bridge gets to get into its call (the emulator test: less)
@@ -83,9 +85,13 @@ final class BridgeCheck {
         new Thread(() -> {
             try {
                 JSONObject r = run(c, task == null ? "" : task);
-                save(c, r);
-                fresh = true;
-                progress = "Отправляю отчёт…";
+                if (QUICK.equals(task)) {
+                    quickAt = System.currentTimeMillis();  // its word is in each connection's button (Scout)
+                } else {
+                    save(c, r);
+                    fresh = true;
+                    progress = "Отправляю отчёт…";
+                }
                 State.fire();
             } catch (Exception e) {
                 Diag.w(c, "bridge check", e);
@@ -124,12 +130,56 @@ final class BridgeCheck {
 
     static JSONObject run(Context c, String task) throws Exception {
         long t0 = SystemClock.elapsedRealtime();
-        if (!task.isEmpty()) c.getSharedPreferences("vpn", Context.MODE_PRIVATE).edit().putString("checkTask", task).apply();
-        Diag.i(c, "bridge check: started" + (task.isEmpty() ? " (the button)" : " (the server's ask)"));
+        boolean quick = QUICK.equals(task);
+        if (!task.isEmpty() && !quick) c.getSharedPreferences("vpn", Context.MODE_PRIVATE).edit().putString("checkTask", task).apply();
+        Diag.i(c, "bridge check: started" + (quick ? " (before connecting: which carry here)" : task.isEmpty() ? " (the button)" : " (the server's ask)"));
         JSONObject r = new JSONObject().put("v", 1).put("task", task).put("at", System.currentTimeMillis() / 1000)
                 .put("app", BuildConfig.VERSION_NAME).put("device", Build.MANUFACTURER + " " + Build.MODEL)
                 .put("android", Build.VERSION.RELEASE).put("net", network(c)).put("vpn", vpn(c));
         List<Profile> all = Profile.all(c);
+        if (!quick) r.put("sites", sites(c, all));
+        // the servers (Hysteria and its salamander door), then the bridges one after another
+        JSONArray servers = new JSONArray(), bridges = new JSONArray();
+        int nb = 0, nbAll = 0;
+        for (Profile p : all) if (p.bridge && !(quick && "vk".equals(p.platformOrDefault()))) nbAll++;
+        Process[] carrier = {null};
+        int[] carrierPort = {0};
+        File dir = new File(c.getFilesDir(), "check");
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        try {
+            for (Profile p : all) {
+                if (p.bridge) continue;
+                progress = "Сервер «" + p.name + "»";
+                State.fire();
+                JSONObject o = new JSONObject().put("name", p.name);
+                if (inUse(p)) o.put("result", "in_use").put("ping_ms", State.pingMs);
+                else if (quick) {
+                    int ms = Speed.pingOne(c, p);
+                    o.put("result", ms > 0 ? "ok" : "no_answer").put("ping_ms", ms);
+                } else o.put("result", "measured").put("line", String.valueOf(Speed.measure(c, p)));
+                servers.put(o);
+            }
+            Scout.waitIdle(90_000);  // a look in the background still in its call: one call at a time
+            for (Profile p : all) {
+                if (!p.bridge || quick && "vk".equals(p.platformOrDefault())) continue;  // (VK: «I'm not a robot» at every join)
+                progress = "Мост «" + p.name + "» (" + (++nb) + " из " + nbAll + ")";
+                State.fire();
+                JSONObject o = bridge(c, p, dir, carrier, carrierPort, quick);
+                if (!"in_use".equals(o.optString("result"))) Scout.record(c, p, o.optString("result"), o.optInt("ping_ms"));
+                bridges.put(o);
+            }
+            r.put("servers", servers).put("bridges", bridges).put("took_s", (SystemClock.elapsedRealtime() - t0) / 1000);
+            Diag.i(c, "bridge check: done, " + bridges.length() + " bridges, " + ok(bridges) + " carry");
+            if (!quick) r.put("sent", send(c, r, carrierPort[0]));
+        } finally {
+            if (carrier[0] != null) carrier[0].destroy();
+        }
+        return r;
+    }
+
+    /** The sites straight from this phone, all at once: those a white-list shuts wait their full time. */
+    private static JSONArray sites(Context c, List<Profile> all) throws Exception {
         // the sites: the bridges' own addresses too (a Bitrix24 portal, a VK call), only their host — never the call itself
         Set<String> seen = new LinkedHashSet<>();
         List<String[]> look = new ArrayList<>();
@@ -161,39 +211,7 @@ final class BridgeCheck {
         pool.awaitTermination(60, TimeUnit.SECONDS);
         JSONArray sites = new JSONArray();
         for (JSONObject o : got) if (o != null) sites.put(o);
-        r.put("sites", sites);
-        // the servers (Hysteria and its salamander door), then the bridges one after another
-        JSONArray servers = new JSONArray(), bridges = new JSONArray();
-        int nb = 0, nbAll = 0;
-        for (Profile p : all) if (p.bridge) nbAll++;
-        Process[] carrier = {null};
-        int[] carrierPort = {0};
-        File dir = new File(c.getFilesDir(), "check");
-        //noinspection ResultOfMethodCallIgnored
-        dir.mkdirs();
-        try {
-            for (Profile p : all) {
-                if (p.bridge) continue;
-                progress = "Сервер «" + p.name + "»";
-                State.fire();
-                JSONObject o = new JSONObject().put("name", p.name);
-                if (inUse(p)) o.put("result", "in_use").put("ping_ms", State.pingMs);
-                else o.put("result", "measured").put("line", String.valueOf(Speed.measure(c, p)));
-                servers.put(o);
-            }
-            for (Profile p : all) {
-                if (!p.bridge) continue;
-                progress = "Мост «" + p.name + "» (" + (++nb) + " из " + nbAll + ")";
-                State.fire();
-                bridges.put(bridge(c, p, dir, carrier, carrierPort, false));
-            }
-            r.put("servers", servers).put("bridges", bridges).put("took_s", (SystemClock.elapsedRealtime() - t0) / 1000);
-            Diag.i(c, "bridge check: done, " + bridges.length() + " bridges, " + ok(bridges) + " carry");
-            r.put("sent", send(c, r, carrierPort[0]));
-        } finally {
-            if (carrier[0] != null) carrier[0].destroy();
-        }
-        return r;
+        return sites;
     }
 
     private static int ok(JSONArray bridges) {
@@ -524,9 +542,9 @@ final class BridgeCheck {
         String n = "«" + o.optString("name") + "»";
         switch (o.optString("result")) {
             case "ok":
-                return String.format(Locale.ROOT, "✅ %s — %d мс, %.1f Мбит/с", n, o.optInt("ping_ms"), o.optDouble("mbps")).replace('.', ',');
+                return "✅ " + n + " — работает";  // (the numbers are in the report, for the developer)
             case "in_use":
-                return "⏺ " + n + " — сейчас в работе" + (o.optInt("ping_ms") > 0 ? ", отклик " + o.optInt("ping_ms") + " мс" : "");
+                return "⏺ " + n + " — сейчас в работе";
             case "captcha":
                 return "⚠️ " + n + " — VK просит «я не робот»: пройдите её, подключившись к мосту";
             case "no_data":

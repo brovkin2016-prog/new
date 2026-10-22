@@ -84,19 +84,7 @@ final class Speed {
                 for (Profile p : Profile.all(app)) {
                     boolean active = State.phase == State.Phase.ON && p.link.equals(State.activeLink);
                     if (p.bridge || active) continue;
-                    int port = VpnSvc.freePort();
-                    Process temp = tempClient(app, p, port, "ping.yaml");
-                    int best = 0;
-                    try {
-                        for (int i = 0; temp != null && i < 2; i++) {
-                            int ms = probe(port, 6000);
-                            if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
-                        }
-                    } finally {
-                        if (temp != null) temp.destroy();
-                    }
-                    savePing(app, p, best);
-                    Diag.i(app, "ping «" + p.name + "»: " + (best > 0 ? best + " ms" : "no answer") + " (a separate test client)");
+                    pingOne(app, p);
                     done.run();
                 }
             } finally {
@@ -104,6 +92,26 @@ final class Speed {
                 pinging.set(false);
             }
         }, "ping-all").start();
+    }
+
+    /** One server through a short-lived client of its own, past the VPN: its response time (0: none), kept for its button
+     *  and as this network's word for it (Scout). */
+    static int pingOne(Context c, Profile p) {
+        int port = VpnSvc.freePort();
+        Process temp = tempClient(c, p, port, "ping.yaml");
+        int best = 0;
+        try {
+            for (int i = 0; temp != null && i < 2; i++) {
+                int ms = probe(port, 6000);
+                if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
+            }
+        } finally {
+            if (temp != null) temp.destroy();
+        }
+        savePing(c, p, best);
+        Scout.record(c, p, best > 0 ? "ok" : "no_answer", best);
+        Diag.i(c, "ping «" + p.name + "»: " + (best > 0 ? best + " ms" : "no answer") + " (a separate test client)");
+        return best;
     }
 
     /** One request through a local SOCKS port: its time in ms, 0 when none came back. */

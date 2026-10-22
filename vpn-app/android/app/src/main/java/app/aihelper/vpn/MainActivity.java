@@ -60,9 +60,10 @@ public class MainActivity extends Activity implements State.Listener {
     private PowerButton power;
     private AuroraView aurora;
     private AvatarView avatar;
-    private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal;
-    private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow;
+    private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal, scoutVal;
+    private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow, scoutRow;
     private boolean checkAsked;  // the button here started the check: its result is shown here when it is done
+    private long quickAsked;  // (v32) when «🔎 Какие подключения работают здесь» was pressed: its word is told once done
     private String connsKey = "";
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
@@ -216,6 +217,14 @@ public class MainActivity extends Activity implements State.Listener {
         hint.setGravity(Gravity.START);
         hint.setPadding(dp(8), dp(6), dp(8), 0);
         root.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        // (v32) before connecting: which of them carry on this network now — each one's button then says so, no numbers
+        LinearLayout scoutCard = list();
+        scoutVal = label("", 13, muted, false);
+        scoutRow = setting("🔎", "Какие подключения работают здесь", scoutVal, v -> startCheck(BridgeCheck.QUICK, true));
+        addTo(scoutCard, scoutRow);
+        LinearLayout.LayoutParams scoutAt = new LinearLayout.LayoutParams(-1, -2);
+        scoutAt.topMargin = dp(10);
+        root.addView(scoutCard, scoutAt);
 
         // the settings: which apps go through it, adding a connection, the update, the journal (and the owner's rescue)
         root.addView(section("Настройки"), sectionParams());
@@ -373,6 +382,17 @@ public class MainActivity extends Activity implements State.Listener {
         setRow(rescueRow, Rescue.shown(this));
         setRow(checkRow, Rescue.shown(this));
         checkVal.setText(BridgeCheck.running.get() ? "идёт…" : "");
+        boolean canScout = false;  // two ways or more, one of them a bridge to look at (VK is not), and Winger off
+        for (Profile x : Profile.all(this)) canScout |= x.bridge && !"vk".equals(x.platformOrDefault());
+        setRow(scoutRow, canScout && Profile.all(this).size() > 1 && (State.phase == State.Phase.OFF || quickAsked > 0));
+        String sv = quickAsked > 0 && BridgeCheck.running.get() ? (BridgeCheck.progress.isEmpty() ? "идёт…" : BridgeCheck.progress) : "";
+        if (!sv.contentEquals(scoutVal.getText())) scoutVal.setText(sv);
+        if (quickAsked > 0 && BridgeCheck.quickAt > quickAsked && !BridgeCheck.running.get()) {
+            quickAsked = 0;
+            scoutSaid();
+        } else if (quickAsked > 0 && System.currentTimeMillis() - quickAsked > 10 * 60_000L) {
+            quickAsked = 0;  // it never started (another check was running): nothing to tell
+        }
         if (checkAsked && BridgeCheck.fresh && !BridgeCheck.running.get()) {
             checkAsked = false;
             showCheck();
@@ -697,7 +717,9 @@ public class MainActivity extends Activity implements State.Listener {
             return;
         }
         if (!mine && System.currentTimeMillis() - BridgeCheck.lastStart() < 60_000) return;
-        checkAsked |= mine;
+        boolean quick = BridgeCheck.QUICK.equals(task);
+        if (quick) quickAsked = System.currentTimeMillis();
+        else checkAsked |= mine;
         Intent s = new Intent(this, CheckSvc.class).putExtra(CheckSvc.TASK, task == null ? "" : task);
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(s);
@@ -706,8 +728,23 @@ public class MainActivity extends Activity implements State.Listener {
             Diag.w(this, "bridge check start", e);
             return;
         }
-        if (mine) Toast.makeText(this, "Проверяю мосты — несколько минут, ход в уведомлении", Toast.LENGTH_LONG).show();
+        if (mine) Toast.makeText(this, quick ? "Проверяю, какие подключения работают здесь — 1–3 минуты"
+                : "Проверяю мосты — несколько минут, ход в уведомлении", Toast.LENGTH_LONG).show();
         changed();
+    }
+
+    /** (v32) What the quick look found, in one line: which carry here and which do not. */
+    private void scoutSaid() {
+        List<String> yes = new ArrayList<>(), no = new ArrayList<>();
+        for (Profile p : Profile.all(this)) {
+            Boolean c = Scout.carries(this, p);
+            if (c != null) (c ? yes : no).add("«" + p.name + "»");
+        }
+        String t = yes.isEmpty() ? "Здесь сейчас не работает ни одно подключение — попробуйте позже или другую сеть"
+                : "Работают здесь: " + android.text.TextUtils.join(", ", yes)
+                + (no.isEmpty() ? "" : ". Не работают: " + android.text.TextUtils.join(", ", no));
+        Diag.i(this, "quick look: " + yes.size() + " carry here, " + no.size() + " do not");
+        Toast.makeText(this, t, Toast.LENGTH_LONG).show();
     }
 
     /** The last check's report, in a few lines. */
@@ -720,15 +757,9 @@ public class MainActivity extends Activity implements State.Listener {
                 .setPositiveButton("Понятно", null).show();
     }
 
-    /** «⏱ отклик 85 мс · 15:03» → «85 мс · 15:03»; «⚡ 23,4 Мбит/с · 45 мс» stays with its ⚡ (one row's short line). */
-    private static String shortLine(String s) {
-        if (s == null) return null;
-        return s.replaceFirst("^⏱\\s*отклик\\s*", "").replaceFirst("^⚡\\s*", "⚡ ");
-    }
-
     /** The connections' rows: made again only when the list changes; their mark, line and state follow the VPN. Each row:
-     *  a mark (filled: the one in use), its sign, its name, one short line (its response time and speed, or what a bridge
-     *  goes through), what it is doing now on the right, and ⚡ for its speed. A long press removes it. */
+     *  a mark (filled: the one in use), its sign, its name, one short line (a server, or what a bridge goes
+     *  through), on the right what it is doing now or whether it carries here (v32: words, no numbers), and ⚡ for its speed. A long press removes it. */
     private void showConns(List<Profile> all) {
         StringBuilder key = new StringBuilder();
         for (Profile p : all) key.append(p.bridge ? "b|" : "s|").append(p.name).append('\n');
@@ -820,15 +851,13 @@ public class MainActivity extends Activity implements State.Listener {
             } else if (i == cur) {
                 ring = muted;
             }
-            // its line: the response time (live for the one in use) and the last speed; a bridge: what it goes through
-            List<String> parts = new ArrayList<>();
-            if (p.bridge) parts.add("мост через " + VpnSvc.service(p));
-            String pg = on && i == act && State.phase == State.Phase.ON && State.pingMs > 0 ? State.pingMs + " мс"
-                    : shortLine(Speed.lastPing(this, p));
-            if (pg != null) parts.add(pg);
-            String sp = shortLine(Speed.last(this, p));
-            if (sp != null) parts.add(sp);
-            String note = parts.isEmpty() ? "сервер" : android.text.TextUtils.join(" · ", parts);
+            Boolean here = chip.isEmpty() ? Scout.carries(this, p) : null;  // (v32) what this network said lately: words, no numbers
+            if (here != null) {
+                chip = here ? "Работает здесь" : "Здесь не работает";
+                chipColor = here ? 0xFF16A34A : muted;
+            }
+            // its line: what it is (a bridge: what it goes through); the response time and speed are not shown here (v32)
+            String note = p.bridge ? "мост через " + VpnSvc.service(p) : "сервер";
             TextView n = connNotes.get(i);
             TextView c = connChips.get(i);
             if (!note.contentEquals(n.getText()) || !chip.contentEquals(c.getText())) {

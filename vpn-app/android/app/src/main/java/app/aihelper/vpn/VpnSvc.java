@@ -538,7 +538,18 @@ public final class VpnSvc extends VpnService {
      * the first one that answers, or else the bridge, is taken at once. The chosen server is looked at again later (BACK).
      */
     private void quickChoice() {
-        if (profile.bridge || !Apps.autoBridge(this) || preferred == null || !preferred.link.equals(profile.link)) return;
+        if (!Apps.autoBridge(this) || preferred == null || !preferred.link.equals(profile.link)) return;
+        if (Boolean.FALSE.equals(Scout.carries(this, profile))) {
+            // (v32) the chosen one was just seen not carrying on this network and another one was seen carrying: that one
+            // first, no two failed tries on the chosen one before it
+            Profile best = Scout.best(this, profile);
+            if (best != null && mine()) {
+                switchTo(best, true, (best.bridge ? "«" + profile.name + "» не работает в этой сети — включаю мост через " + service(best)
+                        : "«" + profile.name + "» не работает в этой сети — пробую «" + best.name + "»") + "…");
+                return;
+            }
+        }
+        if (profile.bridge) return;
         boolean bridge = false;
         for (Profile x : Profile.all(this)) bridge |= x.bridge;
         if (!bridge) return;

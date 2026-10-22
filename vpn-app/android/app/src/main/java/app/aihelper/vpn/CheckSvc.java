@@ -49,9 +49,10 @@ public final class CheckSvc extends Service {
 
     private void finish() {
         main.removeCallbacks(tick);
-        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH);
         JSONObject r = BridgeCheck.last(this);
-        if (r != null && BridgeCheck.fresh) notifyNow(result(r), false);
+        boolean report = r != null && BridgeCheck.fresh;  // (the quick look before connecting leaves no notice: Winger says it)
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(report ? STOP_FOREGROUND_DETACH : STOP_FOREGROUND_REMOVE);
+        if (report) notifyNow(result(r), false);
         stopSelf();
     }
 

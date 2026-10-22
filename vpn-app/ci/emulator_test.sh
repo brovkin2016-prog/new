@@ -332,7 +332,7 @@ adb shell "am start -a android.intent.action.VIEW -d '$DEAD' -n $ACT" >/dev/null
 sleep 2
 mark
 adb shell am start -n $ACT --ez test_auto true --ez test_connect true >/dev/null
-wait_since "auto: «Запасной» не отвечает — \(включаю мост через\|пробую «\)" 150 || fail "did not move on by itself when the chosen server did not answer"
+wait_since "auto: «Запасной» не \(отвечает\|работает в этой сети\) — \(включаю мост через\|пробую «\)" 150 || fail "did not move on by itself when the chosen server did not answer"
 since | sed '/auto: /,$d' | grep -q "connected via" && fail "took the dead server's handshake for a connection"
 adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (by itself to a bridge)"
@@ -475,6 +475,24 @@ adb shell cat /sdcard/ui.xml | grep -q 'Проверка мостов' || fail "
 adb shell cat /sdcard/ui.xml | grep -qE 'МостПроверка» — (не вошёл в звонок|ошибка звонка)' || fail "the bridge's line is not in the result"
 adb exec-out screencap -p > "$OUT/9-check.png"
 adb shell input keyevent KEYCODE_BACK
+
+# before connecting (v32): «🔎 Какие подключения работают здесь» — the servers asked, each bridge (not VK) in a short call
+# with one request; each one's button then says it in words, no numbers
+step "before connecting: which work here (v32): a quick look, each one's button says it in words"
+adb logcat -c
+adb shell "am start -n $ACT --el test_check_join 8000 --es test_check quick" >/dev/null
+for _ in $(seq 1 180); do adb logcat -d -s AIVPN:V | grep -q "quick look: " && break; sleep 1; done
+adb logcat -d -s AIVPN:V | grep "bridge check\|scout\|quick look\|ping «" | tee "$OUT/quick.log"
+grep -q "bridge check: started (before connecting: which carry here)" "$OUT/quick.log" || fail "the quick look did not start"
+grep -qE "scout: «МостПроверка» (no_join|error)" "$OUT/quick.log" || fail "the quick look did not try the bridge in a call of its own"
+grep -qE "quick look: [0-9]+ carry here, [1-9][0-9]* do not" "$OUT/quick.log" || fail "the quick look did not tell what it found"
+sleep 2
+dump /sdcard/ui.xml
+adb shell cat /sdcard/ui.xml > "$OUT/quick.xml"
+grep -q 'text="Здесь не работает"' "$OUT/quick.xml" || fail "the bridge's button does not say it does not work here"
+grep -qE '[0-9] мс · [0-9]{2}:[0-9]{2}|Мбит/с' "$OUT/quick.xml" && fail "numbers on the connections' buttons"
+adb exec-out screencap -p > "$OUT/9a-quick.png"
+echo "quick look: the servers and the bridge looked at, the buttons say it in words"
 adb shell "am start -n $ACT --es test_remove МостПроверка" >/dev/null; sleep 1
 echo "bridge check: a call of its own tried, sites looked at, the result shown"
 

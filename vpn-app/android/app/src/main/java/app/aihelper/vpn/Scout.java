@@ -16,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * most every half hour — and what it said is kept for this network (Wi-Fi or mobile and its operator: a white-list in
  * the morning is not the evening's Wi-Fi). The bridge in use is counted too. When the connection in use stops carrying,
  * the next one is a bridge that carries here now (VpnSvc.nextChoice), never first one just seen failing here. VK asks a
- * person to prove they are one at every join: it is not looked at, and it comes last.
+ * person to prove they are one at every join: it is not looked at, and it comes last. Before connecting, the button
+ * «🔎 Какие подключения работают здесь» looks at all of them at once (BridgeCheck, QUICK); each connection's button
+ * then says «Работает здесь» or «Здесь не работает» — no numbers.
  */
 final class Scout {
     static final long EVERY = 30 * 60_000L;  // each bridge looked at again after this long
@@ -66,6 +68,35 @@ final class Scout {
     static JSONObject seen(Context c, Profile p) {
         JSONObject o = raw(c, p);
         return o != null && System.currentTimeMillis() - o.optLong("at") < FRESH ? o : null;
+    }
+
+    /** For a connection's button: true — it carried here lately, false — it did not, null — not looked at (or VK). */
+    static Boolean carries(Context c, Profile p) {
+        if (p.bridge && "vk".equals(p.platformOrDefault())) return null;
+        JSONObject s = seen(c, p);
+        return s == null ? null : "ok".equals(s.optString("r"));
+    }
+
+    /** The quickest connection that carried here lately, other than this one (VK aside); null: none. */
+    static Profile best(Context c, Profile not) {
+        Profile best = null;
+        int bestMs = Integer.MAX_VALUE;
+        for (Profile p : Profile.all(c)) {
+            if (p.link.equals(not.link) || !Boolean.TRUE.equals(carries(c, p))) continue;
+            int ms = seen(c, p).optInt("ms", Integer.MAX_VALUE);
+            if (ms <= 0) ms = Integer.MAX_VALUE - 1;
+            if (best == null || ms < bestMs) {
+                best = p;
+                bestMs = ms;
+            }
+        }
+        return best;
+    }
+
+    /** Waits (at most ms) for a look in the background to end: a check of its own does not run two calls at once. */
+    static void waitIdle(long ms) throws InterruptedException {
+        long until = System.currentTimeMillis() + ms;
+        while (running.get() && System.currentTimeMillis() < until) Thread.sleep(500);
     }
 
     /**
