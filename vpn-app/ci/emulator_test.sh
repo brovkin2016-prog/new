@@ -477,7 +477,7 @@ adb exec-out screencap -p > "$OUT/9-check.png"
 adb shell input keyevent KEYCODE_BACK
 
 # before connecting (v32): «🔎 Что работает здесь» — the servers asked, each bridge (not VK) in a short call
-# with one request; each one's button then says it in words, no numbers
+# with one request; each one's button then says it: the response time of one that carries (v33), «Здесь не работает»
 step "before connecting: which work here (v32): a quick look, each one's button says it in words"
 adb logcat -c
 adb shell "am start -n $ACT --el test_check_join 8000 --es test_check quick" >/dev/null
@@ -490,7 +490,7 @@ sleep 2
 dump /sdcard/ui.xml
 adb shell cat /sdcard/ui.xml > "$OUT/quick.xml"
 grep -q 'text="Здесь не работает' "$OUT/quick.xml" || fail "the bridge's button does not say it does not work here"
-grep -qE '[0-9] мс · [0-9]{2}:[0-9]{2}|Мбит/с' "$OUT/quick.xml" && fail "numbers on the connections' buttons"
+grep -qE 'text="[0-9]+ мс' "$OUT/quick.xml" || fail "the server's response time is not under its name (v33)"
 adb exec-out screencap -p > "$OUT/9a-quick.png"
 # the whole screen for a look at it (the settings below, the dark theme): pictures only, nothing checked
 read -r SW SH <<< "$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1 | tr x ' ')"

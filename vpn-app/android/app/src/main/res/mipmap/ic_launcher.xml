@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- phones before Android 8: the winged shield on a rounded square of the header's sky, the owner's portrait over it when the
-     server has put one in (see ic_launcher_face.xml) -->
+<!-- phones before Android 8: the winged shield on a rounded square of the header's sky (no portrait over it: see
+     ic_launcher_face.xml) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item><shape android:shape="rectangle"><corners android:radius="22dp" />
         <gradient android:startColor="#F5F3FF" android:centerColor="#EEF2FF" android:endColor="#ECFEFF" android:angle="315" /></shape></item>
     <item android:left="3dp" android:top="6dp" android:right="3dp" android:bottom="1dp" android:drawable="@drawable/emblem" />
-    <item android:drawable="@drawable/ic_owner" />
 </layer-list>

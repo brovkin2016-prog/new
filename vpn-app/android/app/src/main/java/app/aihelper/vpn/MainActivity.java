@@ -59,12 +59,22 @@ public class MainActivity extends Activity implements State.Listener {
     private int text, muted, card, accent;
     private PowerButton power;
     private AuroraView aurora;
-    private AvatarView avatar;
     private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal, scoutVal;
     private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow, scoutRow;
     private boolean checkAsked;  // the button here started the check: its result is shown here when it is done
     private long quickAsked;  // (v32) when «🔎 Что работает здесь» was pressed: its word is told once done
     private String connsKey = "";
+    // (v33) while the screen is open, once a minute: each server's response time and one speed that is due (Speed.auto)
+    private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            Runnable redraw = () -> runOnUiThread(MainActivity.this::changed);
+            Speed.pingAll(MainActivity.this, redraw);
+            Speed.auto(MainActivity.this, redraw);
+            ticker.postDelayed(this, 60_000);
+        }
+    };
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
     private final List<TextView> connNotes = new ArrayList<>();
@@ -106,16 +116,17 @@ public class MainActivity extends Activity implements State.Listener {
         super.onResume();
         State.listen(this);
         changed();
-        avatar.refresh(Profile.chosen(this));
         Updater.check(this, false);
         BridgeSync.run(this, false);  // the owner's bridge, kept ready (nobody else gets one)
-        Speed.pingAll(this, () -> runOnUiThread(this::changed));  // every server's response time
+        ticker.removeCallbacks(tick);
+        ticker.post(tick);  // every server's response time, and the speeds that are due — again each minute while open
         Diag.upload(this, false);  // the journal to the family server (it keeps the owner's only)
         if (Rescue.shown(this)) new Thread(() -> BridgeCheck.sendPending(this), "check-send").start();  // a report made offline
     }
 
     @Override
     protected void onPause() {
+        ticker.removeCallbacks(tick);
         State.unlisten(this);
         super.onPause();
     }
@@ -137,12 +148,11 @@ public class MainActivity extends Activity implements State.Listener {
         scroller.addView(root, new FrameLayout.LayoutParams(-1, -1));
         frame.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
 
-        // the name: the owner's living portrait (or the shield), «Winger» in the aurora's colours, whose VPN it is
+        // the name: the winged shield (as on the icon), «Winger» in the aurora's colours, whose VPN it is
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        avatar = new AvatarView(this);
-        head.addView(avatar, new LinearLayout.LayoutParams(dp(54), dp(54)));
+        head.addView(new LogoView(this), new LinearLayout.LayoutParams(dp(54), dp(54)));
         LinearLayout names = new LinearLayout(this);
         names.setOrientation(LinearLayout.VERTICAL);
         names.setPadding(dp(10), 0, 0, 0);
@@ -769,6 +779,11 @@ public class MainActivity extends Activity implements State.Listener {
                 .setPositiveButton("Понятно", null).show();
     }
 
+    /** «45 Мбит/с», «3,1 Мбит/с», «0,4 Мбит/с». */
+    private static String mbit(double mb) {
+        return (mb >= 10 ? String.valueOf(Math.round(mb)) : String.format(Locale.ROOT, "%.1f", mb).replace('.', ',')) + " Мбит/с";
+    }
+
     /** A bridge's service, short: «Телемост», «WB Stream», «DION», «Битрикс24», «VK». */
     private static String platformName(Profile p) {
         return "telemost".equals(p.platformOrDefault()) ? "Телемост" : VpnSvc.service(p);
@@ -867,12 +882,25 @@ public class MainActivity extends Activity implements State.Listener {
                 chip = here ? "Работает здесь" : "Здесь не работает";
                 chipColor = here ? 0xFF16A34A : muted;
             }
-            // its line under the name (v32: the name is never cut for it): what it is doing now, or whether it carries here,
-            // in its colour, then what it is — no response time or speed here (those are at the top and under ⚡)
+            // its line under the name (the name is never cut for it): what it is doing now, its response time (in the colour
+            // of how good it is) and its speed — live for the one in use, the others' from the last minutes (v33); when there
+            // are no numbers, whether it carries here, or what it is
+            boolean live = on && i == act && State.phase == State.Phase.ON;
+            org.json.JSONObject seen = Scout.seen(this, p);
+            boolean carries = Boolean.TRUE.equals(here);
+            int ms = live ? State.pingMs : carries && seen != null ? seen.optInt("ms") : 0;
+            double mb = live || carries || chip.isEmpty() ? Speed.mbps(this, p) : -1;  // (not for one that does not answer)
+            if (carries && ms > 0) chip = "";  // its numbers say it carries
+            String pingText = ms > 0 ? ms + " мс" : "", speedText = mb > 0 ? mbit(mb) : "";
             String what = p.bridge ? platformName(p) : "сервер";
             if (p.bridge && p.name.toLowerCase(Locale.ROOT).contains(what.toLowerCase(Locale.ROOT))) what = "";  // «Мост · Телемост»: said
-            String note = chip.isEmpty() ? (p.bridge ? "мост" + (what.isEmpty() ? "" : " · " + what) : what)
-                    : chip + (what.isEmpty() ? "" : " · " + what);
+            List<String> parts = new ArrayList<>();
+            if (!chip.isEmpty()) parts.add(chip);
+            if (!pingText.isEmpty()) parts.add(pingText);
+            if (!speedText.isEmpty()) parts.add(speedText);
+            if (parts.isEmpty()) parts.add(p.bridge ? "мост" + (what.isEmpty() ? "" : " · " + what) : what);
+            else if (pingText.isEmpty() && speedText.isEmpty() && !what.isEmpty()) parts.add(what);
+            String note = android.text.TextUtils.join(" · ", parts);
             TextView n = connNotes.get(i);
             if (!note.contentEquals(n.getText())) {
                 Log.i("AIVPN", "button «" + p.name + "»: " + note);
@@ -880,6 +908,12 @@ public class MainActivity extends Activity implements State.Listener {
                 if (!chip.isEmpty()) {
                     line.setSpan(new android.text.style.ForegroundColorSpan(chipColor), 0, chip.length(), 0);
                     line.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, chip.length(), 0);
+                }
+                int at = pingText.isEmpty() ? -1 : note.indexOf(pingText);
+                if (at >= 0) {
+                    int c = ms < 150 ? 0xFF10B981 : ms < 400 ? 0xFFF59E0B : 0xFFDC2626;  // (as the response time at the top)
+                    line.setSpan(new android.text.style.ForegroundColorSpan(c), at, at + pingText.length(), 0);
+                    line.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), at, at + pingText.length(), 0);
                 }
                 n.setText(line);
             }

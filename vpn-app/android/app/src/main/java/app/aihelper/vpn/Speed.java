@@ -26,6 +26,10 @@ import java.util.concurrent.TimeUnit;
  */
 final class Speed {
     private static final String FILE = "https://speed.cloudflare.com/__down?bytes=50000000";
+    // (v33) the look by itself while the screen is open: a short one (4 MB at most, 3 s) — the button's ⚡ is the full one
+    private static final String FILE_SHORT = "https://speed.cloudflare.com/__down?bytes=4000000";
+    private static final long SHORT_MS = 3000;
+    static final long AUTO_ON = 15 * 60_000L, AUTO_OTHER = 30 * 60_000L;  // the one in use again after, the other servers after
     private static final long LIMIT_MS = 8000;
 
     private Speed() {}
@@ -41,12 +45,14 @@ final class Speed {
                 port = VpnSvc.freePort();
                 temp = tempClient(c, p, port);
                 if (temp == null) {
+                    saveMbps(c, p, 0);
                     Diag.i(c, "speed: «" + p.name + "» does not answer");
                     save(c, p, "⚡ не отвечает");
                     return "⚡ не отвечает";
                 }
             }
             double[] r = download(port);
+            saveMbps(c, p, r[0]);
             String line = r[0] <= 0 ? "⚡ ничего не скачалось"
                     : String.format(Locale.ROOT, "⚡ %.1f Мбит/с · %d мс", r[0], Math.round(r[1])).replace('.', ',');
             Diag.i(c, String.format(Locale.ROOT, "speed: «%s» %.2f Mbit/s, first byte %d ms%s", p.name, r[0], Math.round(r[1]),
@@ -142,16 +148,87 @@ final class Speed {
         prefs(c).edit().putString("speed:" + p.link.hashCode(), line + " · " + at).apply();
     }
 
+    /** (v33) The speed as a number for the connection's line: Mbit/s and when it was measured. */
+    private static void saveMbps(Context c, Profile p, double mbps) {
+        prefs(c).edit().putFloat("mbps:" + p.link.hashCode(), (float) mbps).putLong("mbpsAt:" + p.link.hashCode(), System.currentTimeMillis()).apply();
+    }
+
+    /** Its speed (Mbit/s) if measured in the last two hours; -1: none (0: nothing came through). */
+    static double mbps(Context c, Profile p) {
+        long at = prefs(c).getLong("mbpsAt:" + p.link.hashCode(), 0);
+        return System.currentTimeMillis() - at < 2 * 3600_000L ? prefs(c).getFloat("mbps:" + p.link.hashCode(), -1f) : -1;
+    }
+
+    private static long mbpsAt(Context c, Profile p) {
+        return prefs(c).getLong("mbpsAt:" + p.link.hashCode(), 0);
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean measuring = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * (v33) While Winger's screen is open, once a minute: one connection whose speed is due is measured by a short look —
+     * the one in use every 15 minutes, the other servers every half hour (each through a short-lived client of its own).
+     * A bridge not in use cannot be measured without its call: it keeps the speed it had when it was on. Not during a
+     * check of the bridges (one call at a time). done() after it.
+     */
+    static void auto(Context c, Runnable done) {
+        if (BridgeCheck.running.get() || !measuring.compareAndSet(false, true)) return;
+        Context app = c.getApplicationContext();
+        new Thread(() -> {
+            try {
+                long now = System.currentTimeMillis();
+                Profile due = null;
+                boolean active = false;
+                for (Profile p : Profile.all(app)) {
+                    boolean on = State.phase == State.Phase.ON && p.link.equals(State.activeLink) && VpnSvc.socksPort > 0;
+                    if (on && now - mbpsAt(app, p) >= AUTO_ON) {
+                        due = p;
+                        active = true;
+                        break;
+                    }
+                    if (!on && !p.bridge && due == null && now - mbpsAt(app, p) >= AUTO_OTHER) due = p;
+                }
+                if (due == null) return;
+                Process temp = null;
+                int port = VpnSvc.socksPort;
+                try {
+                    if (!active) {
+                        port = VpnSvc.freePort();
+                        temp = tempClient(app, due, port, "ping.yaml");
+                        if (temp == null) {
+                            saveMbps(app, due, 0);
+                            return;
+                        }
+                    }
+                    double[] r = download(port, FILE_SHORT, SHORT_MS);
+                    saveMbps(app, due, r[0]);
+                    Diag.i(app, String.format(Locale.ROOT, "speed (by itself): «%s» %.1f Mbit/s", due.name, r[0]));
+                } finally {
+                    if (temp != null) temp.destroy();
+                }
+            } catch (Exception e) {
+                Diag.i(app, "speed (by itself): " + e);
+            } finally {
+                measuring.set(false);
+                done.run();
+            }
+        }, "speed-auto").start();
+    }
+
     private static SharedPreferences prefs(Context c) {
         return c.getSharedPreferences("speed", Context.MODE_PRIVATE);
     }
 
     /** {Mbit/s, ms to the first byte}: reads for up to 8 s through the local SOCKS5 port. */
     static double[] download(int port) {
+        return download(port, FILE, LIMIT_MS);
+    }
+
+    static double[] download(int port, String file, long limitMs) {
         HttpURLConnection h = null;
         try {
             long t0 = SystemClock.elapsedRealtime();
-            h = (HttpURLConnection) new URL(FILE).openConnection(new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", port)));
+            h = (HttpURLConnection) new URL(file).openConnection(new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", port)));
             h.setConnectTimeout(15_000);
             h.setReadTimeout(10_000);
             h.setUseCaches(false);
@@ -159,7 +236,7 @@ final class Speed {
                 byte[] b = new byte[64 * 1024];
                 int n = in.read(b);
                 if (n <= 0) return new double[]{0, 0};
-                long first = SystemClock.elapsedRealtime(), bytes = n, end = first + LIMIT_MS;
+                long first = SystemClock.elapsedRealtime(), bytes = n, end = first + limitMs;
                 while (SystemClock.elapsedRealtime() < end && (n = in.read(b)) > 0) bytes += n;
                 double sec = Math.max(0.2, (SystemClock.elapsedRealtime() - first) / 1000.0);
                 return new double[]{bytes * 8 / 1e6 / sec, first - t0};
