@@ -26,10 +26,11 @@ import java.util.concurrent.TimeUnit;
  */
 final class Speed {
     private static final String FILE = "https://speed.cloudflare.com/__down?bytes=50000000";
-    // (v33) the look by itself while the screen is open: a short one (4 MB at most, 3 s) — the button's ⚡ is the full one
-    private static final String FILE_SHORT = "https://speed.cloudflare.com/__down?bytes=4000000";
-    private static final long SHORT_MS = 3000;
-    static final long AUTO_ON = 15 * 60_000L, AUTO_OTHER = 30 * 60_000L;  // the one in use again after, the other servers after
+    // (v33) the look by itself while the screen is open: a shorter one (10 MB at most, 4 s; the owner's mobile internet has
+    // no limit) — the button's ⚡ is the full one
+    private static final String FILE_SHORT = "https://speed.cloudflare.com/__down?bytes=10000000";
+    private static final long SHORT_MS = 4000;
+    static final long AUTO_ON = 5 * 60_000L, AUTO_OTHER = 10 * 60_000L;  // the one in use again after, the other servers after
     private static final long LIMIT_MS = 8000;
 
     private Speed() {}
@@ -167,7 +168,7 @@ final class Speed {
 
     /**
      * (v33) While Winger's screen is open, once a minute: one connection whose speed is due is measured by a short look —
-     * the one in use every 15 minutes, the other servers every half hour (each through a short-lived client of its own).
+     * the one in use every 5 minutes, the other servers every 10 (each through a short-lived client of its own).
      * A bridge not in use cannot be measured without its call: it keeps the speed it had when it was on. Not during a
      * check of the bridges (one call at a time). done() after it.
      */
