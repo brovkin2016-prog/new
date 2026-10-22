@@ -89,6 +89,13 @@ public class MainActivity extends Activity implements State.Listener {
     }
 
     @Override
+    public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        // the phone's dark theme switched while Winger is open (it keeps itself through such changes): drawn again in it
+        if (((c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) != dark) recreate();
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         handle(intent);
@@ -253,14 +260,14 @@ public class MainActivity extends Activity implements State.Listener {
         addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
         addTo(settings, addRow);
         // which Winger this is, and a check right now (otherwise it looks for a new version every few hours by itself)
-        addTo(settings, setting("🔄", "Проверить обновление", label("Winger " + BuildConfig.VERSION_NAME, 13, muted, false), v -> {
+        addTo(settings, setting("🔄", "Обновление", label(BuildConfig.VERSION_NAME, 13, muted, false), v -> {
             Toast.makeText(this, "Проверяю обновление…", Toast.LENGTH_SHORT).show();
             Updater.check(this, true);
             BridgeSync.run(this, true);
             Diag.upload(this, true);
         }));
         // when the family server is out of reach the journal cannot go to it: copied here, it goes into a chat
-        addTo(settings, setting("📋", "Скопировать журнал и проверку связи", null, v -> copyJournal()));
+        addTo(settings, setting("📋", "Скопировать журнал", null, v -> copyJournal()));
         // the owner's only: the bridges checked from this phone, on its own network (the family server's Claude reads the report)
         checkVal = label("", 13, muted, false);
         checkRow = setting("🔬", "Проверить мосты с этого телефона", checkVal, v -> startCheck("", true));
@@ -863,7 +870,9 @@ public class MainActivity extends Activity implements State.Listener {
             // its line under the name (v32: the name is never cut for it): what it is doing now, or whether it carries here,
             // in its colour, then what it is — no response time or speed here (those are at the top and under ⚡)
             String what = p.bridge ? platformName(p) : "сервер";
-            String note = chip.isEmpty() ? (p.bridge ? "мост · " + what : what) : chip + " · " + what;
+            if (p.bridge && p.name.toLowerCase(Locale.ROOT).contains(what.toLowerCase(Locale.ROOT))) what = "";  // «Мост · Телемост»: said
+            String note = chip.isEmpty() ? (p.bridge ? "мост" + (what.isEmpty() ? "" : " · " + what) : what)
+                    : chip + (what.isEmpty() ? "" : " · " + what);
             TextView n = connNotes.get(i);
             if (!note.contentEquals(n.getText())) {
                 Log.i("AIVPN", "button «" + p.name + "»: " + note);
@@ -888,8 +897,8 @@ public class MainActivity extends Activity implements State.Listener {
         }
         // what a tap does, said once under the list (and why another one is on by itself)
         String h = State.auto && State.phase == State.Phase.ON ? "Выбранное подключение не отвечает — Winger включил другое сам."
-                : on ? "Нажмите на включённое, чтобы выключить, или на другое — чтобы перейти на него."
-                : all.size() > 1 ? "Нажмите на подключение — Winger включится через него. Удалить — долгое нажатие."
+                : on ? "Нажмите на включённое — выключить, на другое — перейти на него."
+                : all.size() > 1 ? "Нажмите на подключение — Winger включится через него. Долгое нажатие — удалить."
                 : "Удалить подключение — долгое нажатие на него.";
         if (!h.contentEquals(hint.getText())) hint.setText(h);
     }
