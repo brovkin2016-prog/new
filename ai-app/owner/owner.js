@@ -1486,6 +1486,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
     const APP_KEY_OP = { groq: ["groq_set", "groq_off", "key"], exa: ["exa_set", "exa_off", "key"], hf: ["hf_set", "hf_off", "token"],
       coverr: ["coverr_set", "coverr_off", "key"], viggle: ["viggle_set", "viggle_off", "key"] };
     let keysNow = null, testedNow = null;  // the list and its last check, as the server last said them
+    const KEY_PLACE = { claude: "🛠 Claude", app: "🤖 Помощник", draw: "🎨 рисование", video: "🎬 видео", search: "🔎 поиск" };
     function allKeys() {
       sheet("🔑 Ключи и подключения", (box) => {
         const conn = el("div", { class: "ow-list keys-conn" }, diskKeyRow(), searchKeyRow());
@@ -1503,18 +1504,26 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           keysNow = keys;
           if (tested !== undefined) testedNow = tested;
           list.innerHTML = "";
-          const rows = el("div", { class: "ow-list keys-list" });
-          for (const k of keys) {
-            const r = line(k.on ? "✅" : "➖", k.id === "hf" ? "Видео из фото (Hugging Face)" : k.name,
-              [k.use + (k.test === "unknown" ? " · ⚠️ при проверке не ответил" : ""), k.test === "unknown" ? "bad" : ""], null,
-              () => (k.id === "hf" ? openHf(k, fill) : keyOne(k, fill)), k.on ? "ok" : "off");
+          // each key: where it works (v30) and what its last check said; the ones in first, then the ones not
+          const row = (k) => {
+            const where = (k.places || []).map((p) => KEY_PLACE[p]).filter(Boolean).join(" · ");
+            const bad = k.on && k.test === "unknown";
+            const r = line(!k.on ? "➖" : bad ? "⚠️" : "✅", k.id === "hf" ? "Видео из фото (Hugging Face)" : k.name,
+              [(where || k.use) + (bad ? " · ⚠️ при проверке не ответил" : "") + (k.paid ? " · 💳 платный" : ""), bad ? "bad" : ""], null,
+              () => (k.id === "hf" ? openHf(k, fill) : keyOne(k, fill)), k.on ? (bad ? "bad" : "ok") : "off");
             r.dataset.key = k.id;
-            rows.append(r);
-          }
+            return r;
+          };
+          const on = keys.filter((k) => k.on), off = keys.filter((k) => !k.on);
           const t = testedNow;
-          list.append(section(`Ключи · подключено ${keys.filter((k) => k.on).length} из ${keys.length}`), rows,
+          list.append(section(`Ключи · подключено ${on.length} из ${keys.length}`),
+            el("p", { class: "ow-note keys-legend", style: "margin:-4px 2px 6px", text: "Где работает: 🛠 Claude — чат «🛠 Claude» и Дозор · "
+              + "🤖 Помощник — ответы и фото · 🎨 рисование · 🎬 видео и «Я в ролике» · 🔎 поиск в интернете" }),
+            on.length ? el("div", { class: "ow-list keys-list keys-on" }, ...on.map(row)) : null,
+            off.length ? section(`Не подключены · ${off.length}`) : null,
+            off.length ? el("div", { class: "ow-list keys-list keys-off" }, ...off.map(row)) : null,
             el("p", { class: "ow-note", text: t
-              ? `🧪 Проверено ${ago(t.ts)} назад${t.auto ? " (само, после обновления)" : ""}`
+              ? `🧪 Проверено ${ago(t.ts)} назад${t.auto ? " (само, после обновления)" : t.daily ? " (само, ночью — так каждую ночь)" : ""}`
                 + (t.removed.length ? ` · убраны как не принятые: ${t.removed.join(", ")}` : " · не принятых не было")
               : "🧪 Все ключи ещё не проверялись разом." }),
             el("button", { class: "btn line wide", text: "🧪 Проверить все ключи", onclick: async (e) => {
