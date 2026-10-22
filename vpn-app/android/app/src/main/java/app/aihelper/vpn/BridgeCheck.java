@@ -185,7 +185,7 @@ final class BridgeCheck {
                 if (!p.bridge) continue;
                 progress = "Мост «" + p.name + "» (" + (++nb) + " из " + nbAll + ")";
                 State.fire();
-                bridges.put(bridge(c, p, dir, carrier, carrierPort));
+                bridges.put(bridge(c, p, dir, carrier, carrierPort, false));
             }
             r.put("servers", servers).put("bridges", bridges).put("took_s", (SystemClock.elapsedRealtime() - t0) / 1000);
             Diag.i(c, "bridge check: done, " + bridges.length() + " bridges, " + ok(bridges) + " carry");
@@ -238,7 +238,15 @@ final class BridgeCheck {
 
     /** One bridge in a short call of its own: in the call, data through it, response and speed; why not, with the relay's
      *  last lines. A bridge that carries is kept as the way for the report until the next one that carries. */
-    private static JSONObject bridge(Context c, Profile p, File dir, Process[] carrier, int[] carrierPort) throws Exception {
+    /** (v32) The scout's look at one bridge: in its call and one request through it — no speed test, nothing kept. */
+    static JSONObject scoutOne(Context c, Profile p) throws Exception {
+        File dir = new File(c.getFilesDir(), "scout");
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        return bridge(c, p, dir, null, null, true);
+    }
+
+    private static JSONObject bridge(Context c, Profile p, File dir, Process[] carrier, int[] carrierPort, boolean light) throws Exception {
         String tunnel = p.tunnelMode.isEmpty() ? "dc" : p.tunnelMode;
         JSONObject o = new JSONObject().put("name", p.name).put("platform", p.platformOrDefault()).put("mode", p.modeLabel(tunnel));
         if (inUse(p)) {
@@ -279,7 +287,7 @@ final class BridgeCheck {
                 return o;
             }
             int best = 0;
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 3 && !(light && best > 0); i++) {  // (the scout: one answer is enough)
                 int ms = Speed.probe(socks, 10_000);
                 if (ms > 0) best = best == 0 ? ms : Math.min(best, ms);
             }
@@ -287,6 +295,7 @@ final class BridgeCheck {
                 BridgeSync.stuck(c, p, "check: in the call, nothing comes back");  // the server's side restarted
                 return o.put("result", "no_data").put("restarting", true);
             }
+            if (light) return o.put("result", "ok").put("ping_ms", best);
             double[] s = Speed.download(socks);
             o.put("result", "ok").put("ping_ms", best).put("mbps", Math.round(s[0] * 10) / 10.0).put("first_byte_ms", Math.round(s[1]));
             if (carrier[0] != null) carrier[0].destroy();
@@ -299,7 +308,8 @@ final class BridgeCheck {
             synchronized (tail) {
                 o.put("log", new JSONArray(tail));
             }
-            Diag.i(c, "bridge check: «" + p.name + "» " + o.optString("result") + (o.has("ping_ms") ? ", " + o.optInt("ping_ms") + " ms" : ""));
+            Diag.i(c, (light ? "scout" : "bridge check") + ": «" + p.name + "» " + o.optString("result")
+                    + (o.has("ping_ms") ? ", " + o.optInt("ping_ms") + " ms" : ""));
         }
     }
 
@@ -367,7 +377,7 @@ final class BridgeCheck {
     }
 
     /** The phone's own network under the VPN: mobile or Wi-Fi, and the operator. */
-    private static JSONObject network(Context c) throws Exception {
+    static JSONObject network(Context c) throws Exception {
         JSONObject o = new JSONObject().put("type", "none");
         ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) {

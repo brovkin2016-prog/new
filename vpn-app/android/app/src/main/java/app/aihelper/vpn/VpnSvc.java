@@ -212,6 +212,11 @@ public final class VpnSvc extends VpnService {
     /** This thread is the current worker and the VPN is still wanted. */
     private volatile boolean carried;  // the connection in use has carried a request (not just shaken hands)
 
+    /** How many ways one turn has: the servers and the bridges, the chosen one included. */
+    private int autoLimit() {
+        return Math.max(2, Profile.all(this).size());
+    }
+
     private boolean mine() {
         synchronized (lock) {
             return wanted && worker == Thread.currentThread();
@@ -222,6 +227,7 @@ public final class VpnSvc extends VpnService {
 
     private void run() {
         int fails = 0;
+        int autoMisses = 0;  // ways tried by itself in a row, none of them carrying
         State.set(State.Phase.CONNECTING, profile.bridge ? "Поднимаю мост через " + service(profile) + "… до минуты" : "Подключаюсь к серверу…");
         if (socksPort == 0) socksPort = freePort();
         quickChoice();
@@ -258,7 +264,10 @@ public final class VpnSvc extends VpnService {
                 err = watch(own[0]);
                 // it did carry, and for a while (a white-list may let the very first requests through): a failure now is a
                 // new one, not the same again
-                if (carried && SystemClock.elapsedRealtime() - since >= 2 * 60_000L) fails = 0;
+                if (carried && SystemClock.elapsedRealtime() - since >= 2 * 60_000L) {
+                    fails = 0;
+                    autoMisses = 0;
+                }
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
             captchaDone();  // its program is gone: so is the check page it showed
@@ -301,7 +310,18 @@ public final class VpnSvc extends VpnService {
                         : "bridge: the data channel does not carry, trying the video");
                 continue;
             }
+            if (profile.bridge && fails >= 1) Scout.record(this, profile, noData ? "no_data" : "error", 0);  // (this network's word)
             Profile next = fails >= 2 ? nextChoice() : null;
+            if (next != null && ++autoMisses > autoLimit()) {
+                // every way tried in turn and none carried: no running round and round — a longer wait, then once more
+                autoMisses = 0;
+                Diag.i(this, "auto: nothing carries here now — waiting 5 minutes before trying again");
+                State.set(State.Phase.RETRYING, "Сейчас не работает ни одно подключение — попробую снова через 5 минут…");
+                update();
+                if (!sleep(5 * 60_000L)) break;
+                fails = 0;
+                continue;
+            }
             if (next != null) {
                 if (returnedAt > 0 && SystemClock.elapsedRealtime() - returnedAt < 10 * 60_000L) {
                     backWait = Math.min(BACK_MAX, backWait * 2);  // back too soon last time: wait longer before the next try
@@ -382,6 +402,7 @@ public final class VpnSvc extends VpnService {
                 Diag.upload(this, false);  // now and then the journal goes to the family server
                 Updater.background(this, profile.bridge);  // a newer Winger: fetched now and then, put in while the screen is off
                 BridgeCheck.poll(this);  // the family server's Claude may want the bridges checked from this phone (the owner's)
+                if (State.pingMs > 0) Scout.maybe(this, profile.link);  // (v32) which other bridges carry here now
                 if (!mine()) return "";  // switched off while it was pinging: the screen says «off», not «retrying»
                 TProxyService t = hev;
                 if (t == null || !t.TProxyIsRunning()) {
@@ -557,11 +578,13 @@ public final class VpnSvc extends VpnService {
         List<Profile> order = new java.util.ArrayList<>();
         order.add(preferred);
         for (Profile x : Profile.all(this)) if (!x.bridge && !x.link.equals(preferred.link)) order.add(x);
-        // the bridges: the one that last carried data (in the last 3 days) first — not a slow or dead one before it
+        // the bridges (v32): those carrying here now by the scout first, then the one that last carried data (in the last
+        // 3 days), those just seen failing here last (Scout.rank) — not a slow or dead one before a working one
         android.content.SharedPreferences v = getSharedPreferences("vpn", MODE_PRIVATE);
         String good = System.currentTimeMillis() - v.getLong("goodBridgeAt", 0) < 3 * 86_400_000L ? v.getString("goodBridge", "") : "";
-        for (Profile x : Profile.all(this)) if (x.bridge && x.link.equals(good) && !x.link.equals(preferred.link)) order.add(x);
-        for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(good) && !x.link.equals(preferred.link)) order.add(x);
+        List<Profile> bridges = new java.util.ArrayList<>();
+        for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(preferred.link)) bridges.add(x);
+        order.addAll(Scout.rank(this, bridges, good));
         if (order.size() < 2) return null;
         int at = 0;
         for (int i = 0; i < order.size(); i++) if (order.get(i).link.equals(from.link)) at = i;
@@ -650,6 +673,7 @@ public final class VpnSvc extends VpnService {
                     // the bridge that really carried (this one, still the worker's): first next time the server does not answer
                     if (mine()) getSharedPreferences("vpn", MODE_PRIVATE).edit().putString("goodBridge", p.link)
                             .putLong("goodBridgeAt", System.currentTimeMillis()).apply();
+                    Scout.record(this, p, "ok", ms);
                     return null;
                 }
             }

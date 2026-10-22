@@ -233,6 +233,15 @@ public class MainActivity extends Activity implements State.Listener {
         bridgeAppsName.setMaxWidth(dp(120));  // «Через сервер» stays on one line on a narrow phone
         bridgeAppsCard = setting("🌉", "Через мост", bridgeAppsName, v -> chooseApps(true));
         addTo(settings, bridgeAppsCard);
+        // (v32) a bridge that carries here now, by itself, when the connection in use stops carrying
+        TextView autoName = label(Apps.autoBridge(this) ? "вкл." : "выкл.", 13, muted, false);
+        addTo(settings, setting("🔀", "Сам переходить на рабочий мост", autoName, v -> {
+            boolean on = !Apps.autoBridge(this);
+            Apps.setAutoBridge(this, on);
+            autoName.setText(on ? "вкл." : "выкл.");
+            Toast.makeText(this, on ? "Если подключение перестанет работать, Winger сам перейдёт на мост, который работает в этой сети"
+                    : "Winger останется на выбранном подключении; на мост — кнопкой «Через мост»", Toast.LENGTH_LONG).show();
+        }));
         addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
         addTo(settings, addRow);
         // which Winger this is, and a check right now (otherwise it looks for a new version every few hours by itself)
@@ -553,6 +562,7 @@ public class MainActivity extends Activity implements State.Listener {
         if (testPick != null) pickApps(false, testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
         if (testBridge != null) add(testBridge);
+        if (BuildConfig.DEBUG && i.hasExtra("test_auto")) Apps.setAutoBridge(this, i.getBooleanExtra("test_auto", true));  // (the test)
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_install", false)) Updater.testInstall(this);
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_disconnect", false)) {

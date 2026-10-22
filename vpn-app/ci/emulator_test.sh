@@ -33,7 +33,7 @@ adb logcat -c
 adb shell "am start -a android.intent.action.VIEW -d '$LINK' -n $ACT"
 sleep 3
 adb exec-out screencap -p > "$OUT/1-added.png"
-adb shell am start -n $ACT --ez test_all true --ez test_connect true  # first everything through the VPN
+adb shell am start -n $ACT --ez test_auto false --ez test_all true --ez test_connect true  # first everything through the VPN (no going over by itself until its own step)
 wait_log "through the \(server\|bridge\): all apps" 60 || fail "not all apps through the VPN"
 wait_log "connected via" 60 || fail "no connection to the server"
 wait_log "ping [0-9]* ms" 40 || fail "no response time through the tunnel"
@@ -323,15 +323,27 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (the connection's button)"
 echo "connection buttons: the server's and the bridge's shown, the server's switches on through it"
 
-# no going over by itself (the owner: it ran over all the connections): the chosen server does not answer → Winger
-# stays on it and tries again, its button says so; once it answers (a second test server comes up on its port) it is on
-step "no going over by itself: the chosen server does not answer → Winger stays on it and tries"
+# «🔀 Сам переходить на рабочий мост» on (v32, the default): the chosen server does not answer → after it failed twice
+# Winger moves to a bridge by itself (the scout's ranking; here the test's bridge, which has no call: it fails too)
+step "by itself on (v32): the chosen server does not answer twice → the next one that may carry"
 DEAD='hysteria2://family:test-pass-123@10.0.2.2:4999/?sni=vpn.test.local&insecure=1#Запасной'
 adb logcat -c
 adb shell "am start -a android.intent.action.VIEW -d '$DEAD' -n $ACT" >/dev/null
 sleep 2
 mark
-adb shell am start -n $ACT --ez test_connect true >/dev/null
+adb shell am start -n $ACT --ez test_auto true --ez test_connect true >/dev/null
+wait_since "auto: «Запасной» не отвечает — \(включаю мост через\|пробую «\)" 150 || fail "did not move on by itself when the chosen server did not answer"
+since | sed '/auto: /,$d' | grep -q "connected via" && fail "took the dead server's handshake for a connection"
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (by itself to a bridge)"
+echo "by itself to a bridge: the dead chosen server left after two failures, a bridge tried"
+
+# switched off (as it was from 13.10, the owner: it ran over all the connections): the chosen server does not answer →
+# Winger stays on it and tries again, its button says so; once it answers (a second test server comes up on its port) it is on
+step "no going over by itself (switched off): the chosen server does not answer → Winger stays on it and tries"
+adb logcat -c
+mark
+adb shell am start -n $ACT --ez test_auto false --ez test_connect true >/dev/null
 wait_since "retry 2: " 120 || fail "did not try the chosen server again when it did not answer"
 since | grep -q "auto: " && fail "moved to another connection by itself"
 since | grep -q "connected via" && fail "connected somewhere while the chosen server does not answer"

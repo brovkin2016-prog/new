@@ -183,11 +183,17 @@ final class Apps {
     }
 
     /**
-     * Winger does not go from one connection to another by itself any more (the owner: it ran over all of them): the
-     * chosen one stays, its button says when it does not answer, and a tap (or «Через мост» in the notification) moves.
+     * «🔀 Сам переходить на рабочий мост» (v32, on unless switched off): when the connection in use stops carrying
+     * (twice, and a server only after real answers — a white-list lets its handshake through), Winger moves to a bridge
+     * the scout saw carrying on this network, never round and round (Scout, VpnSvc.nextChoice). Off: the chosen one stays,
+     * and a tap (or «Через мост» in the notification) moves — as it was from 13.10 (the owner: it ran over all of them).
      */
     static boolean autoBridge(Context c) {
-        return false;
+        return prefs(c).getBoolean("autoBridge2", true);
+    }
+
+    static void setAutoBridge(Context c, boolean on) {
+        prefs(c).edit().putBoolean("autoBridge2", on).apply();
     }
 
     /** The VPN should come back by itself after a reboot unless the owner of the phone switched it off. */
