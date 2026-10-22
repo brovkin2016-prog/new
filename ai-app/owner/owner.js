@@ -1539,7 +1539,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
                 // on a bridge or a white-list does not lose it)
                 for (let i = 0; i < 60; i++) {
                   await new Promise((ok) => setTimeout(ok, 4000));
-                  if (!document.body.contains(b)) return;  // the sheet was closed: the result waits in the list
+                  if (!document.body.contains(list)) return;  // the sheet was closed: the result waits in the list
                   let k;
                   try { k = await panel({ op: "agent_keys" }); } catch (x) { continue; }  // the line blinked: ask again
                   if (k.t === "done" && k.tested && k.tested.ts > was && !k.tested.running) {

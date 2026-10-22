@@ -256,7 +256,9 @@ public final class VpnSvc extends VpnService {
                 Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + profile.modeLabel(tunnel) + ")" : ""));
                 ping();
                 err = watch(own[0]);
-                if (carried) fails = 0;  // it did carry: its failure now is a new one, not the same again
+                // it did carry, and for a while (a white-list may let the very first requests through): a failure now is a
+                // new one, not the same again
+                if (carried && SystemClock.elapsedRealtime() - since >= 2 * 60_000L) fails = 0;
             }
             killClient(own[0]);  // only its own: a newer worker's client is not touched
             captchaDone();  // its program is gone: so is the check page it showed
@@ -496,7 +498,7 @@ public final class VpnSvc extends VpnService {
             }, "probe-log").start();
             // the handshake, then a request through it: a white-list lets the first through and stops the rest
             boolean shook = ok.await(12, TimeUnit.SECONDS);
-            boolean up = shook && Speed.probe(port, 8000) > 0;
+            boolean up = shook && (Speed.probe(port, 8000) > 0 || sleep(500) && Speed.probe(port, 8000) > 0);  // (its SOCKS port may open a moment later)
             Diag.i(this, "auto: «" + p.name + "» " + (up ? "answers again" : shook ? "shakes hands but carries nothing" : "still does not answer"));
             return up;
         } catch (InterruptedException e) {
