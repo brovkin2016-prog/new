@@ -1,23 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- night sky: deep indigo with a soft glow behind the shield -->
+<!-- the same sky as at the top of Winger's screen: pale lilac to pale cyan, a cyan glow up on the right and a violet one
+     down on the left (the winged shield over it, as in the app's header) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
             <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108">
-                <item android:offset="0" android:color="#FF0B1026" />
-                <item android:offset="0.55" android:color="#FF1E1B4B" />
-                <item android:offset="1" android:color="#FF0F3D4C" />
+                <item android:offset="0" android:color="#FFF5F3FF" />
+                <item android:offset="0.5" android:color="#FFEEF2FF" />
+                <item android:offset="1" android:color="#FFECFEFF" />
             </gradient>
         </aapt:attr>
     </path>
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="54" android:centerY="50" android:gradientRadius="46">
-                <item android:offset="0" android:color="#6622D3EE" />
-                <item android:offset="0.6" android:color="#1A6366F1" />
-                <item android:offset="1" android:color="#006366F1" />
+            <gradient android:type="radial" android:centerX="80" android:centerY="26" android:gradientRadius="46">
+                <item android:offset="0" android:color="#5A22D3EE" />
+                <item android:offset="1" android:color="#0022D3EE" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="24" android:centerY="86" android:gradientRadius="50">
+                <item android:offset="0" android:color="#50A855F7" />
+                <item android:offset="1" android:color="#00A855F7" />
             </gradient>
         </aapt:attr>
     </path>

@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- the icon's picture: the winged shield (in the safe middle of the icon), and over it the owner's portrait. In the
+<!-- the icon's picture: the winged shield as in the app's header — whole, its wing tips inside the round mask (its
+     middle, under the wings, at the icon's middle) — and over it the owner's portrait. In the
      repository ic_owner.png is an empty placeholder; the family server swaps in the portrait when it signs the app,
      so the photo never goes into this public repository. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:left="21dp" android:top="21dp" android:right="21dp" android:bottom="21dp" android:drawable="@drawable/emblem" />
+    <item android:left="22.2dp" android:top="26.6dp" android:right="22.2dp" android:bottom="17.8dp" android:drawable="@drawable/emblem" />
     <item android:drawable="@drawable/ic_owner" />
 </layer-list>
