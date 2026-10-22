@@ -492,25 +492,23 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         el("div", { class: "hints", style: "margin-top:8px" }, ...hints.map((t) => el("button", { class: "hint", text: t, onclick: () => send(t) }))));
     }
     // ---------- «🔍 Дозор»: the agent that keeps looking over the server, VPN and bridges, protection, the app and new
-    // versions by itself. What it finds waits here: ✓ — Claude on the server checks it and shows a plan (🛠), or its text
-    // goes to the developer (👨‍💻: a change of the programs, it comes with a new version); ✕ — never offered again ----------
-    // what the developer is given: the findings the owner accepted for him, and what the server's Claude already has (so
-    // the two never do the same thing)
-    const devText = (list, all) => {
-      const atClaude = all.filter((x) => x.status === "sent").slice(-10);
-      return "Из «🔍 Дозора» сервера — для разработчика (владелец принял; на сервере их не трогают):\n"
-        + list.map((x, i) => `${i + 1}. ${x.kind === "fix" ? "🔴" : "🟡"} ${x.text}`).join("\n")
-        + (atClaude.length ? "\n\nУ Claude на сервере (не делай повторно):\n" + atClaude.map((x) => "— " + x.text).join("\n") : "");
-    };
-    function devSheet(text) {
+    // versions by itself. Everything it finds is for the developer: the owner sees a short list and sends it all in one
+    // text («📋 Для разработчика»), then clears it («🧹 Очистить»); only a small breakage on the server (🔴 [сервер]) the
+    // server's Claude may mend at once («🛠 Починить», a plan first) ----------
+    function devSheet(text, found) {
       sheet("👨‍💻 Для разработчика", (box) => {
+        const kb = Math.max(1, Math.round(new Blob([text]).size / 1024));
         box.append(el("small", { style: "display:block;color:var(--muted);margin:-4px 2px 8px;line-height:1.4",
-          text: "Скопируйте и отправьте в чат с разработчиком — он сделает это в новой версии сервера. Claude на сервере эти пункты не трогает." }),
-        el("div", { class: "card", style: "white-space:pre-wrap;font-size:14px;line-height:1.4;overflow-wrap:anywhere", text }),
-        el("button", { class: "btn wide", text: "📋 Скопировать", onclick: () => { copyText(text); toast("✅ Скопировано — вставьте в чат с разработчиком", 5000); } }));
+          text: `Находки Дозора, ключи и все неполадки мостов (${kb} КБ). Скопируйте и вставьте в чат с разработчиком — или отправьте файлом. `
+            + "Потом нажмите «🧹 Очистить»: в следующий текст попадёт только новое." }),
+        el("div", { class: "card dev-preview", style: "white-space:pre-wrap;font-size:13px;line-height:1.35;overflow-wrap:anywhere;max-height:40vh;overflow:auto",
+          text: text.length > 3000 ? text.slice(0, 3000) + "\n…" : text }),
+        el("div", { class: "ow-acts" },
+          el("button", { class: "btn", text: "📋 Скопировать всё", onclick: () => { copyText(text); toast("✅ Скопировано — вставьте в чат с разработчиком", 5000); } }),
+          el("button", { class: "btn line", text: "📤 Файлом", onclick: () => shareBlob(new Blob([text], { type: "text/markdown" }),
+            "dlya-razrabotchika-" + new Date().toISOString().slice(0, 10) + ".md", found ? `Дозор: находок ${found}` : "") })));
       });
     }
-    const patrolPick = new Map();  // id → "yes" | "no": the owner's marks, kept over the tab's redraws, sent together
     const clean = (t) => String(t || "").replace(/`/g, "");
     function drawPatrol(d) {
       if (d.none) {
@@ -522,7 +520,6 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       }
       const st = d.status || {}, items = d.items || [];
       const open = items.filter((x) => x.status === "new");
-      for (const id of [...patrolPick.keys()]) if (!open.some((x) => x.id === id)) patrolPick.delete(id);
       // how it goes: on or off, checking now, the last round and the next theme
       const hm = (ts) => new Date(ts * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const off = st.on === false;
@@ -566,120 +563,63 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       } });
       scroll.append(el("div", { class: "ow-acts" }, now, reports));
       if (st.busy && !st.running) scroll.append(el("p", { class: "ow-note", style: "margin-top:-4px", text: "Claude сейчас выполняет вашу просьбу — Дозор проверит после." }));
-      // what waits for the owner's ✓ / ✕
-      const go_ = el("button", { class: "btn wide", disabled: true, text: "Отметьте ✓ или ✕" });
-      const count = () => {
-        const ys = [...patrolPick].filter(([, v]) => v === "yes"), n = patrolPick.size - ys.length;
-        const dev = ys.filter(([k]) => (open.find((x) => x.id === k) || {}).who === "dev").length, srv = ys.length - dev;
-        go_.disabled = !patrolPick.size;
-        go_.textContent = !patrolPick.size ? "Отметьте ✓ или ✕" : ys.length
-          ? "Отправить: " + [srv ? `🛠 ${srv}` : "", dev ? `👨‍💻 ${dev}` : "", n ? `✕ ${n}` : ""].filter(Boolean).join(" · ")
-          : `Отклонить: ✕ ${n}`;
-      };
-      const mark = (on, color) => "width:44px;min-height:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;"
-        + (on ? `background:${color};border-color:${color};color:#fff` : "");
-      const item = (x) => {
-        const [title, ...rest] = clean(x.text).split(/\s+—\s+/);
-        const meta = [x.who === "dev" ? "👨‍💻 разработчику" : "🛠 Claude", x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""]
-          .filter(Boolean).join(" · ");
-        const yes = el("button", { class: "chip", "aria-label": "Принять", title: "Принять", text: "✓" });
-        const no = el("button", { class: "chip", "aria-label": "Отклонить", title: "Отклонить", text: "✕" });
-        const words = el("div", { class: "ow-t" }, el("div", { style: "font-weight:500", text: title }),
-          rest.length ? el("small", { text: rest.join(" — ") }) : null, el("small", { style: "font-size:12px;margin-top:3px", text: meta }));
-        const row = el("div", { class: "ow-row patrol-item", "data-id": x.id, style: "align-items:flex-start" }, words,
-          el("div", { style: "display:flex;gap:6px;flex:none" }, yes, no));
-        const paint = () => {
-          const v = patrolPick.get(x.id);
-          yes.style.cssText = mark(v === "yes", "var(--ok)");
-          no.style.cssText = mark(v === "no", "var(--danger)");
-          yes.setAttribute("aria-pressed", v === "yes" ? "true" : "false");
-          no.setAttribute("aria-pressed", v === "no" ? "true" : "false");
-          words.style.opacity = v === "no" ? ".5" : "";
-          words.style.textDecoration = v === "no" ? "line-through" : "";
-        };
-        const flip = (v) => { if (patrolPick.get(x.id) === v) patrolPick.delete(x.id); else patrolPick.set(x.id, v); paint(); count(); };
-        yes.onclick = () => flip("yes");
-        no.onclick = () => flip("no");
-        row.paint = paint;
-        paint();
-        return row;
-      };
+      // what it found: a short list (the whole text is the developer's)
+      const fixIt = (x) => el("button", { class: "ow-btn line", style: "min-height:36px;flex:none", text: "🛠 Починить", onclick: async () => {
+        cache.patrol = null;
+        cache.claude = null;
+        part = "claude"; store.set("accessPart", part); refreshTop();
+        await load();
+        if (part === "claude" && claude.box) talk({ op: "agent_patrol_pick", chat: "new", yes: [x.id], no: [] }, "🔍 Из Дозора — починить: " + clean(x.text).split(/\s+—\s+/)[0]);
+      } });
+      const item = (x) => el("div", { class: "ow-row patrol-item", "data-id": x.id, style: "align-items:flex-start" },
+        el("div", { class: "ow-t" }, el("div", { style: "font-weight:500", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + clean(x.text).split(/\s+—\s+/)[0] }),
+          el("small", { style: "font-size:12px;margin-top:3px", text: [x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ") })),
+        x.kind === "fix" && x.who === "server" ? fixIt(x) : null);
+      const notes = el("button", { class: "btn", text: "📋 Разработчику", onclick: async () => {
+        notes.disabled = true;
+        try {
+          const end = await panel({ op: "agent_devnotes" });
+          if (end.t !== "done") return toast("⚠️ " + end.text, 7000);
+          devSheet(end.text, end.found);
+        } catch (x) { toast(problem(x)); } finally { notes.disabled = false; }
+      } });
+      const wipe = el("button", { class: "btn line", text: "🧹 Очистить", disabled: open.length ? null : true, onclick: async () => {
+        if (!(await confirmBox("Убрать находки с экрана? Сначала отправьте их разработчику («📋 Разработчику»): после очистки в текст попадёт только новое.", "Очистить", true))) return;
+        wipe.disabled = true;
+        try {
+          const end = await panel({ op: "agent_devclear" });
+          if (end.t !== "done") { wipe.disabled = false; return toast("⚠️ " + end.text, 7000); }
+          cache.patrol = Object.assign({}, d, { items: end.items || [], status: end.status || st });
+          toast("🧹 Очищено", 3000);
+          draw();
+        } catch (x) { wipe.disabled = false; toast(problem(x)); }
+      } });
       if (open.length) {
-        scroll.append(el("p", { class: "ow-note", style: "margin-top:4px", text: "✓ — принять: 🛠 Claude на сервере покажет план, 👨‍💻 — текст "
-          + "разработчику. ✕ — больше не предлагать." }));
-        for (const [kind, head_] of [["fix", "🔴 Исправить"], ["idea", "🟡 Улучшить"]]) {
-          const these = open.filter((x) => x.kind === kind).sort((a, b) => b.first - a.first);
-          if (!these.length) continue;
-          const rows = these.map(item);
-          scroll.append(section(`${head_} · ${these.length}`, el("button", { class: "ow-btn line", style: "min-height:36px", text: "✓ все", onclick: () => {
-            for (const x of these) patrolPick.set(x.id, "yes");
-            rows.forEach((r) => r.paint());
-            count();
-          } })), el("div", { class: "ow-list patrol-" + kind }, ...rows));
-        }
-        scroll.append(el("div", { class: "ow-foot" }, go_));
-        count();
+        const these = open.slice().sort((p, q) => (p.kind === "fix" ? 0 : 1) - (q.kind === "fix" ? 0 : 1) || q.first - p.first);
+        scroll.append(section(`Нашёл · ${these.length}`), el("div", { class: "ow-list patrol-found" }, ...these.slice(0, 30).map(item)),
+          these.length > 30 ? el("p", { class: "ow-note", text: `И ещё ${these.length - 30} — в тексте для разработчика.` }) : null);
       } else {
         scroll.append(el("div", { class: "ow-list", style: "text-align:center;padding:16px 12px" },
-          el("div", { style: "font-size:26px", text: "✅" }), el("div", { style: "font-weight:500", text: "Новых замечаний нет" }),
+          el("div", { style: "font-size:26px", text: "✅" }), el("div", { style: "font-weight:500", text: "Новых находок нет" }),
           el("small", { style: "display:block;color:var(--muted);margin-top:4px;font-size:13px",
-            text: off ? "Дозор выключен: проверит, только когда нажмёте «Проверить сейчас»." : "Что найдёт — появится здесь, о важном придёт уведомление." })));
+            text: off ? "Дозор выключен: проверит, только когда нажмёте «Проверить сейчас»." : "Что найдёт — появится здесь; о поломке придёт уведомление." })));
       }
-      // what is already in hand: at the server's Claude, at the developer, done
-      for (const [status, head_, ic, opened] of [["sent", "У Claude на сервере", "🛠", true], ["dev", "У разработчика", "👨‍💻", true], ["done", "Исправлено", "✅", false]]) {
-        const these = items.filter((x) => x.status === status);
-        if (!these.length) continue;
-        const det = el("details", { class: "ow-more patrol-" + status, open: opened && these.length <= 5 ? true : null },
-          el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `${ic} ${head_} · ${these.length}` }), el("span", { class: "ow-go", text: "›" })),
-          el("div", { class: "ow-list" }, ...these.slice().reverse().map((x) => el("div", { class: "ow-row", style: "min-height:40px" },
-            el("div", { class: "ow-t", style: "font-size:14px" }, (x.kind === "fix" ? "🔴 " : "🟡 ") + clean(x.text).split(/\s+—\s+/)[0],
-              el("small", { text: (x.theme ? x.theme + " · " : "") + when(x.first) }))))),
-          status === "dev" ? el("button", { class: "btn line wide", style: "margin:0 0 10px", text: "📋 Текст для разработчика",
-            onclick: () => devSheet(devText(these, items)) }) : null,
-          status === "sent" ? el("p", { class: "ow-note", style: "margin-top:-4px", text: "Планы по ним — в «🛠 Claude», в разговоре «🔍 Из Дозора»." }) : null);
-        scroll.append(det);
-      }
+      notes.style.flex = "2";
+      wipe.style.flex = "1";
+      scroll.append(el("div", { class: "ow-foot", style: "display:flex;gap:8px" }, notes, wipe),
+        el("p", { class: "ow-note", text: "Всё найденное — для разработчика: «📋 Разработчику» собирает находки, отчёты Дозора, ключи и все неполадки мостов "
+          + "в один текст. «🛠 Починить» — только у мелкой поломки на сервере: Claude покажет план." }));
+      const sent = items.filter((x) => x.status === "sent");
+      if (sent.length) scroll.append(el("details", { class: "ow-more patrol-sent" },
+        el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `🛠 Чинит Claude на сервере · ${sent.length}` }), el("span", { class: "ow-go", text: "›" })),
+        el("div", { class: "ow-list" }, ...sent.slice().reverse().map((x) => el("div", { class: "ow-row", style: "min-height:40px" },
+          el("div", { class: "ow-t", style: "font-size:14px" }, clean(x.text).split(/\s+—\s+/)[0], el("small", { text: when(x.first) })))))));
       const themes = st.themes && st.themes.length ? st.themes : ["ошибки и службы", "VPN и мосты", "защита", "приложение", "новые версии ИИ"];
-      scroll.append(section("Темы по кругу"), el("div", { class: "chips patrol-themes", style: "flex-wrap:wrap;margin:0 2px 8px" },
-        ...[...new Set(themes)].map((t) => el("span", { class: "chip" + (t === st.next && !off ? " on" : ""), style: "min-height:32px;padding:5px 11px;font-size:13px",
-          title: t === st.next ? "следующая" : null, text: t }))),
-        el("p", { class: "ow-note", text: "По одной теме примерно раз в час, на бесплатных моделях; фото и видео — чаще всего. "
-          + "Ничего не меняет сам. Один пункт делает кто-то один — правки не пересекаются." }));
-      go_.onclick = async () => {
-        const ys = [...patrolPick].filter(([, v]) => v === "yes").map(([k]) => k), no = [...patrolPick].filter(([, v]) => v === "no").map(([k]) => k);
-        const isDev = (k) => (open.find((x) => x.id === k) || {}).who === "dev";
-        const dev = ys.filter(isDev), yes = ys.filter((k) => !isDev(k));
-        go_.disabled = true;
-        let text = "";
-        if (dev.length) {  // the developer's first: kept as his (never asked of the server's Claude), their text to copy
-          try {
-            const end = await panel({ op: "agent_patrol_dev", ids: dev });
-            if (end.t !== "done") { go_.disabled = false; return toast("⚠️ " + end.text, 7000); }
-            text = devText(items.filter((x) => dev.includes(x.id)), end.items || items);
-            if (end.items) cache.patrol = Object.assign({}, cache.patrol, { items: end.items });
-          } catch (e) { go_.disabled = false; return toast(problem(e)); }
-        }
-        dev.forEach((k) => patrolPick.delete(k));
-        if (!yes.length) {
-          try {
-            if (no.length) {
-              const end = await panel({ op: "agent_patrol_pick", yes: [], no });
-              if (end.t !== "done") { go_.disabled = false; return toast("⚠️ " + end.text, 7000); }
-              toast(`✕ ${end.declined} — Дозор больше не предложит`, 4000);
-            }
-            patrolPick.clear();
-            load();
-          } catch (e) { go_.disabled = false; toast(problem(e)); return; }
-        } else {  // the accepted for the server: Claude checks them in a new talk and shows a plan
-          patrolPick.clear();
-          cache.patrol = null;
-          cache.claude = null;
-          part = "claude"; store.set("accessPart", part); refreshTop();
-          await load();
-          if (part === "claude" && claude.box) talk({ op: "agent_patrol_pick", chat: "new", yes, no }, `🔍 Из Дозора — принято: ${yes.length}`);
-        }
-        if (text) devSheet(text);
-      };
+      scroll.append(el("details", { class: "ow-more" }, el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `Темы по кругу · ${new Set(themes).size}` }), el("span", { class: "ow-go", text: "›" })),
+        el("div", { class: "chips patrol-themes", style: "flex-wrap:wrap;margin:0 2px 8px" },
+          ...[...new Set(themes)].map((t) => el("span", { class: "chip" + (t === st.next && !off ? " on" : ""), style: "min-height:32px;padding:5px 11px;font-size:13px",
+            title: t === st.next ? "следующая" : null, text: t }))),
+        el("p", { class: "ow-note", text: "По одной теме примерно раз в час, на бесплатных моделях; фото, видео и тренды — чаще всего. Сам ничего не меняет." })));
       // while it checks, the tab looks again by itself
       if (st.running) draw.tick = setTimeout(() => { if (part === "patrol" && S.tab === "vpn" && !document.hidden) load(); }, 15000);
     }

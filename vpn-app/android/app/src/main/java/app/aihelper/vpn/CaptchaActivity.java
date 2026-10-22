@@ -107,8 +107,12 @@ public class CaptchaActivity extends Activity implements State.Listener {
                 return !"http".equals(u.getScheme()) && !"https".equals(u.getScheme());  // vk:// and the like: not here
             }
 
+            private boolean said;  // the page finishes its loads many times over: told once
+
             @Override
             public void onPageFinished(WebView v, String u) {
+                if (said) return;
+                said = true;
                 Diag.i(CaptchaActivity.this, "bridge: VK's check page shown in Winger");
             }
 

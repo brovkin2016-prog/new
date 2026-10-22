@@ -2255,7 +2255,7 @@
   }
 
   // ---------- More: translator, reminders, settings, memory, app ----------
-  // ---------- the owner's mini-apps (the server's Claude writes them: srv-miniapp) ----------
+  // ---------- the owner's mini-apps (written by the server's Claude up to server 29; kept to open or take away) ----------
   // Each is one page, shown in a closed frame of its own: it cannot reach this app's sign-in or anything of the page;
   // what it may do goes through window.app (its own storage here, a note, copy, share, a link, a question to the helper).
   const MA_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; "
@@ -2379,8 +2379,7 @@
       const draw = (apps, offline) => {
         list.innerHTML = "";
         if (!apps.length) {
-          list.append(el("p", { class: "muted", text: "Приложений пока нет. Попросите Claude: «Управление» → «🛠 Claude» → «Сделай приложение …» "
-            + "(список покупок, счётчик, расписание, калькулятор — что угодно). Оно появится здесь, его можно поставить значком на главный экран." }));
+          list.append(el("p", { class: "muted", text: "Приложений нет." }));
           return;
         }
         if (offline) list.append(el("p", { class: "muted", text: "Нет связи с сервером — показаны сохранённые на телефоне." }));
@@ -2390,7 +2389,7 @@
             el("div", { class: "grow" }, el("span", { class: "t", text: a.name }), el("small", { text: a.desc || "версия " + a.v })),
             el("button", { class: "round ghost", text: "🗑️", title: "Убрать", "aria-label": "Убрать «" + a.name + "»", onclick: async (e) => {
               e.stopPropagation();
-              if (!(await confirmBox(`Убрать «${a.name}» с телефона? Claude может вернуть его, опубликовав снова.`, "Убрать", true))) return;
+              if (!(await confirmBox(`Убрать «${a.name}» с телефона?`, "Убрать", true))) return;
               try { await api("/api/miniapps", { op: "miniapp_hide", id: a.id }); ls.del("mah:" + a.id); load(); } catch (er) { toast(problem(er)); }
             } })));
         }
@@ -2436,7 +2435,7 @@
       if (me.panel) scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: miniApps },
           el("span", { style: "font-size:24px", text: "📱" }),
-          el("div", { class: "grow" }, "Мои приложения", el("small", { text: "Их пишет Claude в «Управлении» по вашей просьбе" })),
+          el("div", { class: "grow" }, "Мои приложения", el("small", { text: "Сделанные раньше: открыть или убрать" })),
           el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
       if (!me.panel && Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });

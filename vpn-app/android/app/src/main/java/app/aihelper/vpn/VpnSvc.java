@@ -546,7 +546,11 @@ public final class VpnSvc extends VpnService {
         List<Profile> order = new java.util.ArrayList<>();
         order.add(preferred);
         for (Profile x : Profile.all(this)) if (!x.bridge && !x.link.equals(preferred.link)) order.add(x);
-        for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(preferred.link)) order.add(x);
+        // the bridges: the one that last carried data (in the last 3 days) first — not a slow or dead one before it
+        android.content.SharedPreferences v = getSharedPreferences("vpn", MODE_PRIVATE);
+        String good = System.currentTimeMillis() - v.getLong("goodBridgeAt", 0) < 3 * 86_400_000L ? v.getString("goodBridge", "") : "";
+        for (Profile x : Profile.all(this)) if (x.bridge && x.link.equals(good) && !x.link.equals(preferred.link)) order.add(x);
+        for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(good) && !x.link.equals(preferred.link)) order.add(x);
         if (order.size() < 2) return null;
         int at = 0;
         for (int i = 0; i < order.size(); i++) if (order.get(i).link.equals(from.link)) at = i;
@@ -632,6 +636,9 @@ public final class VpnSvc extends VpnService {
                 int ms = probe(10_000);
                 if (ms > 0) {
                     Diag.i(this, "bridge: data flows, " + ms + " ms");
+                    // the bridge that really carried: the first one tried next time the server does not answer
+                    getSharedPreferences("vpn", MODE_PRIVATE).edit().putString("goodBridge", profile.link)
+                            .putLong("goodBridgeAt", System.currentTimeMillis()).apply();
                     return null;
                 }
             }
