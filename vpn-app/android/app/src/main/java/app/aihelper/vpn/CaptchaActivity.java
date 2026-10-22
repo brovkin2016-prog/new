@@ -51,8 +51,8 @@ public class CaptchaActivity extends Activity implements State.Listener {
         root.setOrientation(LinearLayout.VERTICAL);
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(16), dp(14), dp(10), dp(8));
+        head.setGravity(Gravity.TOP);
+        head.setPadding(dp(16), dp(14), dp(6), dp(8));
         LinearLayout words = new LinearLayout(this);
         words.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(this);
@@ -61,7 +61,7 @@ public class CaptchaActivity extends Activity implements State.Listener {
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         TextView hint = new TextView(this);
-        hint.setText("Отметьте галочку ниже (если VK покажет задание — выполните его). Мост подключится сам, окно закроется.");
+        hint.setText("Отметьте галочку ниже или выполните задание VK — мост подключится сам, окно закроется.");
         hint.setTextColor(muted);
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         TextView browser = new TextView(this);  // a phone whose built-in web view is too old for VK's page
@@ -82,10 +82,13 @@ public class CaptchaActivity extends Activity implements State.Listener {
         words.addView(browser);
         head.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
         TextView close = new TextView(this);
-        close.setText("Закрыть");
-        close.setTextColor(0xFF6366F1);
-        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        close.setPadding(dp(12), dp(10), dp(8), dp(10));
+        close.setText("✕");  // (a word there took the hint's room: on a narrow phone it ran to five lines)
+        close.setContentDescription("Закрыть");
+        close.setTextColor(muted);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        close.setGravity(Gravity.CENTER);
+        close.setMinWidth(dp(44));
+        close.setMinHeight(dp(44));
         close.setOnClickListener(v -> finish());
         head.addView(close);
         root.addView(head);
