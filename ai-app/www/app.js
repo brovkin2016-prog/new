@@ -2372,44 +2372,6 @@
     maWanted = "";
     if (S.me.panel) openMiniapp(id);
   }
-  function miniApps() {
-    sheet("📱 Мои приложения", (box, close) => {
-      const list = el("div", {}, el("p", { class: "muted", text: "Загружаю…" }));
-      box.append(list);
-      const draw = (apps, offline) => {
-        list.innerHTML = "";
-        if (!apps.length) {
-          list.append(el("p", { class: "muted", text: "Приложений нет." }));
-          return;
-        }
-        if (offline) list.append(el("p", { class: "muted", text: "Нет связи с сервером — показаны сохранённые на телефоне." }));
-        for (const a of apps) {
-          list.append(el("div", { class: "row chat-row", role: "button", tabindex: "0", "aria-label": a.name, onclick: () => { close(); openMiniapp(a.id); } },
-            el("span", { style: "font-size:26px", text: a.icon }),
-            el("div", { class: "grow" }, el("span", { class: "t", text: a.name }), el("small", { text: a.desc || "версия " + a.v })),
-            el("button", { class: "round ghost", text: "🗑️", title: "Убрать", "aria-label": "Убрать «" + a.name + "»", onclick: async (e) => {
-              e.stopPropagation();
-              if (!(await confirmBox(`Убрать «${a.name}» с телефона?`, "Убрать", true))) return;
-              try { await api("/api/miniapps", { op: "miniapp_hide", id: a.id }); ls.del("mah:" + a.id); load(); } catch (er) { toast(problem(er)); }
-            } })));
-        }
-      };
-      const load = async () => {
-        try {
-          const r = await api("/api/miniapps", { op: "miniapps" });
-          if (r.t !== "done") throw new Error(r.text || "нет ответа");
-          ls.set("miniapps", JSON.stringify(r.apps));
-          draw(r.apps || [], false);
-        } catch (e) {
-          let kept = [];
-          try { kept = JSON.parse(ls.get("miniapps") || "[]"); } catch (er) { kept = []; }
-          draw(kept.filter((a) => ls.get("mah:" + a.id)), true);
-        }
-      };
-      load();
-    });
-  }
-
   function moreView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
@@ -2431,11 +2393,6 @@
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => (S.views.vpn && S.views.vpn.keys ? S.views.vpn.keys() : show("vpn")) },
           el("span", { style: "font-size:24px", text: "🔑" }),
           el("div", { class: "grow" }, "Ключи", el("small", { text: "Все ключи помощника и Claude: какие подключены, каких нет" })),
-          el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
-      if (me.panel) scroll.append(el("div", { class: "card" },
-        el("button", { class: "row", style: "width:100%;text-align:left", onclick: miniApps },
-          el("span", { style: "font-size:24px", text: "📱" }),
-          el("div", { class: "grow" }, "Мои приложения", el("small", { text: "Сделанные раньше: открыть или убрать" })),
           el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
       if (!me.panel && Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
