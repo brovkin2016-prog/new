@@ -256,6 +256,7 @@ final class Speed {
 
     /** cfg: its settings file's name (the speed test and the response times may run at once). */
     private static Process tempClient(Context c, Profile p, int port, String cfgName) {
+        Process[] started = {null};
         try {
             String host = p.host;
             if (!host.matches("[0-9.]+") && !host.contains(":")) host = InetAddress.getByName(host).getHostAddress();
@@ -272,6 +273,7 @@ final class Speed {
             pb.environment().put("HYSTERIA_LOG_LEVEL", "info");
             pb.environment().put("HOME", dir.getAbsolutePath());
             Process proc = pb.start();
+            started[0] = proc;
             CountDownLatch ok = new CountDownLatch(1);
             new Thread(() -> {
                 try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
@@ -297,6 +299,9 @@ final class Speed {
             proc.destroy();
             return null;
         } catch (Exception e) {
+            if (started[0] != null) started[0].destroy();  // (interrupted while waiting: its client goes, its file too)
+            //noinspection ResultOfMethodCallIgnored
+            new File(c.getFilesDir(), cfgName.replace(".yaml", "-" + port + ".yaml")).delete();
             return null;
         }
     }

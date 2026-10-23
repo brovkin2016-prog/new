@@ -177,7 +177,7 @@ final class Scout {
                 String key = net(app);
                 JSONObject r = BridgeCheck.scoutOne(app, due);
                 String res = r.optString("result", "error");
-                if (!"in_use".equals(res) && key.equals(net(app))) record(app, key, due, res, r.optInt("ping_ms"), r.optString("mode"));
+                if (!"in_use".equals(res) && key.equals(net(app))) record(app, key, due, res, r.optInt("ping_ms"), r.optString("way"));
             } catch (Exception e) {
                 Diag.i(app, "scout: " + e);
             } finally {

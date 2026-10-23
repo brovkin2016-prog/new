@@ -166,7 +166,7 @@ final class BridgeCheck {
                 progress = "Мост «" + p.name + "» (" + (++nb) + " из " + nbAll + ")";
                 State.fire();
                 JSONObject o = quick ? look(c, p, dir, carrier, carrierPort) : bridge(c, p, dir, carrier, carrierPort, false);
-                if (!"in_use".equals(o.optString("result"))) Scout.record(c, Scout.net(c), p, o.optString("result"), o.optInt("ping_ms"), o.optString("mode"));
+                if (!"in_use".equals(o.optString("result"))) Scout.record(c, Scout.net(c), p, o.optString("result"), o.optInt("ping_ms"), o.optString("way"));
                 bridges.put(o);
             }
             r.put("servers", servers).put("bridges", bridges).put("took_s", (SystemClock.elapsedRealtime() - t0) / 1000);
@@ -280,7 +280,7 @@ final class BridgeCheck {
         if (v == null) return r;
         v.tunnelMode = "video";
         JSONObject r2 = bridge(c, v, dir, carrier, carrierPort, true);
-        return "ok".equals(r2.optString("result")) ? r2.put("mode", "video") : r;
+        return "ok".equals(r2.optString("result")) ? r2.put("way", "video") : r;  // (not "mode": every look has its label)
     }
 
     private static JSONObject bridge(Context c, Profile p, File dir, Process[] carrier, int[] carrierPort, boolean light) throws Exception {

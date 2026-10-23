@@ -135,7 +135,11 @@ public final class VpnSvc extends VpnService {
             profile = p;
             preferred = p;
             tunnel = p.tunnelMode.isEmpty() ? "dc" : p.tunnelMode;
-            if ("video".equals(Scout.mode(this, p))) tunnel = "video";  // (v34) here only the call's video carried lately
+            fellBackAt = 0;
+            if ("dc".equals(p.tunnelMode) && "video".equals(Scout.mode(this, p))) {
+                tunnel = "video";  // (v34) here only the call's video carried lately: the quicker way tried again in half an hour
+                fellBackAt = SystemClock.elapsedRealtime();
+            }
             backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;
             State.activeLink = p.link;
             State.auto = false;
@@ -634,9 +638,12 @@ public final class VpnSvc extends VpnService {
             if (!wanted || worker != Thread.currentThread()) return;
             profile = next;
             tunnel = next.tunnelMode.isEmpty() ? "dc" : next.tunnelMode;
-            if ("video".equals(Scout.mode(this, next))) tunnel = "video";  // (v34) here only the call's video carried lately
             dcFails = 0;
             fellBackAt = 0;
+            if ("dc".equals(next.tunnelMode) && "video".equals(Scout.mode(this, next))) {
+                tunnel = "video";  // (v34) here only the call's video carried lately: the quicker way tried again in half an hour
+                fellBackAt = SystemClock.elapsedRealtime();
+            }
         }
         stopParts();
         State.activeLink = next.link;
