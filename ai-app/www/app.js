@@ -1596,8 +1596,8 @@
       el("div", { class: "big-actions", style: "margin:16px 0 4px" },
         el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
         el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи"),
-        trendsOk() ? el("button", { class: "big wide", onclick: () => trendsSheet(th) }, el("span", { class: "ic", text: "🔥" }),
-          el("span", {}, "Тренды", el("small", { text: "повторить тренд в один клик: Хэллоуин, фигурка в коробке, денежный дождь…" }))) : null,
+        trendsOk() ? el("button", { class: "big wide", onclick: () => trendsSheet(th, "photo") }, el("span", { class: "ic", text: "🔥" }),
+          el("span", {}, "Фото-тренды", el("small", { text: "в один клик: Хэллоуин, фигурка в коробке, обнять себя в детстве" }))) : null,
         tplOk() ? el("button", { class: "big wide", onclick: () => templatesSheet("photo", th) }, el("span", { class: "ic", text: "🎭" }),
           el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null,
         shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, el("span", { class: "ic", text: "📸" }),
@@ -1614,7 +1614,8 @@
       tools(QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
         tool("✍️ Своё изменение", own),
         // «pick my photo, then put me in a picture»: the photo chosen here is offered in who-is-who
-        trendsOk() ? tool("🔥 Тренды", () => trendsSheet(th)) : null,
+        has("animate") ? tool("🎬 Оживить", () => runOp("animate")) : null,
+        trendsOk() ? tool("🔥 Фото-тренды", () => trendsSheet(th, "photo")) : null,
         tplOk() ? tool("🎭 Я на фото", () => templatesSheet("photo", th)) : null,
         shootOk() ? tool("📸 Фотосессия", () => shootSheet(th)) : null,
         tool("🧰 Другое", more)))
@@ -1624,7 +1625,7 @@
         el("div", { class: "menu-sec", style: "grid-column:1/-1;padding:4px 2px 0", text: "Новое фото" }),
         el("button", { class: "btn", text: "📷 Снять фото", onclick: () => pick(true) }),
         el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => pick(false) }),
-        trendsOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🔥 Тренды", onclick: () => trendsSheet(th) }) : null,
+        trendsOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🔥 Фото-тренды", onclick: () => trendsSheet(th, "photo") }) : null,
         tplOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🎭 Я на фото", onclick: () => templatesSheet("photo", th) }) : null,
         shootOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "📸 Фотосессия", onclick: () => shootSheet(th) }) : null)
       : null);
@@ -1636,7 +1637,7 @@
     autoGrow(ta);
     const cam = el("button", { class: "round ghost", text: "📷", title: "Выбрать фото", onclick: () => menu("Выбрать фото", [
       ["📷", "Снять фото", () => pick(true)], ["🖼️", "Из галереи", () => pick(false)],
-      trendsOk() ? ["🔥", "Тренды", () => trendsSheet(th)] : null,
+      trendsOk() ? ["🔥", "Фото-тренды", () => trendsSheet(th, "photo")] : null,
       tplOk() ? ["🎭", "Я на фото", () => templatesSheet("photo", th)] : null,
       shootOk() ? ["📸", "Фотосессия", () => shootSheet(th)] : null]) });
     const act = el("button", { class: "round main", text: "🎤" });
@@ -1955,46 +1956,53 @@
   // ---------- «🔥 Тренды» (v34): as on the trend sites — sections, a search, tall cards with «ХИТ»; a card: what it is,
   // the photos it asks for, «Повторить». The result comes into the Фото thread (a video trend: a clip) ----------
   const trendsOk = () => !!((S.me.can || {}).trends || S.me.panel);
-  function trendsSheet(th) {
-    if (S.busy[th.name]) { toast("Подождите, предыдущее фото ещё делается"); return; }
-    if (!trendsOk()) { toast("Тренды пока не включены — их включает владелец помощника.", 5000); return; }
-    sheet("", (box, close) => {
-      let cat = "", q = "", data = null;
-      const search = el("input", { class: "input", type: "search", placeholder: "Найти тренд", "aria-label": "Найти тренд",
-        oninput: () => { q = search.value.trim().toLowerCase(); paint(); } });
-      const chips = el("div", { class: "chips fade" });
-      const grid = el("div", { class: "trend-grid" }, el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
-      box.append(el("h2", { class: "trend-title", text: "ТРЕНДЫ" }),
-        el("p", { class: "muted", style: "margin:0 0 10px;font-size:15px", text: "Повторяйте актуальные тренды в один клик — выберите тренд, загрузите фото и получите готовый результат." }),
-        search, el("div", { class: "sheet-stick" }, chips), grid);
-      function paint() {
-        if (!data) return;
-        chips.innerHTML = "";
-        for (const c of [""].concat(data.cats)) {
-          chips.append(el("button", { class: "chip" + (c === cat ? " on" : ""), "aria-pressed": c === cat ? "true" : "false",
-            text: c || "Все", onclick: () => { cat = c; paint(); } }));
-        }
-        grid.innerHTML = "";
-        const list = data.items.filter((t) => (!cat || t.cats.includes(cat)) && (!q || (t.title + " " + t.desc).toLowerCase().includes(q)));
-        for (const t of list) {
-          grid.append(el("button", { class: "tcard", "aria-label": t.title + (t.hit ? " — хит" : ""), onclick: () => { close(); trendCard(th, t); } },
-            t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
-            t.hit ? el("span", { class: "tcard-hit", text: "ХИТ" }) : null,
-            t.kind === "video" ? el("span", { class: "tcard-kind", text: "▶ видео" }) : null,
-            el("span", { class: "tcard-name", text: t.title })));
-        }
-        if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: q ? "Ничего не нашлось — попробуйте другое слово." : "В этом разделе пока пусто." }));
+  // the panel itself: the Видео tab shows it on its screen (video trends), the Фото tab in a sheet (photo trends)
+  function trendsPanel(th, kind, before) {
+    let cat = "", q = "", data = null;
+    const search = el("input", { class: "input", type: "search", placeholder: "Найти тренд", "aria-label": "Найти тренд",
+      oninput: () => { q = search.value.trim().toLowerCase(); paint(); } });
+    const chips = el("div", { class: "chips fade" });
+    const grid = el("div", { class: "trend-grid" }, el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
+    const box = el("div", { class: "trends" }, el("h2", { class: "trend-title", text: "ТРЕНДЫ" }),
+      el("p", { class: "muted", style: "margin:0 0 10px;font-size:15px", text: kind === "video"
+        ? "Повторяйте актуальные видео-тренды в один клик — выберите сценарий, загрузите фото и получите готовое видео."
+        : "Повторяйте фото-тренды в один клик — выберите тренд, загрузите фото и получите готовый снимок." }),
+      search, el("div", { class: "sheet-stick" }, chips), grid);
+    function paint() {
+      if (!data) return;
+      const mine = data.items.filter((t) => t.kind === kind);
+      const cats = data.cats.filter((c) => mine.some((t) => t.cats.includes(c)));  // (a section with nothing in it: not shown)
+      chips.innerHTML = "";
+      for (const c of [""].concat(cats)) {
+        chips.append(el("button", { class: "chip" + (c === cat ? " on" : ""), "aria-pressed": c === cat ? "true" : "false",
+          text: c || "Все", onclick: () => { cat = c; paint(); } }));
       }
-      api("/api/trends", {}).then((r) => { data = r; paint(); }).catch((e) => {
-        grid.innerHTML = "";
-        grid.append(el("p", { class: "gal-msg", text: problem(e) }));
-      });
+      grid.innerHTML = "";
+      const list = mine.filter((t) => (!cat || t.cats.includes(cat)) && (!q || (t.title + " " + t.desc).toLowerCase().includes(q)));
+      for (const t of list) {
+        grid.append(el("button", { class: "tcard", "aria-label": t.title + (t.hit ? " — хит" : ""), onclick: () => { if (before) before(); trendCard(th, t); } },
+          t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
+          t.hit ? el("span", { class: "tcard-hit", text: "ХИТ" }) : null,
+          el("span", { class: "tcard-name", text: t.title })));
+      }
+      if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: q ? "Ничего не нашлось — попробуйте другое слово." : "В этом разделе пока пусто." }));
+    }
+    api("/api/trends", {}).then((r) => { data = r; paint(); }).catch((e) => {
+      grid.innerHTML = "";
+      grid.append(el("p", { class: "gal-msg", text: problem(e) }));
     });
+    return box;
+  }
+  function trendsSheet(th, kind) {
+    if (S.busy[th.name]) { toast(kind === "video" ? "Подождите, ролик ещё делается" : "Подождите, предыдущее фото ещё делается"); return; }
+    if (!trendsOk()) { toast("Тренды пока не включены — их включает владелец помощника.", 5000); return; }
+    sheet("", (box, close) => box.append(trendsPanel(th, kind, close)));
   }
   function trendCard(th, t) {
     const photos = t.photos.map(() => null);
-    const mine = S.views.photo && S.views.photo.current ? S.views.photo.current() : null;
+    const mine = th.name === "photo" && S.views.photo && S.views.photo.current ? S.views.photo.current() : null;
     if (mine) photos[0] = mine;
+    if (S.busy[th.name]) { toast(t.kind === "video" ? "Подождите, ролик ещё делается" : "Подождите, предыдущее фото ещё делается"); return; }
     sheet("", (box, close) => {
       const why = el("div", { class: "why" });
       const rows = el("div");
@@ -2036,13 +2044,12 @@
         }
         if (!goBtn.isConnected) return;
         close();
-        if (S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
+        if (th.name === "photo" && S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
         await th.run("/api/trend", { trend: t.id, images, consent: true }, { role: "me", image: photos[0], text: "🔥 " + t.title });
       } });
       paintRows();
       box.append(
-        el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
-          video ? el("span", { class: "tcard-kind", text: "▶ видео" }) : null),
+        el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" })),
         el("h2", { class: "trend-name" }, t.title, t.hit ? el("span", { class: "tcard-hit inline", text: "ХИТ" }) : null),
         el("p", { class: "muted", style: "margin:0 0 10px;font-size:15px", text: t.desc }),
         el("div", { class: "menu-sec", text: t.photos.length > 1 ? "Ваши фото" : "Ваше фото" }), rows,
@@ -2288,61 +2295,29 @@
   function videoView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
-    const NOT_ON = "Видео вам пока не включено — его включает владелец помощника.";
-    const tv = () => canTpl("video");
-    const an = () => !!((S.me.ai_ops || {}).animate || (S.me.photo_ops || {}).animate);
-    const empty = () => {
-      // the title centred as on the sibling tabs; the two features are cards with their words to the left (.feat)
-      const box = el("div", { class: "empty" }, el("h2", { text: "Ролики с вами" }));
-      if (!tv() && !an() && !S.me.panel) { box.append(el("div", { class: "note-card", "data-off": "tv an", text: NOT_ON })); return box; }
-      const feat = (on, k, title, words, offWords) => el("p", { class: "feat" + (on ? "" : " off"), "data-off": on ? null : k },
-        el("b", { text: title }), " — " + words, on ? null : el("small", { text: offWords }));
-      box.append(
-        tv() ? feat(true, "tv", "🎭 Я в ролике", (S.me.texts || {}).tclips || "выберите готовый ролик или свой (до 20 секунд). В нём можно заменить до трёх человек: на каждого — своё фото. Ролик готов через 5–8 минут.", "") : "",
-        feat(an(), "an", "🖼️ Оживить фото", "выберите фото, где хорошо видно лицо, и оно начнёт двигаться. Готово через 1–3 минуты.", "Пока не включено."));
-      return box;
-    };
+    const NOT_ON = "Видео-тренды вам пока не включены — их включает владелец помощника.";
+    // (v35) the tab is the trend sites' «Тренды»: the video trends on its screen (the old clips «🎭 Я в ролике» are gone
+    // from here, the owner: «там одни косяки»; «Оживить фото» is in Фото, with the photo)
+    const empty = () => (!trendsOk() ? el("div", { class: "empty" }, el("h2", { text: "Видео-тренды" }), el("div", { class: "note-card", text: NOT_ON }))
+      : el("div", { class: "empty trends-home" }, trendsPanel(th, "video")));
     const th = thread("video", scroll, empty);
     scroll.append(th.box);
-    // a tap on a switched-off button: the words on the screen that already say so light up; with no such words (the
-    // clips cover them) a short notice says whom to ask
-    function offTap(k, name) {
-      const said = th.box.querySelector(`.empty [data-off~="${k}"]`);
-      if (said) {
-        said.classList.remove("nudge");
-        void said.offsetWidth;  // the light runs again on every tap
-        said.classList.add("nudge");
-        said.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        return;
-      }
-      toast(S.me.panel ? `«${name}» пока не работает — его подключают в «Управлении».` : `Попросите владельца помощника включить «${name}».`, 4000);
-    }
-    // a large font on 360: the words go under the icon whole («Я в ролике», not «Я в / ролике»)
-    const tvBtn = el("button", { class: "btn", text: "🎭 Я\u00a0в\u00a0ролике", onclick: () => {
-      if (!tv() && !S.me.panel) { offTap("tv", "Я в ролике"); return; }
-      templatesSheet("video", th);
-    } });
-    const anBtn = el("button", { class: "btn line", text: "🖼️ Оживить\u00a0фото", onclick: animate });
+    const trBtn = el("button", { class: "btn", text: "🔥 Видео-тренды", onclick: () => trendsSheet(th, "video") });
     const bar = el("div", { class: "vbar" });
-    const paintBar = () => {  // «🎭 Я в ролике» only while the server has it
-      bar.innerHTML = "";  // (replaceChildren: not in the older WebViews the app runs on)
-      bar.append(...(tv() ? [tvBtn, anBtn] : [anBtn]));
-      anBtn.className = tv() ? "btn line" : "btn";
-      tvBtn.classList.toggle("off", !tv()); anBtn.classList.toggle("off", !an());
+    const paintBar = () => {  // with the clips made under them, the trends a tap away (with none, they are the screen)
+      bar.innerHTML = "";
+      if (S.msgs.video.length && trendsOk()) bar.append(trBtn);
+      bar.classList.toggle("hidden", !bar.childElementCount);
+      comp.style.display = bar.childElementCount ? "" : "none";  // (no empty strip over the tabs)
     };
-    root.append(scroll, el("div", { class: "composer" }, bar));
-    async function animate() {
-      if (!an()) { offTap("an", "Оживить фото"); return; }
-      if (S.busy.video) { toast("Подождите, ролик ещё делается"); return; }
-      const f = await pickFile("image/*", false);
-      if (!f) return;
-      await th.run("/api/animate", { image: await b64(await shrink(f, 2048, 0.9)) }, { role: "me", image: f, text: "🖼️ Оживить фото" });
-    }
+    th.onRedraw = paintBar;  // (after each change: the bar follows)
+    const comp = el("div", { class: "composer" }, bar);
+    root.append(scroll, comp);
     paintBar();
     th.redraw();
     return {
       root, th, redraw: th.redraw,
-      sub: () => (tv() ? "ролики с вами и ожившие фото" : an() || S.me.panel ? "ожившие фото" : "пока не включено"),
+      sub: () => (trendsOk() ? "тренды с вами" : "пока не включено"),
       buttons: () => (S.msgs.video.length ? [["🧹 Очистить", "Очистить", async () => {
         if (!S.msgs.video.length) { toast("Здесь пока пусто"); return; }
         if (!(await confirmBox("Удалить все ролики из списка?", "Очистить", true))) return;

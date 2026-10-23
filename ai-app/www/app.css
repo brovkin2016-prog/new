@@ -412,3 +412,7 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
   background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .72)); }
 .tcard-big { position: relative; width: min(56%, 210px); aspect-ratio: 9 / 16; margin: 0 auto 10px; border-radius: 18px; overflow: hidden; background: var(--raise); }
 .trend-name { margin: 0 0 6px; font-size: 20px; }
+/* (v35) the Видео tab is the trends: the panel on its screen, left-aligned like the rest of it */
+.empty.trends-home { text-align: left; padding-top: 4px; }
+.vbar.hidden { display: none; }
+.trends-home .sheet-stick { top: 0; margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; background: var(--bg); }
