@@ -395,3 +395,20 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .ma-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--card); }
 .ma-head b { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ma-view iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }
+
+/* (v34) «🔥 Тренды»: as on the trend sites — two columns of tall cards, a gold «ХИТ» */
+.trend-title { margin: 0 0 4px; font-size: 22px; letter-spacing: .02em; }
+.trend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.trend-grid > .gal-msg { grid-column: 1 / -1; }
+.tcard { position: relative; aspect-ratio: 9 / 16; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); padding: 0;
+  background: var(--raise); display: block; text-align: left; }
+.tcard img, .tcard-big img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tcard-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 34px; color: var(--muted); }
+.tcard-hit { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 800; font-style: italic;
+  color: #3b2a00; background: linear-gradient(180deg, #ffd96a, #e7a92b); }
+.tcard-hit.inline { position: static; display: inline-block; margin-left: 8px; vertical-align: middle; }
+.tcard-kind { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; background: rgba(0, 0, 0, .55); }
+.tcard-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 10px 10px; font-size: 14px; font-weight: 600; line-height: 1.25; color: #fff;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .72)); }
+.tcard-big { position: relative; width: min(56%, 210px); aspect-ratio: 9 / 16; margin: 0 auto 10px; border-radius: 18px; overflow: hidden; background: var(--raise); }
+.trend-name { margin: 0 0 6px; font-size: 20px; }
