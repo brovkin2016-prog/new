@@ -283,6 +283,16 @@ final class Speed {
             boolean up = ok.await(12, TimeUnit.SECONDS);
             //noinspection ResultOfMethodCallIgnored
             cfg.delete();  // (read when it started)
+            // (v34) «connected to server» comes before its own port is open: a request at once was refused, and a server that
+            // works read «no answer» — its port open first (3 s at most)
+            for (long until = SystemClock.elapsedRealtime() + 3000; up && SystemClock.elapsedRealtime() < until; ) {
+                try (java.net.Socket probe = new java.net.Socket()) {
+                    probe.connect(new InetSocketAddress("127.0.0.1", port), 300);
+                    break;
+                } catch (java.io.IOException notYet) {
+                    Thread.sleep(50);
+                }
+            }
             if (up) return proc;
             proc.destroy();
             return null;
