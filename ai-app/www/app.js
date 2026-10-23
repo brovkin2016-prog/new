@@ -1983,6 +1983,7 @@
         grid.append(el("button", { class: "tcard", "aria-label": t.title + (t.hit ? " — хит" : ""), onclick: () => { if (before) before(); trendCard(th, t); } },
           t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
           t.hit ? el("span", { class: "tcard-hit", text: "ХИТ" }) : null,
+          t.fresh ? el("span", { class: "tcard-new", text: "НОВОЕ" }) : null,  // (a trend found on the web this week)
           el("span", { class: "tcard-name", text: t.title })));
       }
       if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: q ? "Ничего не нашлось — попробуйте другое слово." : "В этом разделе пока пусто." }));

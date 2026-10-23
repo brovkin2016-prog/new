@@ -406,6 +406,8 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .tcard-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 34px; color: var(--muted); }
 .tcard-hit { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 800; font-style: italic;
   color: #3b2a00; background: linear-gradient(180deg, #ffd96a, #e7a92b); }
+.tcard-new { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 800;
+  color: #fff; background: linear-gradient(180deg, #34c77b, #1f9d5c); }
 .tcard-hit.inline { position: static; display: inline-block; margin-left: 8px; vertical-align: middle; }
 .tcard-kind { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; background: rgba(0, 0, 0, .55); }
 .tcard-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 10px 10px; font-size: 14px; font-weight: 600; line-height: 1.25; color: #fff;
