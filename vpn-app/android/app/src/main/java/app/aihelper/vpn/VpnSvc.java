@@ -135,6 +135,7 @@ public final class VpnSvc extends VpnService {
             profile = p;
             preferred = p;
             tunnel = p.tunnelMode.isEmpty() ? "dc" : p.tunnelMode;
+            if ("video".equals(Scout.mode(this, p))) tunnel = "video";  // (v34) here only the call's video carried lately
             backWait = testBackMs > 0 ? testBackMs : BACK_FIRST;
             State.activeLink = p.link;
             State.auto = false;
@@ -550,9 +551,21 @@ public final class VpnSvc extends VpnService {
      * all, and a minute of failed tries would go by before the move — each server is looked at once (a few seconds) and
      * the first one that answers, or else the bridge, is taken at once. The chosen server is looked at again later (BACK).
      */
+    private static volatile String pickedLink;
+    private static volatile long pickedAt;
+
+    /** (v34) The person tapped this connection just now: it is tried first, whatever this network said of it lately. */
+    static void picked(String link) {
+        pickedLink = link;
+        pickedAt = SystemClock.elapsedRealtime();
+    }
+
     private void quickChoice() {
         if (!Apps.autoBridge(this) || preferred == null || !preferred.link.equals(profile.link)) return;
-        if (Boolean.FALSE.equals(Scout.carries(this, profile))) {
+        boolean byHand = profile.link.equals(pickedLink) && SystemClock.elapsedRealtime() - pickedAt < 30_000L;
+        if (byHand && Boolean.FALSE.equals(Scout.carries(this, profile))) {
+            Diag.i(this, "auto: «" + profile.name + "» chosen by hand — tried first, though it did not carry here lately");
+        } else if (Boolean.FALSE.equals(Scout.carries(this, profile))) {
             // (v32) the chosen one was just seen not carrying on this network and another one was seen carrying: that one
             // first, no two failed tries on the chosen one before it
             Profile best = Scout.best(this, profile);
@@ -621,6 +634,7 @@ public final class VpnSvc extends VpnService {
             if (!wanted || worker != Thread.currentThread()) return;
             profile = next;
             tunnel = next.tunnelMode.isEmpty() ? "dc" : next.tunnelMode;
+            if ("video".equals(Scout.mode(this, next))) tunnel = "video";  // (v34) here only the call's video carried lately
             dcFails = 0;
             fellBackAt = 0;
         }
@@ -697,7 +711,7 @@ public final class VpnSvc extends VpnService {
                     // the bridge that really carried (this one, still the worker's): first next time the server does not answer
                     if (mine()) getSharedPreferences("vpn", MODE_PRIVATE).edit().putString("goodBridge", p.link)
                             .putLong("goodBridgeAt", System.currentTimeMillis()).apply();
-                    Scout.record(this, p, "ok", ms);
+                    Scout.record(this, Scout.net(this), p, "ok", ms, "video".equals(tunnel) && "dc".equals(p.tunnelMode) ? "video" : "");
                     return null;
                 }
             }

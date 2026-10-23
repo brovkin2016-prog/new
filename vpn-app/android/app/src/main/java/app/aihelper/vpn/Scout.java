@@ -46,17 +46,19 @@ final class Scout {
 
     /** What a bridge did here: "ok" with its response time, or why not (no_data, no_join, error, captcha, stopped). */
     static void record(Context c, Profile p, String result, int ms) {
-        record(c, net(c), p, result, ms);
+        record(c, net(c), p, result, ms, "");
     }
 
     /** ... on that network (the one there was when the look began: a look that ends on another network is not its word). */
-    static synchronized void record(Context c, String key, Profile p, String result, int ms) {
+    static synchronized void record(Context c, String key, Profile p, String result, int ms, String mode) {
         try {
             JSONObject all = new JSONObject(prefs(c).getString(key, "{}"));
             String id = String.valueOf(p.link.hashCode());
             JSONObject was = all.optJSONObject(id);
             int same = was != null && result.equals(was.optString("r")) ? was.optInt("n") + 1 : 0;  // the same word again
-            all.put(id, new JSONObject().put("r", result).put("ms", ms).put("at", System.currentTimeMillis()).put("n", same));
+            JSONObject o = new JSONObject().put("r", result).put("ms", ms).put("at", System.currentTimeMillis()).put("n", same);
+            if (mode != null && !mode.isEmpty()) o.put("m", mode);  // (v34) the way that carried here: "video"
+            all.put(id, o);
             prefs(c).edit().putString(key, all.toString()).apply();
         } catch (Exception ignored) {
             // nothing kept: the next look says it again
@@ -85,6 +87,12 @@ final class Scout {
     private static Boolean carries(Profile p, JSONObject s) {
         if (p.bridge && "vk".equals(p.platformOrDefault())) return null;
         return s == null ? null : "ok".equals(s.optString("r"));
+    }
+
+    /** (v34) The way a bridge carried here lately when only the call's video did: "video"; null otherwise. */
+    static String mode(Context c, Profile p) {
+        JSONObject s = seen(c, p);
+        return s != null && "ok".equals(s.optString("r")) && !s.optString("m").isEmpty() ? s.optString("m") : null;
     }
 
     /** The same call (a bridge and its twin with other settings, say «2 трека»): the server keeps one of them in it. */
@@ -169,7 +177,7 @@ final class Scout {
                 String key = net(app);
                 JSONObject r = BridgeCheck.scoutOne(app, due);
                 String res = r.optString("result", "error");
-                if (!"in_use".equals(res) && key.equals(net(app))) record(app, key, due, res, r.optInt("ping_ms"));
+                if (!"in_use".equals(res) && key.equals(net(app))) record(app, key, due, res, r.optInt("ping_ms"), r.optString("mode"));
             } catch (Exception e) {
                 Diag.i(app, "scout: " + e);
             } finally {

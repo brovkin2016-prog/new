@@ -950,6 +950,7 @@ public class MainActivity extends Activity implements State.Listener {
             return;
         }
         Profile.select(this, at);
+        VpnSvc.picked(Profile.all(this).get(at).link);  // (v34) chosen by hand: tried first even if it did not carry here lately
         changed();
         if (State.phase != State.Phase.OFF) start();  // the service closes the old connection and opens this one
         else connect();

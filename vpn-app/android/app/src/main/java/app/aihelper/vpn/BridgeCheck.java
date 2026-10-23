@@ -165,8 +165,8 @@ final class BridgeCheck {
                 if (!p.bridge || quick && "vk".equals(p.platformOrDefault())) continue;  // (VK: «I'm not a robot» at every join)
                 progress = "Мост «" + p.name + "» (" + (++nb) + " из " + nbAll + ")";
                 State.fire();
-                JSONObject o = bridge(c, p, dir, carrier, carrierPort, quick);
-                if (!"in_use".equals(o.optString("result"))) Scout.record(c, p, o.optString("result"), o.optInt("ping_ms"));
+                JSONObject o = quick ? look(c, p, dir, carrier, carrierPort) : bridge(c, p, dir, carrier, carrierPort, false);
+                if (!"in_use".equals(o.optString("result"))) Scout.record(c, Scout.net(c), p, o.optString("result"), o.optInt("ping_ms"), o.optString("mode"));
                 bridges.put(o);
             }
             r.put("servers", servers).put("bridges", bridges).put("took_s", (SystemClock.elapsedRealtime() - t0) / 1000);
@@ -265,7 +265,22 @@ final class BridgeCheck {
         File dir = new File(c.getFilesDir(), "scout");
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
-        return bridge(c, p, dir, null, null, true);
+        return look(c, p, dir, null, null);
+    }
+
+    /**
+     * (v34) A quick look at one bridge; one with two ways (WB Stream, Bitrix24, DION: the quicker data channel, or the
+     * call's video) is looked at the other way too when the quicker one gets nothing back — a network may let only the
+     * video through. The result says which way carried ("mode").
+     */
+    private static JSONObject look(Context c, Profile p, File dir, Process[] carrier, int[] carrierPort) throws Exception {
+        JSONObject r = bridge(c, p, dir, carrier, carrierPort, true);
+        if (!"no_data".equals(r.optString("result")) || !"dc".equals(p.tunnelMode)) return r;
+        Profile v = Profile.find(p.link);
+        if (v == null) return r;
+        v.tunnelMode = "video";
+        JSONObject r2 = bridge(c, v, dir, carrier, carrierPort, true);
+        return "ok".equals(r2.optString("result")) ? r2.put("mode", "video") : r;
     }
 
     private static JSONObject bridge(Context c, Profile p, File dir, Process[] carrier, int[] carrierPort, boolean light) throws Exception {
