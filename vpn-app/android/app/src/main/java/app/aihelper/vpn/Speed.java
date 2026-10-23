@@ -260,7 +260,9 @@ final class Speed {
             String host = p.host;
             if (!host.matches("[0-9.]+") && !host.contains(":")) host = InetAddress.getByName(host).getHostAddress();
             File dir = c.getFilesDir();
-            File cfg = new File(dir, cfgName);
+            // (v34) a file of its own for each client: two at once (a response time and a speed by itself) wrote the same one,
+            // and one of them asked the other's port — «no answer» in a moment
+            File cfg = new File(dir, cfgName.replace(".yaml", "-" + port + ".yaml"));
             try (FileOutputStream out = new FileOutputStream(cfg)) {
                 out.write(VpnSvc.clientConfig(p, host, port).getBytes(StandardCharsets.UTF_8));
             }
@@ -278,7 +280,10 @@ final class Speed {
                     // the client ended
                 }
             }, "speed-log").start();
-            if (ok.await(12, TimeUnit.SECONDS)) return proc;
+            boolean up = ok.await(12, TimeUnit.SECONDS);
+            //noinspection ResultOfMethodCallIgnored
+            cfg.delete();  // (read when it started)
+            if (up) return proc;
             proc.destroy();
             return null;
         } catch (Exception e) {
