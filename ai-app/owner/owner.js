@@ -571,7 +571,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       const BY = [["claude", "🟠 Claude"], ["free", "🆓 Бесплатный"], ["dev", "👨‍💻 Разработчику"], ["no", "✕ Не надо"]];
       const REC = { need: "👍 нужно", maybe: "🤔 можно", low: "💤 не особо" };
       const picks = draw.picks = draw.picks || {};
-      const applyBtn = el("button", { class: "btn", text: "✅ Применить отмеченное", onclick: async () => {
+      const applyBtn = el("button", { class: "btn wide", text: "✅ Применить отмеченное", onclick: async () => {
         const items = Object.entries(picks).filter(([id, by]) => by && open.some((x) => x.id === id)).map(([id, by]) => ({ id, by }));
         if (!items.length) return toast("Отметьте у находок, кому их поручить, или «✕ Не надо».", 5000);
         const forClaude = items.filter((x) => x.by === "claude" || x.by === "free").length;
@@ -957,7 +957,17 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       } });
       const sub = !b ? "ещё не делалась — сервер сделает сам, когда изменится важное"
         : b.ok ? (b.where ? "Лежит " + b.where + "." : "Сделана.") : [String(b.text || "").replace(/^\S+\s*/, ""), "bad"];
-      const r = line("🗂", b ? `Копия: ${when(b.ts)} ${b.ok ? "✓" : "✗"}` : "Резервная копия", sub, now, null, !b ? "off" : b.ok ? "ok" : "bad");
+      // (v36) the move to a new server in one command (the newest copy from the Yandex Disk): a tap shows it
+      const move = b && b.move ? () => sheet("💾 Переезд на новый сервер", (box) => box.append(
+        el("p", { style: "margin:0 0 8px;font-size:15px", text: "На новом сервере (Ubuntu 24.04, вход root) вставьте одну строку. Она возьмёт самую "
+          + "новую копию с вашего Яндекс Диска, спросит пароль резервных копий и перенесёт всё: VPN и мосты, людей, ИИ-помощника, Claude и "
+          + "Дозор. В конце скажет, что поменять в DNS. Старый сервер для этого не нужен." }),
+        el("pre", { class: "dev-preview move-line", style: "white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:30vh;overflow:auto", text: b.move }),
+        el("div", { class: "ow-acts" }, el("button", { class: "btn", text: "📋 Скопировать строку", onclick: () => { copyText(b.move); toast("✅ Скопировано — вставьте на новом сервере", 5000); } })),
+        el("p", { class: "ow-note", text: "Эта же строка лежит на Яндекс Диске, в папке «Семейный сервер — копии», файл «Как восстановить.txt». "
+          + "Копии там зашифрованы вашим паролем резервных копий." }))) : null;
+      const r = line("🗂", b ? `Копия: ${when(b.ts)} ${b.ok ? "✓" : "✗"}` : "Резервная копия", b && b.move && typeof sub === "string" ? sub + " Переезд на новый сервер — одной командой." : sub,
+        now, move, !b ? "off" : b.ok ? "ok" : "bad");
       r.classList.add("backup-card");
       return r;
     }
