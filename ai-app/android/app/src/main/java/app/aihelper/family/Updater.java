@@ -56,6 +56,8 @@ final class Updater {
     private static final String RESULT = "app.aihelper.family.INSTALL_RESULT";
     private static final int TRIES = 6;
     private static volatile boolean busy, downloading;
+    /** The app is on the screen (MainActivity's onResume / onPause): only then the installer's own window may open. */
+    static volatile boolean shown;
     private static WeakReference<Activity> current = new WeakReference<>(null);
 
     private Updater() {}
@@ -106,7 +108,7 @@ final class Updater {
     }
 
     private static void download(Activity a, JSONObject info) {
-        if (downloading) {
+        if (downloading || quiet) {  // (the night's download writes the same file)
             Toast.makeText(a, "Обновление уже загружается", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -378,7 +380,7 @@ final class Updater {
                     @SuppressWarnings("deprecation")
                     Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
                     if (confirm == null) return;
-                    if (alive(current.get())) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    if (shown && alive(current.get())) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                     else askLater(c, confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));  // at night: a notice, not a window
                     return;
                 }
@@ -492,7 +494,8 @@ final class Updater {
         Notification.Builder b;
         if (Build.VERSION.SDK_INT >= 26) {
             if (nm.getNotificationChannel("update") == null) {
-                nm.createNotificationChannel(new NotificationChannel("update", "Обновления", NotificationManager.IMPORTANCE_DEFAULT));
+                // (quiet: it comes at night — no sound, no vibration)
+                nm.createNotificationChannel(new NotificationChannel("update", "Обновления", NotificationManager.IMPORTANCE_LOW));
             }
             b = new Notification.Builder(c, "update");
         } else {

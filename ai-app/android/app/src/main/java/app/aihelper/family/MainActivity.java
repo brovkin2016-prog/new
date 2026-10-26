@@ -173,6 +173,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        Updater.shown = true;  // (v36) the installer's «yes» may open now; in the background a notice asks instead
         web.onResume();
         // newer screens: the page is reloaded only when nothing on it would be lost (not right after the camera or the
         // files, whose photo is just arriving, nor over typed text or a recording); else they wait for the next start
@@ -214,6 +215,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        Updater.shown = false;
         web.onPause();
         super.onPause();
     }
