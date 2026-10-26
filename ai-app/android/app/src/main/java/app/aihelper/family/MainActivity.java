@@ -206,7 +206,10 @@ public class MainActivity extends Activity {
             Updater.testInstall(this);
             return;
         }
-        Updater.check(this, false);
+        NightUpdate.schedule(this);  // (v36) the app updates itself at night
+        boolean now = i != null && i.getBooleanExtra("update_now", false);  // the night's notice: «нажмите, чтобы установить»
+        if (now) i.removeExtra("update_now");
+        Updater.check(this, now);
     }
 
     @Override

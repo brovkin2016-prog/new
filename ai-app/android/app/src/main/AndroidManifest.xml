@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- (v36) Android 12+: the app's own update needs no «yes» at night -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- reminders ring on time: Android 13+ grants this to the app by itself, Android 12 asks for the other one -->
@@ -44,6 +46,10 @@
         <!-- the owner's server notifications -->
         <service
             android:name=".AlertJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service
+            android:name=".NightUpdate"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 

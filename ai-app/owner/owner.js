@@ -523,9 +523,10 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       // how it goes: on or off, checking now, the last round and the next theme
       const hm = (ts) => new Date(ts * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       const off = st.on === false;
-      const head = st.running ? "Проверяет: " + (st.theme || "сервер") + "…" : off ? "Выключен" : st.rest ? "Отдыхает до " + hm(st.rest) : "Следит";
+      const head = st.running ? (st.agent ? st.agent + ": " : "Проверяет: ") + (st.theme || "сервер") + "…" : st.applying ? "Выполняет отмеченное…"
+        : off ? "Выключен" : st.rest ? "Отдыхает до " + hm(st.rest) : "Следит";
       const sub = off ? "сам не проверяет — только кнопкой ниже"
-        : [st.at ? "проверял " + when(st.at) : "ещё не проверял", st.running ? "" : "дальше: " + st.next].filter(Boolean).join(" · ");
+        : [st.at ? "проверял " + when(st.at) : "ещё не проверял", st.running ? "" : "дальше: " + (st.next_agent ? st.next_agent + " — " : "") + st.next].filter(Boolean).join(" · ");
       const toggle = st.on === null || st.on === undefined ? null : el("button", { class: "toggle" + (off ? "" : " on"), "aria-label": "Дозор следит сам",
         "aria-pressed": off ? "false" : "true", onclick: async (e) => {
           const b = e.currentTarget;
@@ -564,17 +565,54 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       scroll.append(el("div", { class: "ow-acts" }, now, reports));
       if (st.busy && !st.running) scroll.append(el("p", { class: "ow-note", style: "margin-top:-4px", text: "Claude сейчас выполняет вашу просьбу — Дозор проверит после." }));
       // what it found: a short list (the whole text is the developer's)
-      const fixIt = (x) => el("button", { class: "ow-btn line", style: "min-height:36px;flex:none", text: "🛠 Починить", onclick: async () => {
-        cache.patrol = null;
-        cache.claude = null;
-        part = "claude"; store.set("accessPart", part); refreshTop();
-        await load();
-        if (part === "claude" && claude.box) talk({ op: "agent_patrol_pick", chat: "new", yes: [x.id], no: [] }, "🔍 Из Дозора — починить: " + clean(x.text).split(/\s+—\s+/)[0]);
+      // (v36) each finding: what it is, how much it is needed, pluses and minuses against what works now — and the owner's
+      // choice by whom: Claude on the key (Opus 5.5), the free Claude, the developer, or not at all; «Применить» carries
+      // the choices out (Claude: plan, the change, a second look; the snapshot puts it back when broken)
+      const BY = [["claude", "🟠 Claude"], ["free", "🆓 Бесплатный"], ["dev", "👨‍💻 Разработчику"], ["no", "✕ Не надо"]];
+      const REC = { need: "👍 нужно", maybe: "🤔 можно", low: "💤 не особо" };
+      const picks = draw.picks = draw.picks || {};
+      const applyBtn = el("button", { class: "btn", text: "✅ Применить отмеченное", onclick: async () => {
+        const items = Object.entries(picks).filter(([id, by]) => by && open.some((x) => x.id === id)).map(([id, by]) => ({ id, by }));
+        if (!items.length) return toast("Отметьте у находок, кому их поручить, или «✕ Не надо».", 5000);
+        const forClaude = items.filter((x) => x.by === "claude" || x.by === "free").length;
+        if (forClaude && !(await confirmBox(`Поручить Claude ${forClaude} шт.? Он проверит, сделает и перепроверит сам; перед правками — снимок, при поломке вернёт как было. Правки программ уйдут разработчику.`, "Применить"))) return;
+        applyBtn.disabled = true;
+        try {
+          const end = await panel({ op: "agent_patrol_apply", items });
+          if (end.t !== "done") { applyBtn.disabled = false; return toast("⚠️ " + end.text, 7000); }
+          for (const x of items) delete picks[x.id];
+          cache.patrol = Object.assign({}, d, { items: end.items || [], status: end.status || st });
+          toast([end.claude + end.free ? `🛠 Claude взялся (${end.claude + end.free}) — о результате придёт уведомление` : "", end.dev ? `👨‍💻 разработчику: ${end.dev}` : "",
+            end.no ? `✕ убрано: ${end.no}` : ""].filter(Boolean).join(" · "), 7000);
+          draw();
+        } catch (x) { applyBtn.disabled = false; toast(problem(x)); }
       } });
-      const item = (x) => el("div", { class: "ow-row patrol-item", "data-id": x.id, style: "align-items:flex-start" },
-        el("div", { class: "ow-t" }, el("div", { style: "font-weight:500", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + clean(x.text).split(/\s+—\s+/)[0] }),
-          el("small", { style: "font-size:12px;margin-top:3px", text: [x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ") })),
-        x.kind === "fix" && x.who === "server" ? fixIt(x) : null);
+      const paintApply = () => {
+        const n = Object.values(picks).filter(Boolean).length;
+        applyBtn.textContent = n ? `✅ Применить отмеченное (${n})` : "✅ Применить отмеченное";
+        applyBtn.disabled = !n || !!st.applying;
+      };
+      const item = (x) => {
+        const rec = x.rec && REC[x.rec];
+        const chips = el("div", { class: "chips patrol-by", style: "flex-wrap:wrap;margin:6px 0 2px;gap:6px" });
+        const paintChips = () => {
+          chips.innerHTML = "";
+          for (const [k, name] of BY) {
+            const on = picks[x.id] === k;
+            chips.append(el("button", { class: "chip" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false", style: "min-height:34px;padding:4px 10px;font-size:13px",
+              text: name + (x.by === k && k !== "no" ? " ★" : ""), title: x.by === k ? "советует Дозор" : null,
+              onclick: () => { picks[x.id] = on ? "" : k; paintChips(); paintApply(); } }));
+          }
+        };
+        paintChips();
+        return el("div", { class: "ow-row patrol-item", "data-id": x.id, style: "align-items:flex-start;flex-direction:column;gap:2px" },
+          el("div", { class: "ow-t", style: "width:100%" }, el("div", { style: "font-weight:500", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + clean(x.text).split(/\s+[—|]\s+/)[0] }),
+            el("small", { style: "font-size:12px;margin-top:3px", text: [x.agent ? ((st.agents || []).find((a) => a.id === x.agent) || {}).name : x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ") })),
+          rec || x.pros || x.cons ? el("div", { class: "patrol-why", style: "font-size:13px;line-height:1.35;color:var(--muted);width:100%" },
+            rec ? el("div", { text: rec + (x.by ? " · советует: " + ((BY.find((b) => b[0] === x.by) || [])[1] || "") : "") }) : null,
+            x.pros ? el("div", { text: "➕ " + x.pros }) : null, x.cons ? el("div", { text: "➖ " + x.cons }) : null) : null,
+          chips);
+      };
       const notes = el("button", { class: "btn", text: "📋 Разработчику", onclick: async () => {
         notes.disabled = true;
         try {
@@ -598,7 +636,9 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       if (open.length) {
         const these = open.slice().sort((p, q) => (p.kind === "fix" ? 0 : 1) - (q.kind === "fix" ? 0 : 1) || q.first - p.first);
         scroll.append(section(`Нашёл · ${these.length}`), el("div", { class: "ow-list patrol-found" }, ...these.slice(0, 30).map(item)),
-          these.length > 30 ? el("p", { class: "ow-note", text: `И ещё ${these.length - 30} — в тексте для разработчика.` }) : null);
+          these.length > 30 ? el("p", { class: "ow-note", text: `И ещё ${these.length - 30} — в тексте для разработчика.` }) : null,
+          el("div", { class: "ow-acts patrol-apply", style: "position:sticky;bottom:0;background:var(--bg);padding:8px 0" }, applyBtn));
+        paintApply();
       } else {
         scroll.append(el("div", { class: "ow-list", style: "text-align:center;padding:16px 12px" },
           el("div", { style: "font-size:26px", text: "✅" }), el("div", { style: "font-weight:500", text: "Новых находок нет" }),
@@ -608,19 +648,21 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       notes.style.flex = "2";
       wipe.style.flex = "1";
       scroll.append(el("div", { class: "ow-foot", style: "display:flex;gap:8px" }, notes, wipe),
-        el("p", { class: "ow-note", text: "Всё найденное — для разработчика: «📋 Разработчику» собирает находки, отчёты Дозора, ключи и все неполадки мостов "
-          + "в один текст. «🛠 Починить» — только у мелкой поломки на сервере: Claude покажет план." }));
+        el("p", { class: "ow-note", text: "У каждой находки выберите, кому поручить (★ — совет Дозора), и нажмите «Применить». «📋 Разработчику» собирает находки, "
+          + "отчёты Дозора, ключи, неполадки мостов и правки программ, сделанные Claude на сервере, в один текст." }));
       const sent = items.filter((x) => x.status === "sent");
       if (sent.length) scroll.append(el("details", { class: "ow-more patrol-sent" },
         el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `🛠 Чинит Claude на сервере · ${sent.length}` }), el("span", { class: "ow-go", text: "›" })),
         el("div", { class: "ow-list" }, ...sent.slice().reverse().map((x) => el("div", { class: "ow-row", style: "min-height:40px" },
           el("div", { class: "ow-t", style: "font-size:14px" }, clean(x.text).split(/\s+—\s+/)[0], el("small", { text: when(x.first) })))))));
-      const themes = st.themes && st.themes.length ? st.themes : ["ошибки и службы", "VPN и мосты", "защита", "приложение", "новые версии ИИ"];
-      scroll.append(el("details", { class: "ow-more" }, el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `Темы по кругу · ${new Set(themes).size}` }), el("span", { class: "ow-go", text: "›" })),
-        el("div", { class: "chips patrol-themes", style: "flex-wrap:wrap;margin:0 2px 8px" },
-          ...[...new Set(themes)].map((t) => el("span", { class: "chip" + (t === st.next && !off ? " on" : ""), style: "min-height:32px;padding:5px 11px;font-size:13px",
-            title: t === st.next ? "следующая" : null, text: t }))),
-        el("p", { class: "ow-note", text: "По одной теме примерно раз в час, на бесплатных моделях; фото, видео и тренды — чаще всего. Сам ничего не меняет." })));
+      // (v36) the six agents, each with its own themes
+      const agents = st.agents && st.agents.length ? st.agents : [];
+      scroll.append(el("details", { class: "ow-more" }, el("summary", { class: "ow-sec" }, el("span", { class: "grow", text: `Агенты · ${agents.length || 6}` }), el("span", { class: "ow-go", text: "›" })),
+        el("div", { class: "ow-list patrol-agents" }, ...agents.map((a) => el("div", { class: "ow-row", style: "min-height:44px" },
+          el("div", { class: "ow-t" }, el("div", { style: "font-weight:500", text: a.name + (a.name === st.next_agent && !off ? " · следующий" : "") }),
+            el("small", { style: "font-size:12px", text: a.themes.join(" · ") }))))),
+        el("p", { class: "ow-note", text: "Агенты смотрят по очереди, примерно раз в час, на бесплатных моделях; видео и фото — чаще всего. Сами ничего не меняют: "
+          + "что поручите — делает Claude на сервере (по ключу Anthropic — Opus 5.5; без ключа или денег — бесплатный)." })));
       // while it checks, the tab looks again by itself
       if (st.running) draw.tick = setTimeout(() => { if (part === "patrol" && S.tab === "vpn" && !document.hidden) load(); }, 15000);
     }
@@ -1644,6 +1686,8 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
     }
 
     // «🔥 Тренды»: the Instagram trends the family's «Я в ролике» and «Я на фото» put first; the server finds them once a day
+    // (v36) its definition was lost in an earlier rework: the row failed with no error to see and vanished
+    const coverrBad = (c) => !!(c && c.on && c.last && /ключ/.test(c.last.error || ""));  // the key refused: a new one is needed
     function trendsRow() {
       let cur = line("🔥", "Тренды для «Я в ролике»", "проверяю…", null, null, "off");
       const fill = (v) => {

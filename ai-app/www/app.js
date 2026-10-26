@@ -735,7 +735,9 @@
   // ---------- the main screen ----------
   const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼️", "Фото"], ["video", "🎬", "Видео"], ["more", "☰", "Ещё"]];
   const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото", video: "Видео", vpn: "Управление", more: "Ещё" };
-  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "🛡️", "Управление"]], TABS.slice(4)) : TABS);
+  // (v36) the family has four tabs (the owner: «чат, фото, видео и учёба»); «Ещё» — the ☰ in the header (reminders,
+  // translator, memory, settings); the owner keeps «Управление» and «Ещё» as tabs
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "🛡️", "Управление"]], TABS.slice(4)) : TABS.slice(0, 4));
   // «Управление» is not in this app: the server gives its code only to the owner's signed-in phone
   async function ownerCode() {
     try {
@@ -812,8 +814,12 @@
     const v = S.views[tab];
     S.top.innerHTML = "";
     const sub = v.sub ? v.sub() : "";
+    const family = !(S.me && S.me.panel);
+    if (family && tab === "more") S.top.append(el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => show(S.back || "chat") }));
+    else if (family) S.back = tab;
     S.top.append(el("h1", {}, TITLES[tab], sub ? el("span", { class: "sub", text: sub }) : null));
     for (const b of v.buttons ? v.buttons() : []) S.top.append(el("button", { class: "icon-btn pill", title: b[1], onclick: b[2] }, b[0]));
+    if (family && tab !== "more") S.top.append(el("button", { class: "icon-btn", text: "☰", title: "Ещё: напоминания, переводчик, настройки", "aria-label": "Ещё", onclick: () => show("more") }));
     if (v.onShow) v.onShow();
   }
   function refreshTop() { if (S.views[S.tab]) show(S.tab); }
@@ -1007,14 +1013,14 @@
         async wait(rid, again, broke) {
           const sayOnce = (t) => { if (t && t !== said) say(t); };  // the clock goes on while the words stay the same
           const offline = "📶 Нет интернета — ответ придёт, когда связь вернётся";
-          sayOnce(navigator.onLine === false ? offline : broke || (said.startsWith("⏳") || said.startsWith("📶") ? said
-            : "⏳ Связь прервалась — ответ ещё готовится и придёт сюда"));
+          // (v36) the phone's «no network» is not trusted: under a VPN (Winger switching bridges) the WebView often says
+          // «offline» while the line works — the server is asked anyway, «no internet» only when asking really fails
+          sayOnce(broke || (said.startsWith("⏳") || said.startsWith("📶") ? said : "⏳ Связь прервалась — ответ ещё готовится и придёт сюда"));
           const until = Date.now() + 2 * 3600e3;
           let pause = 1500, sent = 0;
           while (Date.now() < until) {
             await nap(pause);
             if (document.hidden) await new Promise((r) => document.addEventListener("visibilitychange", function on() { if (!document.hidden) { document.removeEventListener("visibilitychange", on); r(); } }));
-            if (navigator.onLine === false) { sayOnce(offline); pause = 15000; continue; }  // woken by «online» at once
             let r;
             try {
               r = await api("/api/job", { rid, lite: true });
@@ -1040,7 +1046,7 @@
               }
               if (e instanceof HttpError && e.status === 401) return { t: "error", text: problem(e) };
               if (!(e instanceof HttpError)) sayOnce(navigator.onLine === false ? offline : "📶 Связь прерывается — жду ответ сервера…");
-              pause = Math.min(15000, pause * 1.5);  // no network yet, or asked too often: a little later
+              pause = Math.min(15000, pause * 1.5);  // no network yet, or asked too often: a little later (woken by «online» at once)
               continue;
             }
             pause = 3000;
@@ -1601,7 +1607,7 @@
         tplOk() ? el("button", { class: "big wide", onclick: () => templatesSheet("photo", th) }, el("span", { class: "ic", text: "🎭" }),
           el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null,
         shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, el("span", { class: "ic", text: "📸" }),
-          el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до трёх) на фото по теме: море, Новый год, журнал…" }))) : null),
+          el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до четырёх) на фото по теме: море, Новый год, журнал…" }))) : null),
       S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите — я нарисую:" }),
         el("div", { class: "hints" }, DRAW_HINTS.map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.dispatchEvent(new Event("input")); ta.focus(); } })))] : null));
     const has = (op) => !!(S.me.photo_ops[op] || S.me.ai_ops[op]);
@@ -1735,7 +1741,8 @@
       sync();
     }
     function runOp(op) {
-      if (op === "animate") go("/api/animate", {}, label(op));
+      if (op === "animate") menu("Длина ролика", [["⏱️", "5 секунд — быстрее", () => go("/api/animate", { seconds: 5 }, label(op) + " · 5 с")],
+        ["🎞️", "10 секунд", () => go("/api/animate", { seconds: 10 }, label(op) + " · 10 с")]]);  // (v36) up to 10 s
       else go("/api/photo", { op }, label(op));
     }
     function send() {
@@ -1963,11 +1970,12 @@
       oninput: () => { q = search.value.trim().toLowerCase(); paint(); } });
     const chips = el("div", { class: "chips fade" });
     const grid = el("div", { class: "trend-grid" }, el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
+    const pics = el("p", { class: "muted hidden", style: "margin:0 0 8px;font-size:13px" });  // (v36) the owner: are the pictures coming
     const box = el("div", { class: "trends" }, el("h2", { class: "trend-title", text: "ТРЕНДЫ" }),
       el("p", { class: "muted", style: "margin:0 0 10px;font-size:15px", text: kind === "video"
         ? "Повторяйте актуальные видео-тренды в один клик — выберите сценарий, загрузите фото и получите готовое видео."
         : "Повторяйте фото-тренды в один клик — выберите тренд, загрузите фото и получите готовый снимок." }),
-      search, el("div", { class: "sheet-stick" }, chips), grid);
+      search, pics, el("div", { class: "sheet-stick" }, chips), grid);
     function paint() {
       if (!data) return;
       const mine = data.items.filter((t) => t.kind === kind);
@@ -1984,11 +1992,20 @@
           t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
           t.hit ? el("span", { class: "tcard-hit", text: "ХИТ" }) : null,
           t.fresh ? el("span", { class: "tcard-new", text: "НОВОЕ" }) : null,  // (a trend found on the web this week)
+          t.clip ? el("span", { class: "tcard-play", "aria-hidden": "true", text: "▶" }) : null,  // (v36) an example clip inside
           el("span", { class: "tcard-name", text: t.title })));
       }
       if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: q ? "Ничего не нашлось — попробуйте другое слово." : "В этом разделе пока пусто." }));
     }
-    api("/api/trends", {}).then((r) => { data = r; paint(); }).catch((e) => {
+    api("/api/trends", {}).then((r) => {
+      data = r;
+      const p = r.pics || {};
+      if (S.me.panel && p.all && p.drawn < p.all) {
+        pics.textContent = `🎨 Картинки карточек: ${p.drawn} из ${p.all} — дорисовываю` + (p.why ? ` (последний ответ: ${p.why})` : "");
+        pics.classList.remove("hidden");
+      }
+      paint();
+    }).catch((e) => {
       grid.innerHTML = "";
       grid.append(el("p", { class: "gal-msg", text: problem(e) }));
     });
@@ -2027,6 +2044,26 @@
       };
       const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
       const video = t.kind === "video";
+      let secs = 10;  // (v36) the clip's length: 10 s unless 5 is chosen
+      const schips = el("div", { class: "chips", style: "margin:0 0 6px" });
+      const paintSecs = () => {
+        schips.innerHTML = "";
+        for (const [k, v] of [[10, "10 секунд"], [5, "5 секунд — быстрее"]]) {
+          schips.append(el("button", { class: "chip" + (k === secs ? " on" : ""), "aria-pressed": k === secs ? "true" : "false", text: v, onclick: () => { secs = k; paintSecs(); } }));
+        }
+      };
+      paintSecs();
+      const big = el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }));
+      if (t.clip) {  // (v36) the example clip: what will be made, the card's picture brought to life
+        api("/api/trend_clip", { id: t.id }).then((r) => {
+          if (!big.isConnected && !document.body.contains(big)) return;
+          const v = el("video", { src: "data:" + r.mime + ";base64," + r.video, autoplay: "", loop: "", muted: "", playsinline: "", "aria-label": "Пример ролика" });
+          v.muted = true;
+          big.innerHTML = "";
+          big.append(v, el("span", { class: "tcard-kind", text: "пример" }));
+          v.play().catch(() => {});
+        }).catch(() => {});
+      }
       const goBtn = el("button", { class: "btn wide", text: "Повторить", onclick: async () => {
         if (photos.some((p) => !p)) { why.textContent = "Добавьте фото: " + t.photos.join(", ").toLowerCase() + "."; return; }
         if (!check.checked) { why.textContent = "Поставьте галочку: это ваши фото, или человек согласен."; return; }
@@ -2046,29 +2083,31 @@
         if (!goBtn.isConnected) return;
         close();
         if (th.name === "photo" && S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
-        await th.run("/api/trend", { trend: t.id, images, consent: true }, { role: "me", image: photos[0], text: "🔥 " + t.title });
+        await th.run("/api/trend", Object.assign({ trend: t.id, images, consent: true }, video ? { seconds: secs } : {}),
+          { role: "me", image: photos[0], text: "🔥 " + t.title + (video ? " · " + secs + " с" : "") });
       } });
       paintRows();
       box.append(
-        el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" })),
+        big,
         el("h2", { class: "trend-name" }, t.title, t.hit ? el("span", { class: "tcard-hit inline", text: "ХИТ" }) : null),
         el("p", { class: "muted", style: "margin:0 0 10px;font-size:15px", text: t.desc }),
+        video ? el("div", { class: "menu-sec", text: "Длина ролика" }) : null, video ? schips : null,
         el("div", { class: "menu-sec", text: t.photos.length > 1 ? "Ваши фото" : "Ваше фото" }), rows,
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: t.photos.length > 1 ? "Это мои фото, или люди на них согласны" : "Это моё фото, или человек согласен" })),
-          el("p", { class: "muted", style: "margin:4px 0;font-size:13px", text: video ? "Ролик будет готов за 2–5 минут, с пометкой «ИИ»." : "Обычно готово за минуту, с пометкой «ИИ»." }),
+          el("p", { class: "muted", style: "margin:4px 0;font-size:13px", text: video ? "Ролик будет готов за 2–6 минут, с пометкой «ИИ»." : "Обычно готово за минуту, с пометкой «ИИ»." }),
           why, goBtn));
     });
   }
-  // ---------- «📸 Фотосессия»: a theme (the server's list or one's own words), 1–3 people with a photo each, the shape;
-  // two pictures come into the Фото thread ----------
+  // ---------- «📸 Фотосессия»: a theme (the server's list or one's own words), 1–4 people with a photo each, the shape,
+  // 1–4 pictures (v36) — they come into the Фото thread ----------
   function shootSheet(th) {
     if (S.busy[th.name]) { toast("Подождите, предыдущее фото ещё делается"); return; }
     if (!(S.me.can || {}).shoot && !S.me.panel) { toast("Фотосессия пока не включена — её включает владелец помощника.", 5000); return; }
     const themes = S.me.shoot || {};
     const mine = S.views.photo && S.views.photo.current ? S.views.photo.current() : null;
     const photos = [mine || null];  // one row to start; the photo chosen in Фото is the first person's
-    let theme = "", aspect = "3:4";
+    let theme = "", aspect = "3:4", count = 4;  // (v36) up to 4 pictures
     sheet("📸 Фотосессия", (box, close) => {
       const why = el("div", { class: "why" });
       // (v29) one's own words first — the server's art director makes a whole scene of them; the themes as tiles under
@@ -2124,13 +2163,20 @@
           rows.append(el("div", { class: "who-row" }, slot,
             el("div", { class: "who" }, el("b", { text: who }), el("small", { text: p ? "✓ фото есть" : "лицо крупно и прямо, при хорошем свете" }))));
         });
-        addBtn.classList.toggle("hidden", photos.length >= 3);
+        addBtn.classList.toggle("hidden", photos.length >= 4);  // (v36) up to four people
       };
       const achips = el("div", { class: "chips", style: "margin:0 0 6px" });
       const paintAspect = () => {
         achips.innerHTML = "";
         for (const [k, v] of [["3:4", "Портрет"], ["1:1", "Квадрат"], ["9:16", "Сторис"]]) {
           achips.append(el("button", { class: "chip" + (k === aspect ? " on" : ""), text: v, onclick: () => { aspect = k; paintAspect(); } }));
+        }
+      };
+      const nchips = el("div", { class: "chips", style: "margin:0 0 6px" });
+      const paintCount = () => {
+        nchips.innerHTML = "";
+        for (const k of [1, 2, 3, 4]) {
+          nchips.append(el("button", { class: "chip" + (k === count ? " on" : ""), "aria-pressed": k === count ? "true" : "false", text: String(k), "aria-label": "Снимков: " + k, onclick: () => { count = k; paintCount(); } }));
         }
       };
       const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
@@ -2156,17 +2202,19 @@
         close();
         if (S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
         const title = theme ? themes[theme] + (text ? ": " + text : "") : "📸 " + text;
-        await th.run("/api/shoot", { theme: theme || undefined, text: text || undefined, images, aspect, consent: true },
+        await th.run("/api/shoot", { theme: theme || undefined, text: text || undefined, images, aspect, n: count, consent: true },
           { role: "me", image: set[0], text: title + (set.length > 1 ? " · 👥 " + set.length : "") });
       } });
       paintThemes();
       paintRows();
       paintAspect();
-      box.append(el("p", { class: "muted", style: "margin:0 0 8px;font-size:15px", text: "Опишите, какую фотосессию хотите, или выберите тему, и добавьте фото — до трёх человек. Придут 2 снимка, обычно за 1–2 минуты." }),
+      paintCount();
+      box.append(el("p", { class: "muted", style: "margin:0 0 8px;font-size:15px", text: "Опишите, какую фотосессию хотите, или выберите тему, и добавьте фото — до четырёх человек. Снимков — до четырёх, обычно за 1–3 минуты." }),
         el("div", { class: "menu-sec", text: "Кто на фото" }), rows, addBtn,
         el("div", { class: "menu-sec", text: "Какую фотосессию хотите" }), own,
         el("div", { class: "menu-sec", style: "margin-top:8px", text: "Или тема (можно вместе с описанием)" }), tchips,
         el("div", { class: "menu-sec", text: "Формат" }), achips,
+        el("div", { class: "menu-sec", text: "Сколько снимков" }), nchips,
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: "Это мои фото, или люди на них согласны" })), why, goBtn));
     });

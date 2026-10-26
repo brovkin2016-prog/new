@@ -2,6 +2,9 @@ package app.aihelper.family;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -12,8 +15,10 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
+import android.net.ConnectivityManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.LinearLayout;
@@ -32,6 +37,7 @@ import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -149,7 +155,10 @@ final class Updater {
                     a.runOnUiThread(() -> line.setText("Связь прервалась, продолжаю… (попытка " + (n + 1) + " из " + TRIES + ")"));
                     sleep(1500L * t);
                 }
-                err = fetch(a, apk, size, bar, line, stop);
+                err = fetch(apk, size, g -> a.runOnUiThread(() -> {
+                    bar.setProgress((int) Math.min(1000, g * 1000 / size));
+                    line.setText(String.format(java.util.Locale.ROOT, "%.1f из %.1f МБ", g / 1e6, size / 1e6));
+                }), stop);
                 if (err == null && apk.length() >= size) break;
             }
             if (stop.get()) err = "отменено";
@@ -185,8 +194,13 @@ final class Updater {
         }, "update-download").start();
     }
 
+    /** How much of the file is here (the dialog's bar; null at night). */
+    interface Progress {
+        void at(long got);
+    }
+
     /** One pass: continues the file from its current length (Range), or starts over when the server sends it whole. */
-    private static String fetch(Activity a, File apk, long size, ProgressBar bar, TextView line, AtomicBoolean stop) {
+    private static String fetch(File apk, long size, Progress progress, AtomicBoolean stop) {
         long have = apk.length();
         Map<String, String> h = new HashMap<>();
         if (have > 0) h.put("Range", "bytes=" + have + "-");
@@ -214,11 +228,7 @@ final class Updater {
                 try {
                     out[0].write(chunk);
                     got[0] += chunk.length;
-                    long g = got[0];
-                    a.runOnUiThread(() -> {
-                        bar.setProgress((int) Math.min(1000, g * 1000 / size));
-                        line.setText(String.format(java.util.Locale.ROOT, "%.1f из %.1f МБ", g / 1e6, size / 1e6));
-                    });
+                    if (progress != null) progress.at(got[0]);
                 } catch (Exception e) {
                     why[0] = e.getMessage();
                 }
@@ -325,6 +335,8 @@ final class Updater {
             PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             p.setAppPackageName(app.getPackageName());
             p.setSize(apk.length());
+            // (v36) Android 12+: the app updating itself needs no «yes» (UPDATE_PACKAGES_WITHOUT_USER_ACTION)
+            if (Build.VERSION.SDK_INT >= 31) p.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
             id = pi.createSession(p);
             try (PackageInstaller.Session s = pi.openSession(id)) {
                 // the file goes in and its stream is closed exactly once, before the commit
@@ -365,7 +377,9 @@ final class Updater {
                 if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                     @SuppressWarnings("deprecation")
                     Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
-                    if (confirm != null) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    if (confirm == null) return;
+                    if (alive(current.get())) c.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    else askLater(c, confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));  // at night: a notice, not a window
                     return;
                 }
                 if (status == PackageInstaller.STATUS_SUCCESS || status == PackageInstaller.STATUS_FAILURE_ABORTED) return;
@@ -401,6 +415,96 @@ final class Updater {
         };
         if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(r, new IntentFilter(RESULT), Context.RECEIVER_NOT_EXPORTED);
         else app.registerReceiver(r, new IntentFilter(RESULT));
+    }
+
+    // ---------- (v36) at night by itself (the owner: «автообновления ночью для всех») ----------
+    private static volatile boolean quiet;
+
+    /**
+     * NightUpdate's call (a job about every hour): a newer app is fetched (over Wi-Fi or another unmetered network: the
+     * family's mobile data is not spent on it) and checked as above; then between 1 and 6 at night, the screen off, on
+     * Android 12+ it is put in without a question (the app is updating itself). Where the phone still wants a «yes»
+     * (older Android, installs not allowed yet), one notice asks for it: «Обновить» in the app does the rest.
+     */
+    static void night(Context ctx) {
+        Context c = ctx.getApplicationContext();
+        SharedPreferences prefs = c.getSharedPreferences("app", Context.MODE_PRIVATE);
+        String host = prefs.getString("host", "");
+        if (host.isEmpty() || quiet || downloading) return;
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        File ready = new File(prefs.getString("nightReady", "/nonexistent"));
+        int readyCode = prefs.getInt("nightReadyCode", 0);
+        if (readyCode > BuildConfig.VERSION_CODE && ready.isFile()) {
+            PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            if (hour < 1 || hour >= 6 || pm == null || pm.isInteractive()) return;
+            if (Build.VERSION.SDK_INT < 31 || !c.getPackageManager().canRequestPackageInstalls()) {
+                if (prefs.getInt("nightAsked", 0) != readyCode) {
+                    prefs.edit().putInt("nightAsked", readyCode).apply();
+                    askLater(c, new Intent(c, MainActivity.class).putExtra("update_now", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                }
+                return;
+            }
+            prefs.edit().remove("nightReady").remove("nightReadyCode").apply();
+            Log.i("AIUPD", "night: putting in " + ready.getName());
+            String err = write(c, ready);
+            if (err != null) Log.i("AIUPD", "night: not started: " + err);
+            return;
+        }
+        long now = System.currentTimeMillis();
+        ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null || cm.isActiveNetworkMetered() || now - prefs.getLong("nightCheck", 0) < EVERY_MS) return;
+        prefs.edit().putLong("nightCheck", now).apply();
+        quiet = true;
+        try {
+            Net.setHost(c, host);
+            byte[] raw = Net.get("/app/apk.json", 20_000);
+            JSONObject info = raw == null ? null : new JSONObject(new String(raw, StandardCharsets.UTF_8));
+            if (info == null || info.optInt("code", 0) <= BuildConfig.VERSION_CODE) return;
+            long size = Math.max(1, info.optLong("size", 1));
+            File dir = new File(c.getCacheDir(), "update");
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+            File apk = new File(dir, "ai-" + info.optInt("code", 0) + ".apk");  // the same file the dialog would resume
+            String err = null;
+            for (int t = 0; t < TRIES && apk.length() < size; t++) {
+                if (t > 0) sleep(3000L * t);
+                err = fetch(apk, size, null, new AtomicBoolean());
+            }
+            if (apk.length() < size || !info.optString("sha256", "").equalsIgnoreCase(sha256(apk)) || !sameSigner(c, apk)) {
+                //noinspection ResultOfMethodCallIgnored
+                if (apk.length() >= size) apk.delete();  // a wrong file: from the start next time
+                Log.i("AIUPD", "night: " + info.optString("name") + " not ready (" + (err != null ? err : "the file does not check out") + ")");
+                return;
+            }
+            prefs.edit().putString("nightReady", apk.getPath()).putInt("nightReadyCode", info.optInt("code", 0)).apply();
+            Log.i("AIUPD", "night: " + info.optString("name") + " downloaded and checked, goes in at night with the screen off");
+        } catch (Exception e) {
+            Log.i("AIUPD", "night: " + e);
+        } finally {
+            quiet = false;
+        }
+    }
+
+    /** The phone wants a «yes» for the update while nobody is in the app: a notice that opens that question. */
+    private static void askLater(Context c, Intent open) {
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        Notification.Builder b;
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (nm.getNotificationChannel("update") == null) {
+                nm.createNotificationChannel(new NotificationChannel("update", "Обновления", NotificationManager.IMPORTANCE_DEFAULT));
+            }
+            b = new Notification.Builder(c, "update");
+        } else {
+            b = new Notification.Builder(c);
+        }
+        PendingIntent pi = PendingIntent.getActivity(c, 7, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        nm.notify(7001, b.setSmallIcon(R.drawable.ic_launcher_fg)
+                .setContentTitle("Новая версия ИИ-помощника готова")
+                .setContentText("Нажмите, чтобы установить")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build());
     }
 
     private static byte[] readAll(File f) throws java.io.IOException {
