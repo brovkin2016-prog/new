@@ -149,9 +149,15 @@ jobs:
               family: "test-pass-123"
           EOT
           HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy-obfs.yaml > hy-obfs.log 2>&1 &
+          # (v37) a gecko door (salamander with the handshake cut into pieces of random size) on a port of its own
+          sed -e 's/^listen: :4444/listen: :4446/' -e 's/type: salamander/type: gecko/' -e 's/^  salamander:/  gecko:/' \
+            -e 's/Salam-test-0123456789/Gecko-test-0123456789/' hy-obfs.yaml > hy-gecko.yaml
+          grep -q "type: gecko" hy-gecko.yaml && grep -q "^  gecko:" hy-gecko.yaml
+          HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy-gecko.yaml > hy-gecko.log 2>&1 &
           sleep 3
           grep -q "server up and running" hy.log
           grep -q "server up and running" hy-obfs.log
+          grep -q "server up and running" hy-gecko.log
 
       - name: Enable KVM
         run: |

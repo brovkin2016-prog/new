@@ -8,6 +8,7 @@ import (
 func TestConfigs(t *testing.T) {
 	srv, _ := ParseLink("hysteria2://me:pw@1.2.3.4:443/?sni=vpn.sites-s.ru#s")
 	hop, _ := ParseLink("hysteria2://me:pw@1.2.3.4:20000-30000,40000/?sni=vpn.sites-s.ru&obfs=salamander&obfs-password=x#h")
+	gecko, _ := ParseLink("hysteria2://me:pw@1.2.3.4:8453/?sni=vpn.sites-s.ru&obfs=gecko&obfs-password=y#g")
 	br, _ := ParseLink("winger-bridge://telemost?link=https%3A%2F%2Ftelemost.yandex.ru%2Fj%2F12345678901234#b")
 	own := []string{"winger.exe", "winger-relay.exe"}
 	cases := map[string]EngineOptions{
@@ -18,6 +19,7 @@ func TestConfigs(t *testing.T) {
 		"bridge, chosen programs": {Profile: br, SocksPort: 47802, ProbePort: 47801, Own: own, Tun: true, OnlyApps: []string{"telegram.exe"},
 			Home: "vpn.sites-s.ru"},
 		"port hopping and obfs":     {Profile: hop, ProbePort: 47801, Own: own, Tun: true},
+		"gecko door (v37)":          {Profile: gecko, ProbePort: 47801, Own: own, Tun: true},
 		"bridge":                    {Profile: br, SocksPort: 47802, ProbePort: 47801, Own: own, Tun: true},
 		"a look at the server only": {Profile: srv, ProbePort: 47803},
 	}
@@ -54,6 +56,14 @@ func TestConfigs(t *testing.T) {
 	px := c["outbounds"].([]any)[0].(map[string]any)
 	if ports := px["server_ports"].([]string); len(ports) != 2 || ports[0] != "20000:30000" || ports[1] != "40000:40000" || px["password"] != "me:pw" {
 		t.Fatalf("%v", px)
+	}
+	// (v37) the next port after 15–45 s at random; behind obfs the look of Chrome off (it would cut the idle wait to 30 s)
+	if px["hop_interval"] != "15s" || px["hop_interval_max"] != "45s" || px["disable_chrome_parrot"] != true {
+		t.Fatalf("hop/parrot: %v", px)
+	}
+	gx := Config(cases["gecko door (v37)"])["outbounds"].([]any)[0].(map[string]any)
+	if ob := gx["obfs"].(map[string]any); ob["type"] != "gecko" || ob["password"] != "y" || gx["disable_chrome_parrot"] != true || gx["hop_interval"] != nil {
+		t.Fatalf("gecko: %v", gx)
 	}
 	// this program's own checks come in by the local port: through the connection, before «own traffic goes straight»
 	rules := Config(cases["server, all programs"])["route"].(map[string]any)["rules"].([]any)

@@ -65,6 +65,7 @@ func Config(o EngineOptions) map[string]any {
 				}
 			}
 			proxy["server_ports"] = ports
+			proxy["hop_interval"], proxy["hop_interval_max"] = "15s", "45s" // (v37) the next port after 15–45 s at random
 		} else {
 			port, _ := strconv.Atoi(p.Ports)
 			proxy["server_port"] = port
@@ -74,8 +75,11 @@ func Config(o EngineOptions) map[string]any {
 			name = p.Host
 		}
 		proxy["tls"] = map[string]any{"enabled": true, "server_name": name, "insecure": p.Insecure}
-		if p.Obfs == "salamander" {
-			proxy["obfs"] = map[string]any{"type": "salamander", "password": p.ObfsPassword}
+		// (v37) gecko too (salamander with the handshake cut into pieces of random size); behind either the look of
+		// Chrome shows nothing and only cuts the idle wait to 30 s — off
+		if p.Obfs == "salamander" || p.Obfs == "gecko" {
+			proxy["obfs"] = map[string]any{"type": p.Obfs, "password": p.ObfsPassword}
+			proxy["disable_chrome_parrot"] = true
 		}
 	}
 	var inbounds []any

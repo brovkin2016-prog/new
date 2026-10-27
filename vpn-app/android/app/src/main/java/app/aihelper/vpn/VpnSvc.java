@@ -499,15 +499,20 @@ public final class VpnSvc extends VpnService {
         y.append("auth: ").append(q(p.auth)).append('\n');
         y.append("tls:\n  sni: ").append(q(p.serverName())).append("\n  insecure: ").append(p.insecure).append('\n');
         if (p.pin != null && !p.pin.isEmpty()) y.append("  pinSHA256: ").append(q(p.pin)).append('\n');
-        if ("salamander".equalsIgnoreCase(p.obfs)) {
-            y.append("obfs:\n  type: salamander\n  salamander:\n    password: ").append(q(p.obfsPassword == null ? "" : p.obfsPassword)).append('\n');
+        // (v37) gecko: salamander and the handshake cut into pieces of random size (a door of its own on the server)
+        String obfs = "salamander".equalsIgnoreCase(p.obfs) ? "salamander" : "gecko".equalsIgnoreCase(p.obfs) ? "gecko" : null;
+        if (obfs != null) {
+            y.append("obfs:\n  type: ").append(obfs).append("\n  ").append(obfs).append(":\n    password: ")
+                    .append(q(p.obfsPassword == null ? "" : p.obfsPassword)).append('\n');
         }
+        // (v37) port hopping: the next port after 15–45 s at random, not every 30 s like a clock
+        if (p.ports.contains("-") || p.ports.contains(",")) y.append("transport:\n  udp:\n    minHopInterval: 15s\n    maxHopInterval: 45s\n");
         // a phone that dozes a little (Xiaomi, Android power saving) keeps its connection: the server waits as long.
         // (v37) Hysteria 2.11+ looks like Chrome by default and then fixes the wait at 30 s: behind salamander nothing of
-        // it shows anyway, so there it is off and the 90 s hold; a plain door keeps the look (its keep-alive every 10 s
+        // it shows anyway, so there (and behind gecko) it is off and the 90 s hold; a plain door keeps the look (its keep-alive every 10 s
         // and the processor kept awake hold it)
         y.append("quic:\n  keepAlivePeriod: 10s\n  maxIdleTimeout: 90s\n");
-        if ("salamander".equalsIgnoreCase(p.obfs)) y.append("  disableChromeParrot: true\n");
+        if (obfs != null) y.append("  disableChromeParrot: true\n");
         y.append("fastOpen: true\n");
         y.append("socks5:\n  listen: 127.0.0.1:").append(port).append('\n');
         return y.toString();

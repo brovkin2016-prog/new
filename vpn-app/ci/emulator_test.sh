@@ -275,6 +275,25 @@ adb shell am start -n $ACT --es test_select Тест >/dev/null
 sleep 1
 echo "salamander door: kept once, not chosen by itself, connected through it"
 
+# (v37) a gecko door (the test server's third hysteria, gecko on 4446): Winger's client speaks it
+step "a gecko door (v37): Winger connects through it"
+GECKO='hysteria2://family:test-pass-123@10.0.2.2:4446/?sni=vpn.test.local&insecure=1&obfs=gecko&obfs-password=Gecko-test-0123456789#Геккон'
+adb shell "am start -a android.intent.action.VIEW -d '$GECKO' -n $ACT" >/dev/null
+sleep 2
+adb shell am start -n $ACT --es test_select Геккон >/dev/null
+sleep 1
+mark
+adb shell am start -n $ACT --ez test_connect true >/dev/null
+wait_since "connected via 10.0.2.2" 60 || fail "no connection through the gecko door"
+grep -q "client connected" /tmp/t/hy-gecko.log || fail "the gecko server saw no connection"
+mark
+adb shell am start -n $ACT --ez test_disconnect true >/dev/null
+wait_since "stopped" 20 || fail "did not switch off (gecko door)"
+adb shell am start -n $ACT --es test_remove Геккон >/dev/null  # the steps below count the connections there are
+adb shell am start -n $ACT --es test_select Тест >/dev/null
+sleep 1
+echo "gecko door: connected through it"
+
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 step "a real update of the app over itself: the next build (version + 1) through the app's own i"
 # Android's «install the update?» answered by a tap — the way a phone gets every update
