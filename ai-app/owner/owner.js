@@ -880,6 +880,17 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           box.append(el("div", { class: "chips", style: "margin:0 0 10px;flex-wrap:wrap" },
             chip(!d.on_claude, "🆓 Бесплатные", { op: "agent_engine", engine: "free" }), chip(!!d.on_claude, "🟠 Claude", { op: "agent_engine", engine: "claude" })));
         }
+        if (d.paid_key) {  // (v37) Claude Code on the key, end to end: what the last look said, and a look now
+          const p = d.probe || {};
+          const when = p.at ? new Date(p.at * 1000).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+          const said = !p.at ? "Claude по ключу ещё не проверялся" : p.ok ? "✅ Claude по ключу отвечает" : "⚠️ Claude по ключу не ответил";
+          box.append(el("div", { class: "ow-list claude-probe" }, line("🧪", said, p.at ? (p.ok ? "проверено " + when : when + " · " + (p.why || "")) : "одно слово от Haiku, доли цента",
+            el("button", { class: "ow-btn line", text: "Проверить", onclick: async (e) => {
+              e.target.disabled = true;
+              try { await panel({ op: "agent_probe" }); toast("Проверяю Claude по ключу — откройте это окно снова через минуту"); }
+              catch (err) { toast(problem(err)); e.target.disabled = false; }
+            } }), null, p.at && !p.ok ? "warn" : null)));
+        }
         if (d.paid_key && d.on_claude) {
           box.append(el("div", { class: "chips", style: "margin:0 0 10px;flex-wrap:wrap" },
             chip((d.model || "auto") === "auto", "Авто", { op: "agent_model", model: "auto" }),
