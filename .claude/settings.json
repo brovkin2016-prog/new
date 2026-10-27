@@ -3,5 +3,22 @@
     "BASH_MAX_OUTPUT_LENGTH": "15000",
     "IMPECCABLE_NO_TELEMETRY": "1",
     "DO_NOT_TRACK": "1"
+  },
+  "permissions": {
+    "deny": [
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(curl * | sh:*)",
+      "Bash(curl * | bash:*)",
+      "Bash(wget * | sh:*)",
+      "Bash(sudo:*)",
+      "Bash(chmod 777:*)",
+      "Bash(ssh:*)"
+    ]
   }
 }
