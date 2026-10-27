@@ -1,3 +1,7 @@
-https://docs.viggle.ai/v1/guides/quickstart-image.md
-https://docs.viggle.ai/v1/api-reference/images/create.md (reference|image|prompt|resolution|aspect|seed|model|n\b|202|200|status|id)
-https://docs.viggle.ai/v1/api-reference/images/get.md (status|images|url|error|ready)
+# v37: the Spaces' own API (names, inputs) before they are called from the server
+https://lightricks-ltx-2-5.hf.space/gradio_api/info
+https://hugging-apps-minimax-h3-character-swap-lora.hf.space/gradio_api/info
+https://hugging-apps-bfs-best-face-swap.hf.space/gradio_api/info
+https://briaai-fibo-2-0-editing.hf.space/gradio_api/info
+https://briaai-fibo-edit.hf.space/gradio_api/info
+https://lightricks-ltx-2-3.hf.space/gradio_api/info
