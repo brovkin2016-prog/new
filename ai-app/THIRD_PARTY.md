@@ -6,3 +6,5 @@
   Ограничения лицензии весов действуют и на результат распознавания.
 - **moli** (v37, поиск: страницы, которые рисуют скрипты) — Apache-2.0 или MIT, https://github.com/lexmount/moli, выпуск
   v1.1.19, проверяется по SHA-256; лицензии лежат рядом с программой на сервере (/opt/aibot/moli/).
+- **anydoc** (v37, «Учёба»: старые .doc/.ppt/.xls, .xlsx, OpenDocument, RTF в текст) — MIT, https://github.com/firecrawl/anydoc,
+  выпуск 0.2.4 (пакет firecrawl-anydoc), колесо сверяется по SHA-256, из исходников не собирается.

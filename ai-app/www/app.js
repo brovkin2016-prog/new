@@ -1438,7 +1438,7 @@
         ["📷", "Камера", async () => { const f = await pickFile("image/*", true); if (f) { image = f; sync(); } }],
         ["🖼️", "Фото из галереи", async () => { const f = await pickFile("image/*"); if (f) { image = f; sync(); } }],
         ["📄", "Документ: PDF, Word, текст", async () => {
-          const f = await pickFile(".pdf,.docx,.pptx,.epub,.txt,.md,.csv,.json,.html,text/*,application/pdf");
+          const f = await pickFile(".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.odt,.ods,.odp,.rtf,.epub,.txt,.md,.csv,.json,.html,text/*,application/pdf");
           if (f) { if (f.size > 14e6) toast("Файл больше 14 МБ — возьмите поменьше"); else { doc = f; sync(); } }
         }],
         ["💡", "Готовые задачи", ideasMenu],
