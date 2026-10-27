@@ -1580,7 +1580,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
 
     // ---- «🔑 Ключи»: every key of the helper and Claude in one place — which are in, which are not, what each is for ----
     const KEY_SITE = {  // where each key is made
-      dahl: "https://inference.dahl.global", orca: "https://orcarouter.ai", nvidia: "https://build.nvidia.com",
+      dahl: "https://inference.dahl.global", nvidia: "https://build.nvidia.com",
       zhipu: "https://open.bigmodel.cn", openrouter: "https://openrouter.ai/keys",
       groq: "https://console.groq.com/keys", exa: "https://dashboard.exa.ai/api-keys", giga: "https://developers.sber.ru/studio",
       cf: "https://dash.cloudflare.com",
