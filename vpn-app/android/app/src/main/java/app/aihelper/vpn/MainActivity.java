@@ -656,7 +656,10 @@ public class MainActivity extends Activity implements State.Listener {
         if (testPick != null) pickApps(false, testPick);
         String testBridge = BuildConfig.DEBUG ? i.getStringExtra("test_bridge") : null;  // the emulator test only
         if (testBridge != null) add(testBridge);
-        if (BuildConfig.DEBUG && i.hasExtra("test_white")) Scout.testWhite(i.getBooleanExtra("test_white", false));  // (the test)
+        if (BuildConfig.DEBUG && i.hasExtra("test_white")) {  // (the test) a white-list made or undone; nothing «tapped by hand»
+            Scout.testWhite(i.getBooleanExtra("test_white", false));  // just now (a tap a step before would be tried first)
+            VpnSvc.picked(null);
+        }
         if (BuildConfig.DEBUG && i.hasExtra("test_auto")) Apps.setAutoBridge(this, i.getBooleanExtra("test_auto", true));  // (the test)
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_connect", false)) connect();   // the emulator test only
         if (BuildConfig.DEBUG && i.getBooleanExtra("test_install", false)) Updater.testInstall(this);
