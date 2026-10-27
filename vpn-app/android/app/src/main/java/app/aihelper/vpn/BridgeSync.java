@@ -95,7 +95,7 @@ final class BridgeSync {
                 // the owner's login: «🛟 Спасение сервера» on the screen (kept, so it is there when the server's app is broken)
                 if (js.has("owner")) c.getSharedPreferences("vpn", Context.MODE_PRIVATE).edit().putBoolean("owner", js.optBoolean("owner")).apply();
                 Profile main = Profile.parse(js.optString("link")), hop = Profile.parse(js.optString("hop"));
-                changed = main != null && take(c, login, main, hop, Profile.parse(js.optString("obfs")));
+                changed = main != null && take(c, login, main, hop, Profile.parse(js.optString("obfs")), Profile.parse(js.optString("gecko")));
             }
             h.disconnect();
             return changed;
@@ -108,14 +108,18 @@ final class BridgeSync {
     /**
      * What the server gave for this login: its links renewed in place when the server moved (true then), and its
      * salamander door («маскировка»: Hysteria with salamander on its own port) kept as one more connection — after the
-     * renewal, so a door already there (at the server's old address too) is renewed in place, not added again.
+     * renewal, so a door already there (at the server's old address too) is renewed in place, not added again. (v37) The
+     * gecko door («геккон»: salamander with the handshake cut into pieces of random size, its own port) the same way.
      */
-    static boolean take(Context c, String login, Profile main, Profile hop, Profile door) {
+    static boolean take(Context c, String login, Profile main, Profile hop, Profile door, Profile gecko) {
         if (door != null && (door.bridge || !"salamander".equalsIgnoreCase(door.obfs) || !login.equals(door.auth))) door = null;
-        boolean changed = Profile.renew(c, login, main, hop, door);
+        if (gecko != null && (gecko.bridge || !"gecko".equalsIgnoreCase(gecko.obfs) || !login.equals(gecko.auth))) gecko = null;
+        boolean changed = Profile.renew(c, login, main, hop, door, gecko);
         if (changed) Diag.i(c, "the family server moved: its link renewed");
         boolean kept = door != null && Profile.keep(c, door);
         if (kept) Diag.i(c, "the server's salamander door kept as a connection");
+        boolean keptGecko = gecko != null && Profile.keep(c, gecko);
+        if (keptGecko) Diag.i(c, "the server's gecko door kept as a connection");
         return changed;
     }
 

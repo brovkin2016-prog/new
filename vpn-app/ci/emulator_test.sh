@@ -275,11 +275,17 @@ adb shell am start -n $ACT --es test_select Тест >/dev/null
 sleep 1
 echo "salamander door: kept once, not chosen by itself, connected through it"
 
-# (v37) a gecko door (the test server's third hysteria, gecko on 4446): Winger's client speaks it
-step "a gecko door (v37): Winger connects through it"
+# (v37) the server's gecko door (the test server's third hysteria, gecko on 4446): kept once as a connection, beside the
+# salamander one, not chosen by itself — and Winger's client speaks it
+step "a gecko door (v37): kept once as a connection, Winger connects through it"
 GECKO='hysteria2://family:test-pass-123@10.0.2.2:4446/?sni=vpn.test.local&insecure=1&obfs=gecko&obfs-password=Gecko-test-0123456789#Геккон'
-adb shell "am start -a android.intent.action.VIEW -d '$GECKO' -n $ACT" >/dev/null
-sleep 2
+mark
+adb shell "am start -n $ACT --es test_door '$GECKO'" >/dev/null
+wait_since "door: kept true · chosen «Тест»" 20 || fail "the gecko door was not kept (or it took the choice)"
+since | grep -q "the server's gecko door kept as a connection" || fail "the gecko door not taken as the gecko one"
+mark
+adb shell "am start -n $ACT --es test_door '$GECKO'" >/dev/null
+wait_since "door: kept false" 20 || fail "the same gecko door was added twice"
 adb shell am start -n $ACT --es test_select Геккон >/dev/null
 sleep 1
 mark

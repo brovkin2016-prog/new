@@ -152,7 +152,7 @@ func TestRenewedMeanwhileIsFound(t *testing.T) {
 	if e.renewedMeanwhile(old) != nil {
 		t.Fatal("not renewed, yet something was found")
 	}
-	if !st.Renew("u:k", mustParse(t, "hysteria2://u:k@3.3.3.3:443/?sni=vpn.example.ru#Дом"), nil, nil) {
+	if !st.Renew("u:k", mustParse(t, "hysteria2://u:k@3.3.3.3:443/?sni=vpn.example.ru#Дом"), nil, nil, nil) {
 		t.Fatal("not renewed")
 	}
 	if got := e.renewedMeanwhile(old); got == nil || got.Host != "3.3.3.3" || got.Name != "Дом" {

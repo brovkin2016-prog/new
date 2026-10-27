@@ -252,7 +252,7 @@ func TestSalamanderDoorKeptAndRenewedApart(t *testing.T) {
 	if all := st.Profiles(); len(all) != 2 || st.Get().Current != 0 || all[1].Obfs != "salamander" || all[1].Name != "Маскировка" {
 		t.Fatalf("the door beside the chosen server, not chosen: %+v", all)
 	}
-	if st.Renew("u:k", mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"), nil, nil) {
+	if st.Renew("u:k", mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"), nil, nil, nil) {
 		t.Fatal("nothing new, yet renewed")
 	}
 	if all := st.Profiles(); all[1].Obfs != "salamander" || all[1].Ports != "8443" {
@@ -260,13 +260,35 @@ func TestSalamanderDoorKeptAndRenewedApart(t *testing.T) {
 	}
 	main := mustParse(t, "hysteria2://u:k@3.3.3.3:443/?sni=vpn.example.ru#x")
 	moved := mustParse(t, "hysteria2://u:k@3.3.3.3:8443/?sni=vpn.example.ru&obfs=salamander&obfs-password=Salam-0123456789abc#Маскировка")
-	if !st.Renew("u:k", main, nil, moved) || st.Keep(moved) {
+	if !st.Renew("u:k", main, nil, moved, nil) || st.Keep(moved) {
 		t.Fatal("the server moved: renewed in place, the door not added again")
 	}
 	all := st.Profiles()
 	if len(all) != 2 || all[0].Host != "3.3.3.3" || all[0].Obfs != "" || all[0].Name != "Дом" ||
 		all[1].Host != "3.3.3.3" || all[1].Ports != "8443" || all[1].Obfs != "salamander" || all[1].Name != "Маскировка" {
 		t.Fatalf("each took its own new link, names kept: %+v %+v", all[0], all[1])
+	}
+}
+
+// (v37) the gecko door beside the salamander one: each renewed with its own new link, neither given the other's
+func TestGeckoDoorRenewedApart(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"))
+	st.Keep(mustParse(t, "hysteria2://u:k@1.1.1.1:8443/?sni=vpn.example.ru&obfs=salamander&obfs-password=Salam-0123456789abc#Маскировка"))
+	gecko := mustParse(t, "hysteria2://u:k@1.1.1.1:8444/?sni=vpn.example.ru&obfs=gecko&obfs-password=Gecko-0123456789abc#Геккон")
+	if !st.Keep(gecko) || st.Keep(gecko) {
+		t.Fatal("the gecko door: kept once, not twice")
+	}
+	main := mustParse(t, "hysteria2://u:k@3.3.3.3:443/?sni=vpn.example.ru#x")
+	door := mustParse(t, "hysteria2://u:k@3.3.3.3:8443/?sni=vpn.example.ru&obfs=salamander&obfs-password=Salam-0123456789abc#x")
+	moved := mustParse(t, "hysteria2://u:k@3.3.3.3:8444/?sni=vpn.example.ru&obfs=gecko&obfs-password=Gecko-0123456789abc#x")
+	if !st.Renew("u:k", main, nil, door, moved) {
+		t.Fatal("the server moved: not renewed")
+	}
+	all := st.Profiles()
+	if len(all) != 3 || all[1].Obfs != "salamander" || all[1].Ports != "8443" || all[1].Host != "3.3.3.3" ||
+		all[2].Obfs != "gecko" || all[2].Ports != "8444" || all[2].Host != "3.3.3.3" || all[2].Name != "Геккон" {
+		t.Fatalf("each door its own link, names kept: %+v", all)
 	}
 }
 

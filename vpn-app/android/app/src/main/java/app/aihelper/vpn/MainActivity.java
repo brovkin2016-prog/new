@@ -600,16 +600,17 @@ public class MainActivity extends Activity implements State.Listener {
         String testRenew = BuildConfig.DEBUG ? i.getStringExtra("test_renew") : null;  // the emulator test only
         if (testRenew != null) {
             Profile f = Profile.parse(testRenew);
-            boolean renewed = f != null && Profile.renew(this, f.auth, f, null, null);
+            boolean renewed = f != null && Profile.renew(this, f.auth, f, null, null, null);
             Profile now = Profile.chosen(this);
             Diag.i(this, "renew: " + renewed + " · chosen «" + (now == null ? "" : now.name) + "» " + (now == null ? "" : now.link.contains("moved=1")));
             changed();
         }
         String testDoor = BuildConfig.DEBUG ? i.getStringExtra("test_door") : null;  // the emulator test only
-        if (testDoor != null) {  // the server's answer with its salamander door beside the chosen server's link
+        if (testDoor != null) {  // the server's answer with its salamander (or, v37, gecko) door beside the chosen server's link
             Profile f = Profile.chosen(this), door = Profile.parse(testDoor);
             int before = Profile.all(this).size();
-            if (f != null && door != null) BridgeSync.take(this, door.auth, f, null, door);
+            boolean gecko = door != null && "gecko".equalsIgnoreCase(door.obfs);
+            if (f != null && door != null) BridgeSync.take(this, door.auth, f, null, gecko ? null : door, gecko ? door : null);
             Profile now = Profile.chosen(this);
             Diag.i(this, "door: kept " + (Profile.all(this).size() > before) + " · chosen «" + (now == null ? "" : now.name) + "»");
             changed();
