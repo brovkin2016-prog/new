@@ -1444,6 +1444,32 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       }
       return { color: "var(--muted)", short: "⚡ «Я в ролике» в HD: готовится — пара минут.", long: "⚡ «Я в ролике» в HD готовится в вашем аккаунте — пара минут." };
     }
+    // (v37, the audit) a read-only token of the same account for other people's Spaces: their code may see the token they
+    // are given, and one with the right to write could change the owner's repositories (the own HD Space among them)
+    function readTokenBox(v, close, fill) {
+      const rin = el("input", { class: "input hf-read", placeholder: "hf_… (тип Read)", autocomplete: "off", spellcheck: "false" });
+      return el("div", { class: "card hf-read-card", style: "margin-top:14px;font-size:14px;line-height:1.45" },
+        el("b", { text: "🔒 Токен для чужих сервисов" }),
+        el("div", { style: "margin:4px 0 8px;color:" + (v.read ? "var(--ok-ink, inherit)" : v.role === "write" ? "var(--danger-ink)" : "var(--muted)"),
+          text: v.read ? "✅ Подключён: чужим сервисам (оживление, тренды) уходит токен только для чтения."
+            : v.role === "write" ? "⚠️ Сейчас чужим сервисам уходит ваш токен с правом записи. Безопаснее добавить второй — тип Read: минуты те же, а менять ваши файлы на Hugging Face по нему нельзя."
+            : "Можно добавить второй токен — тип Read: чужим сервисам будет уходить он." }),
+        v.read ? "" : el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens/new?tokenType=read",
+          style: "display:block;text-align:center;text-decoration:none;margin-bottom:8px", text: "🔑 Получить токен Read" }),
+        v.read ? "" : rin,
+        v.read ? el("button", { class: "btn line wide", style: "margin-top:4px", text: "Убрать токен Read", onclick: async () => {
+          try { const end = await panel({ op: "hf_read_off" }); close(); fill(end); toast("Токен Read убран"); } catch (e) { toast(problem(e)); }
+        } }) : el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ Подключить токен Read", onclick: async (e) => {
+          const b = e.currentTarget;
+          if (!rin.value.trim()) { toast("Сначала вставьте токен"); return; }
+          busyBtn(b, "⏳ Проверяю токен…");
+          try {
+            const end = await panel({ op: "hf_read_set", token: rin.value.trim() });
+            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
+            close(); fill(end); toast("✅ Токен Read подключён: чужим сервисам уходит только он", 5000);
+          } catch (x) { toast(problem(x)); freeBtn(b); }
+        } }));
+    }
     function videoSetup(v, fill) {
       sheet("🎬 Видео из фото", (box, close) => {
         const inp = el("input", { class: "input", placeholder: "hf_…", autocomplete: "off", spellcheck: "false" });
@@ -1478,6 +1504,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
               toast(`✅ Подключено${end.name ? ": " + end.name : ""}. Видео из фото — во вкладке «🎬 Видео»: «🖼️ Оживить фото»`, 5000);
             } catch (x) { toast(problem(x)); freeBtn(b); }
           } }),
+          v.on ? readTokenBox(v, close, fill) : "",
           v.on && v.write ? el("button", { class: "btn line wide", style: "margin-top:14px", text: "🔄 Проверить HD-сервис", onclick: async (e) => {
             const b = e.currentTarget;
             busyBtn(b, "Проверяю… до минуты");
