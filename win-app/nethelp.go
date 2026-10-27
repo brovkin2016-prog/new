@@ -130,6 +130,16 @@ func Ping(probePort int, timeout time.Duration) int {
 // Speed, as the phone measures it: Mbit/s over 8 seconds of download counted from its first byte, and the ms to that
 // first byte (0, 0 when nothing came).
 func Speed(probePort int) (float64, int) {
+	return speedOver(probePort, 8*time.Second, 0)
+}
+
+// BridgeSpeed (v38): a bridge's first seconds are a burst (the call's buffers fill — Bitrix showed 20 Mbit/s where it
+// carried about one): 12 seconds, counted from the 3rd on, as the phone does.
+func BridgeSpeed(probePort int) (float64, int) {
+	return speedOver(probePort, 12*time.Second, 3*time.Second)
+}
+
+func speedOver(probePort int, span, skip time.Duration) (float64, int) {
 	c := client(probePort, 30*time.Second)
 	t0 := time.Now()
 	r, err := c.Get("https://speed.cloudflare.com/__down?bytes=50000000")
@@ -152,15 +162,22 @@ func Speed(probePort int) (float64, int) {
 			break
 		}
 	}
-	for time.Since(first) < 8*time.Second {
+	from, fromGot := first, int64(0)
+	for time.Since(first) < span {
 		k, err := r.Body.Read(buf)
 		got += int64(k)
+		if skip > 0 && from == first && time.Since(first) >= skip {
+			from, fromGot = time.Now(), got
+		}
 		if err != nil {
 			break
 		}
 	}
-	sec := max(0.2, time.Since(first).Seconds())
-	return float64(got) * 8 / 1e6 / sec, max(1, int(first.Sub(t0).Milliseconds()))
+	if from == first || time.Since(from) < time.Second { // too little after the burst to tell: all of it
+		from, fromGot = first, 0
+	}
+	sec := max(0.2, time.Since(from).Seconds())
+	return float64(got-fromGot) * 8 / 1e6 / sec, max(1, int(first.Sub(t0).Milliseconds()))
 }
 
 // FreePort: a free TCP port on this computer.

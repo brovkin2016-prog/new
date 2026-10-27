@@ -1,9 +1,11 @@
 package bitrix
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,6 +37,8 @@ type PullClient struct {
 
 	onUsersAnswered func([]string)
 	onUserLeave     func(string)
+	// the joiner's own dialer (on Android: names resolved by the app — Go's resolver asks [::1]:53 there and fails)
+	dial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 func NewPullClient(cfg PullConfigResult, ua, origin string, logFn func(string, ...any)) *PullClient {
@@ -44,6 +48,11 @@ func NewPullClient(cfg PullConfigResult, ua, origin string, logFn func(string, .
 func (p *PullClient) SetOnUsersAnswered(fn func([]string)) { p.onUsersAnswered = fn }
 
 func (p *PullClient) SetOnUserLeave(fn func(string)) { p.onUserLeave = fn }
+
+// SetDialContext: how the connection is made (the joiner's own, as its signalling uses)
+func (p *PullClient) SetDialContext(fn func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	p.dial = fn
+}
 
 func (p *PullClient) dialURL() string {
 	q := url.Values{}
@@ -70,7 +79,10 @@ func (p *PullClient) connect() error {
 	if p.origin != "" {
 		headers.Set("Origin", p.origin)
 	}
-	dialer := headless.ChromeWindows.WebSocketDialer(headless.TLSOptions{})
+	dialer := headless.ChromeWindows.WebSocketDialer(headless.TLSOptions{DialContext: p.dial})
+	if p.dial != nil {
+		dialer.NetDialContext = p.dial
+	}
 	conn, resp, err := dialer.Dial(p.dialURL(), headers)
 	if err != nil {
 		if resp != nil {

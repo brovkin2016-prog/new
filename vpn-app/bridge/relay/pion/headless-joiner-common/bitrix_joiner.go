@@ -296,6 +296,7 @@ func (j *BitrixHeadlessJoiner) startKickWatch(c *bitrix.Client, sig *bitrix.Sign
 		return
 	}
 	pull := bitrix.NewPullClient(pc, userAgent, j.portal, j.logFn)
+	pull.SetDialContext(j.makeDialContext()) // (the names through the app on Android, as the call's own connections)
 	pull.SetOnUserLeave(func(uid string) {
 		if uid != selfID {
 			return

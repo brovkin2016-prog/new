@@ -688,6 +688,9 @@ func (e *Engine) SpeedOf(p *Profile) (string, error) {
 		}
 	}
 	mbit, ms := Speed(port)
+	if p.Bridge {
+		mbit, ms = BridgeSpeed(port)
+	}
 	line := "⚡ ничего не скачалось"
 	if mbit > 0 {
 		line = strings.Replace(fmt.Sprintf("⚡ %.1f Мбит/с · %d мс", mbit, ms), ".", ",", 1)

@@ -340,7 +340,7 @@ final class BridgeCheck {
                 return o.put("result", "no_data").put("restarting", true);
             }
             if (light) return o.put("result", "ok").put("ping_ms", best);
-            double[] s = Speed.download(socks);
+            double[] s = Speed.bridgeDownload(socks);  // (v38: past the first seconds' burst)
             o.put("result", "ok").put("ping_ms", best).put("mbps", Math.round(s[0] * 10) / 10.0).put("first_byte_ms", Math.round(s[1]));
             if (carrier[0] != null) carrier[0].destroy();
             carrier[0] = proc;

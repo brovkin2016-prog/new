@@ -32,6 +32,9 @@ final class Speed {
     private static final long SHORT_MS = 4000;
     static final long AUTO_ON = 5 * 60_000L, AUTO_OTHER = 10 * 60_000L;  // the one in use again after, the other servers after
     private static final long LIMIT_MS = 8000;
+    // (v38) a bridge: its first seconds are a burst (the call's buffers fill) — Bitrix showed 20 Mbit/s where it carried
+    // about one; it is read longer and counted from the 3rd second on
+    private static final long BRIDGE_MS = 12_000, BRIDGE_SKIP = 3000;
 
     private Speed() {}
 
@@ -52,7 +55,7 @@ final class Speed {
                     return "⚡ не отвечает";
                 }
             }
-            double[] r = download(port);
+            double[] r = p.bridge ? bridgeDownload(port) : download(port);
             saveMbps(c, p, r[0]);
             String line = r[0] <= 0 ? "⚡ ничего не скачалось"
                     : String.format(Locale.ROOT, "⚡ %.1f Мбит/с · %d мс", r[0], Math.round(r[1])).replace('.', ',');
@@ -201,7 +204,7 @@ final class Speed {
                             return;
                         }
                     }
-                    double[] r = download(port, FILE_SHORT, SHORT_MS);
+                    double[] r = due.bridge ? bridgeDownload(port) : download(port, FILE_SHORT, SHORT_MS);
                     saveMbps(app, due, r[0]);
                     Diag.i(app, String.format(Locale.ROOT, "speed (by itself): «%s» %.1f Mbit/s", due.name, r[0]));
                 } finally {
@@ -225,7 +228,17 @@ final class Speed {
         return download(port, FILE, LIMIT_MS);
     }
 
+    /** (v38) a bridge's: 12 s, counted from the 3rd second (its first ones are a burst). */
+    static double[] bridgeDownload(int port) {
+        return download(port, FILE, BRIDGE_MS, BRIDGE_SKIP);
+    }
+
     static double[] download(int port, String file, long limitMs) {
+        return download(port, file, limitMs, 0);
+    }
+
+    /** skipMs: the first moments not counted (the speed from then on; all of it when the download ended sooner). */
+    static double[] download(int port, String file, long limitMs, long skipMs) {
         HttpURLConnection h = null;
         try {
             long t0 = SystemClock.elapsedRealtime();
@@ -237,10 +250,21 @@ final class Speed {
                 byte[] b = new byte[64 * 1024];
                 int n = in.read(b);
                 if (n <= 0) return new double[]{0, 0};
-                long first = SystemClock.elapsedRealtime(), bytes = n, end = first + limitMs;
-                while (SystemClock.elapsedRealtime() < end && (n = in.read(b)) > 0) bytes += n;
-                double sec = Math.max(0.2, (SystemClock.elapsedRealtime() - first) / 1000.0);
-                return new double[]{bytes * 8 / 1e6 / sec, first - t0};
+                long first = SystemClock.elapsedRealtime(), bytes = n, end = first + limitMs, from = first, fromBytes = 0;
+                while (SystemClock.elapsedRealtime() < end && (n = in.read(b)) > 0) {
+                    bytes += n;
+                    if (skipMs > 0 && from == first && SystemClock.elapsedRealtime() - first >= skipMs) {
+                        from = SystemClock.elapsedRealtime();
+                        fromBytes = bytes;
+                    }
+                }
+                long now = SystemClock.elapsedRealtime();
+                if (from == first || now - from < 1000) {  // (too little after the burst to tell: all of it)
+                    from = first;
+                    fromBytes = 0;
+                }
+                double sec = Math.max(0.2, (now - from) / 1000.0);
+                return new double[]{(bytes - fromBytes) * 8 / 1e6 / sec, first - t0};
             }
         } catch (Exception e) {
             return new double[]{0, 0};
