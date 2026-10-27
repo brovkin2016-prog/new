@@ -7,3 +7,6 @@ https://briaai-fibo-edit.hf.space/gradio_api/info
 https://lightricks-ltx-2-3.hf.space/gradio_api/info
 https://kandinskylab-kandinsky-6-0-pro-distill-5s.hf.space/gradio_api/info
 https://hugging-apps-kandinsky-6-lite-distill-5s.hf.space/gradio_api/info
+# v37: SambaNova (OmniRoute's list): its models and free limits
+https://api.sambanova.ai/v1/models
+https://docs.sambanova.ai/docs/en/models/rate-limits
