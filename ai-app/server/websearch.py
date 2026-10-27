@@ -439,28 +439,56 @@ def read_page(url, limit=4000, query=None):
 # 15 s and 3 MB at most; its output is text, its scripts' requests stay in it.
 MOLI = os.environ.get("WEB_MOLI", "/opt/aibot/moli/moli")
 MOLI_SEC = 15
-FENCE = None  # set by the helper: the command fenced in (aibot.fenced)
+FENCE = None  # set by the helper: the command fenced in (aibot.fenced); none — moli is not run at all
 _own = []
+# (v37, the review) besides moli's «private networks»: the shared, link-local and unique-local ranges, said outright
+ALWAYS_BLOCKED = ["0.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"]
 
 
 def own_cidrs():
-    """This server's own public addresses (a page's script must not reach the server through them either)."""
-    if not _own:
-        found = set()
+    """This server's own addresses (a page's script must not reach the server through them either): its domain's
+    addresses (behind a provider's NAT the public one is on no interface), the address it goes out from, and those on its
+    interfaces when `ip` may run (the helper's unit has no netlink). Kept once something was found."""
+    if _own:
+        return _own[0]
+    found = set()
+
+    def add(a):
         try:
-            out = subprocess.run(["ip", "-o", "addr", "show", "scope", "global"], capture_output=True, text=True, timeout=5).stdout
-            for m in re.finditer(r"\binet6?\s+([0-9a-fA-F:.]+)/", out):
-                ip = ipaddress.ip_address(m.group(1))
-                found.add(f"{ip}/{32 if ip.version == 4 else 128}")
-        except (OSError, ValueError, subprocess.SubprocessError):
+            ip = ipaddress.ip_address(a.split("%")[0])
+            found.add(f"{ip}/{32 if ip.version == 4 else 128}")
+        except ValueError:
             pass
+    dom = os.environ.get("APP_DOMAIN", "").strip()
+    if dom:
+        try:
+            for info in socket.getaddrinfo(dom, None):
+                add(info[4][0])
+        except OSError:
+            pass
+    for fam, probe in ((socket.AF_INET, ("1.1.1.1", 53)), (socket.AF_INET6, ("2606:4700:4700::1111", 53))):
+        try:  # (a UDP «connect» sends nothing: it only picks the way out)
+            with socket.socket(fam, socket.SOCK_DGRAM) as so:
+                so.connect(probe)
+                add(so.getsockname()[0])
+        except OSError:
+            pass
+    try:
+        out = subprocess.run(["ip", "-o", "addr", "show", "scope", "global"], capture_output=True, text=True, timeout=5).stdout
+        for m in re.finditer(r"\binet6?\s+([0-9a-fA-F:.]+)/", out):
+            add(m.group(1))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if found:
         _own.append(sorted(found))
-    return _own[0]
+    return sorted(found)
 
 
 def js_page(url):
-    """The text of a page as its scripts draw it, or "" (no moli here, not a public address, nothing in time)."""
-    if not (os.path.isfile(MOLI) and os.access(MOLI, os.X_OK)):
+    """The text of a page as its scripts draw it, or "" (no moli here, not a public address, nothing in time). (v37, the
+    review) Only fenced in (the helper's sandbox) and never as root: srv-agent (root) loads this file for its own search —
+    there pages are read without scripts."""
+    if FENCE is None or os.geteuid() == 0 or not (os.path.isfile(MOLI) and os.access(MOLI, os.X_OK)):
         return ""
     try:
         u = urlsplit(url)
@@ -471,8 +499,8 @@ def js_page(url):
         return ""
     cmd = [MOLI, "fetch", "--block-private-networks", "--dump", "markdown", "--timeout", str(MOLI_SEC * 1000),
            "--http-max-response-size", "3000000", "--disable-subframes", "-H", "User-Agent: " + UA]
-    for c in own_cidrs():
-        cmd += ["--block-cidrs", c]
+    # one --block-cidrs, the ranges comma-joined (moli takes the flag once: a second one fails the whole run)
+    cmd += ["--block-cidrs", ",".join(ALWAYS_BLOCKED + own_cidrs())]
     cmd.append(url)
     with tempfile.TemporaryDirectory(prefix="moli-") as tmp:
         try:

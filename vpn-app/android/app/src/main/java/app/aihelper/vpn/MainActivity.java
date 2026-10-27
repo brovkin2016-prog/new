@@ -273,8 +273,16 @@ public class MainActivity extends Activity implements State.Listener {
         TextView sleepName = label("", 13, muted, false);
         sleepRow = sleepName;
         addTo(settings, setting("🌙", "Не рвать во сне", sleepName, v -> {
-            if (Apps.keepAwake(this) && !batteryFree()) {  // on, but Android may still cut it: the one thing missing
-                askBattery();
+            if (Apps.keepAwake(this) && !batteryFree()) {  // on, but Android may still cut it: allow it, or switch it off
+                new AlertDialog.Builder(this).setTitle("🌙 Не рвать во сне")
+                        .setMessage("Включено, но Android всё ещё может усыплять Winger. Разрешите ему работать без ограничений "
+                                + "батареи — или выключите эту настройку.")
+                        .setPositiveButton("Разрешить", (d, w) -> askBattery())
+                        .setNegativeButton("Выключить", (d, w) -> {
+                            Apps.setKeepAwake(this, false);
+                            paintSleep();
+                        })
+                        .setNeutralButton("Отмена", null).show();
                 return;
             }
             boolean on2 = !Apps.keepAwake(this);

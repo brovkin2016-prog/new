@@ -337,7 +337,12 @@ public final class VpnSvc extends VpnService {
                 wake = false;
                 long until = SystemClock.elapsedRealtime() + 5 * 60_000L;
                 boolean on = true;
+                resting = true;  // (v37) the 5 minutes need no awake processor (a network change or a tap ends them anyway)
+                keepAwake(false);
                 while (on && !netChanged && !wake && SystemClock.elapsedRealtime() < until) on = sleep(2000);
+                resting = false;
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                keepAwake(pm != null && !pm.isInteractive());
                 if (!on) break;
                 if (netChanged || wake) Diag.i(this, netChanged ? "auto: the network changed — trying again now" : "auto: pressed again — trying again now");
                 fails = 0;
@@ -629,6 +634,13 @@ public final class VpnSvc extends VpnService {
      */
     private boolean whiteJump() {
         if (profile.bridge || !Apps.autoBridge(this) || preferred == null || !mine() || !Scout.whiteList(this)) return false;
+        // (v37, the review) Google may be shut for other reasons (a school's network, a trip abroad): the chosen server
+        // looked at once (a few seconds) — it answers: no white-list here after all, it stays
+        if (probeServer(profile)) {
+            Scout.notWhite(this);
+            Diag.i(this, "network: Google shut, but the chosen server answers — not a white-list, it stays");
+            return false;
+        }
         Profile best = bestBridge();
         if (best == null || !mine()) return false;
         switchTo(best, true, "В этой сети открыты только сайты из белого списка — включаю мост через " + service(best) + "…");
@@ -1113,11 +1125,12 @@ public final class VpnSvc extends VpnService {
     // connected with the screen off; released when the screen comes on, the VPN goes off or the setting is off.
     private android.os.PowerManager.WakeLock awake;
     private android.content.BroadcastReceiver screen;
+    private volatile boolean resting;  // (v37, the review) «nothing carries here, 5 minutes' wait»: no reason to stay awake
 
     private void keepAwake(boolean screenOff) {
         boolean on = Apps.keepAwake(this);
         synchronized (lock) {
-            boolean want = screenOff && wanted && on;
+            boolean want = screenOff && wanted && on && !resting;
             if (want && awake == null) {
                 android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
                 if (pm == null) return;
@@ -1134,7 +1147,7 @@ public final class VpnSvc extends VpnService {
 
     private void watchScreen() {
         synchronized (lock) {
-            if (screen != null) return;
+            if (screen != null || !wanted) return;  // (v37, the review: switched off meanwhile — no receiver left behind)
             screen = new android.content.BroadcastReceiver() {
                 @Override
                 public void onReceive(android.content.Context c, Intent i) {
@@ -1164,13 +1177,13 @@ public final class VpnSvc extends VpnService {
     }
 
     private void stop(String why) {
-        unwatchScreen();
         synchronized (lock) {
             asked++;  // a switch still waiting does not open anything after this
-            wanted = false;
+            wanted = false;  // (v37, the review) first: the worker may not take the wake lock again after it is let go
             if (worker != null) worker.interrupt();
             worker = null;
         }
+        unwatchScreen();
         stopParts();
         socksPort = 0;
         State.set(State.Phase.OFF, why);

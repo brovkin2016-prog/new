@@ -145,6 +145,11 @@ final class Scout {
         return white;
     }
 
+    /** (v37) The chosen server answered here though Google did not: «not a white-list» kept for this network. */
+    static void notWhite(Context c) {
+        verdicts.put(net(c), new long[]{System.currentTimeMillis(), 0});
+    }
+
     /** The word kept for this network, without looking: true — a white-list here lately. */
     static boolean whiteListSeen(Context c) {
         long[] v = verdicts.get(net(c));

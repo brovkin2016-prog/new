@@ -69,6 +69,8 @@ step "asleep: the screen off, deep sleep forced, the tunnel holds"
 adb logcat -c
 adb shell input keyevent KEYCODE_SLEEP
 wait_log "screen off: kept awake" 20 || fail "the screen went off but Winger did not keep the connection awake"
+# (v37, the review) not only its word: Android itself holds Winger's wake lock now
+adb shell dumpsys power | grep -q "winger:tunnel" || fail "the screen went off but no wake lock of Winger's is held"
 adb shell dumpsys deviceidle force-idle >/dev/null
 sleep 120
 adb shell dumpsys deviceidle unforce >/dev/null
@@ -383,20 +385,28 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (by itself to a bridge)"
 echo "by itself to a bridge: the dead chosen server left after two failures, a bridge tried"
 
-# (v37) a white-list here (only white-listed sites open: Google shut, Yandex open — made by the test): the chosen server's
-# door is shut there too, so a bridge at once — the server not tried first (no minute of failed tries)
-step "a white-list here (v37): a bridge at once, the chosen server not tried first"
+# (v37) a white-list here (only white-listed sites open: Google shut, Yandex open — made by the test): the chosen
+# server does not answer there either (it is «Запасной», a dead one, here), so a bridge at once — no minute of its failed
+# tries first; then the same «white-list» with a server that does answer (Google shut for some other reason): it stays
+step "a white-list here (v37): a bridge at once; Google shut but the server answers: it stays"
 adb logcat -c
 mark
-adb shell am start -n $ACT --es test_select Тест --ez test_auto true --ez test_white true --ez test_connect true >/dev/null
-wait_since "auto: В этой сети открыты только сайты из белого списка — включаю мост через" 60 || fail "a white-list: did not go to a bridge at once"
+adb shell am start -n $ACT --es test_select Запасной --ez test_auto true --ez test_white true --ez test_connect true >/dev/null
+wait_since "auto: В этой сети открыты только сайты из белого списка — включаю мост через" 90 || fail "a white-list: did not go to a bridge at once"
 since | grep -q "network: a white-list" || fail "a white-list: not said in the journal"
-since | sed '/auto: /,$d' | grep -q "connected via" && fail "a white-list: the server was tried first"
+since | sed '/auto: /,$d' | grep -q "retry [0-9]" && fail "a white-list: the dead server was tried over and over first"
 adb shell am start -n $ACT --ez test_disconnect true --ez test_white false >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (a white-list)"
+mark
+adb shell am start -n $ACT --es test_select Тест --ez test_auto true --ez test_white true --ez test_connect true >/dev/null
+wait_since "not a white-list, it stays" 60 || fail "Google shut but the server answers: it did not stay"
+wait_since "connected via 10.0.2.2" 60 || fail "Google shut but the server answers: not connected through it"
+since | grep -q "auto: В этой сети открыты только сайты из белого списка" && fail "Google shut but the server answers: went to a bridge"
+adb shell am start -n $ACT --ez test_disconnect true --ez test_white false >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (Google shut, server answers)"
 adb shell am start -n $ACT --es test_select Запасной >/dev/null  # (the next step: «Запасной» chosen again)
 sleep 1
-echo "white-list: a bridge at once, the chosen server not tried first"
+echo "white-list: a bridge at once; Google shut but the server answers: it stays"
 
 # switched off (as it was from 13.10, the owner: it ran over all the connections): the chosen server does not answer →
 # Winger stays on it and tries again, its button says so; once it answers (a second test server comes up on its port) it is on

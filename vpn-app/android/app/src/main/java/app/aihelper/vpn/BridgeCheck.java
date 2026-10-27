@@ -429,7 +429,13 @@ final class BridgeCheck {
         JSONObject o = new JSONObject().put("type", "none");
         ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) {
-            for (Network n : cm.getAllNetworks()) {
+            // (v37, the review) the network this app really goes by first (it is outside its own VPN): a Wi-Fi with a
+            // sign-in page beside the mobile network that carries is not «the network» then
+            java.util.List<Network> all = new java.util.ArrayList<>();
+            Network active = cm.getActiveNetwork();
+            if (active != null) all.add(active);
+            for (Network n : cm.getAllNetworks()) if (!n.equals(active)) all.add(n);
+            for (Network n : all) {
                 NetworkCapabilities nc = cm.getNetworkCapabilities(n);
                 if (nc == null || nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
                         || !nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
@@ -439,8 +445,8 @@ final class BridgeCheck {
                 if (nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
                     String mark = wifiMark(cm.getLinkProperties(n));
                     if (mark != null) o.put("mark", mark);
-                    break;  // the phone uses Wi-Fi first
                 }
+                if (n.equals(active) || nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) break;  // the one in use (else Wi-Fi first)
             }
         }
         TelephonyManager tm = (TelephonyManager) c.getSystemService(Context.TELEPHONY_SERVICE);
