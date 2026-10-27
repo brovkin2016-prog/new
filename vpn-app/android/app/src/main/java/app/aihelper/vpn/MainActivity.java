@@ -614,11 +614,10 @@ public class MainActivity extends Activity implements State.Listener {
             changed();
         }
         String testDoor = BuildConfig.DEBUG ? i.getStringExtra("test_door") : null;  // the emulator test only
-        if (testDoor != null) {  // the server's answer with its salamander door beside the chosen server's link (v39: no gecko)
+        if (testDoor != null) {  // the server's answer for the login of this link (v39: no extra doors any more)
             Profile f = Profile.chosen(this), door = Profile.parse(testDoor);
             int before = Profile.all(this).size();
-            boolean gecko = door != null && "gecko".equalsIgnoreCase(door.obfs);
-            if (f != null && door != null) BridgeSync.take(this, door.auth, f, null, gecko ? null : door);
+            if (f != null && door != null) BridgeSync.take(this, door.auth, f, null);
             Profile now = Profile.chosen(this);
             Diag.i(this, "door: kept " + (Profile.all(this).size() > before) + " · chosen «" + (now == null ? "" : now.name) + "»");
             changed();

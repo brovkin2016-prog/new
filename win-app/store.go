@@ -209,10 +209,10 @@ func (st *Store) Keep(p *Profile) bool {
 	return changed
 }
 
-// DropGecko (v39): the server's gecko door is gone (the owner, 27.10: the operator lets only UDP 443 through, so it
-// never carried): this login's gecko connection goes too; what was chosen stays chosen (the first when it was that
-// one). Whether one went.
-func (st *Store) DropGecko(auth string) bool {
+// DropDoors (v39): the server's extra doors are gone (the owner, 27.10: the operator lets only UDP 443 through, so
+// neither the salamander «Маскировка» nor the gecko one ever carried): this login's connections through them go too;
+// what was chosen stays chosen (the first when it was one of them). Whether one went.
+func (st *Store) DropDoors(auth string) bool {
 	gone := false
 	st.Update(func(s *Settings) {
 		chosen := ""
@@ -221,7 +221,7 @@ func (st *Store) DropGecko(auth string) bool {
 		}
 		kept := s.Profiles[:0]
 		for _, sv := range s.Profiles {
-			if p, err := ParseLink(sv.Link); err == nil && !p.Bridge && p.Obfs == "gecko" && p.Auth == auth {
+			if p, err := ParseLink(sv.Link); err == nil && !p.Bridge && p.Obfs != "" && p.Auth == auth {
 				gone = true
 				continue
 			}

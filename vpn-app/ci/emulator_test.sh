@@ -253,43 +253,23 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_since "stopped" 20 || fail "did not switch off (renewed link)"
 echo "server moved: the saved server took the new link in place, its name and choice kept; another login changes nothing"
 
-# the server's salamander door («маскировка»): Winger keeps it as one more connection without choosing it, once only,
-# and gets through it (the test server's second hysteria, with salamander on 4444)
-step "the server's salamander door: kept once as a connection, and Winger gets through it"
+# (v39) the server's extra doors are gone (the owner: the operator lets only UDP 443 through — the salamander
+# «Маскировка» and the gecko one never carried): their connections of this login go at the server's next answer; what
+# was chosen stays chosen
+step "the extra doors gone (v39): «Маскировка» and «Геккон» removed at the server's answer, the choice kept"
 DOOR='hysteria2://family:test-pass-123@10.0.2.2:4444/?sni=vpn.test.local&insecure=1&obfs=salamander&obfs-password=Salam-test-0123456789#Маскировка'
-mark
-adb shell "am start -n $ACT --es test_door '$DOOR'" >/dev/null
-wait_since "door: kept true · chosen «Тест»" 20 || fail "the salamander door was not kept (or it took the choice)"
-mark
-adb shell "am start -n $ACT --es test_door '$DOOR'" >/dev/null
-wait_since "door: kept false" 20 || fail "the same door was added twice"
-mark
-adb shell am start -n $ACT --es test_select Маскировка >/dev/null
-sleep 1
-adb shell am start -n $ACT --ez test_connect true >/dev/null
-wait_since "connected via 10.0.2.2" 60 || fail "no connection through the salamander door"
-grep -q "client connected" /tmp/t/hy-obfs.log || fail "the salamander server saw no connection"
-mark
-adb shell am start -n $ACT --ez test_disconnect true >/dev/null
-wait_since "stopped" 20 || fail "did not switch off (salamander door)"
-adb shell am start -n $ACT --es test_remove Маскировка >/dev/null  # the steps below count the connections there are
-adb shell am start -n $ACT --es test_select Тест >/dev/null
-sleep 1
-echo "salamander door: kept once, not chosen by itself, connected through it"
-
-# (v39) the server's gecko door is gone (the owner: the operator lets only UDP 443 through, it never carried): a gecko
-# connection of this login goes from the list at the server's next answer; what was chosen stays chosen
-step "the gecko door gone (v39): its connection removed at the server's answer, the choice kept"
 GECKO='hysteria2://family:test-pass-123@10.0.2.2:4446/?sni=vpn.test.local&insecure=1&obfs=gecko&obfs-password=Gecko-test-0123456789#Геккон'
+adb shell "am start -a android.intent.action.VIEW -d '$DOOR' -n $ACT" >/dev/null
+sleep 2
 adb shell "am start -a android.intent.action.VIEW -d '$GECKO' -n $ACT" >/dev/null
 sleep 2
 adb shell am start -n $ACT --es test_select Тест >/dev/null
 sleep 1
 mark
-adb shell "am start -n $ACT --es test_door '$GECKO'" >/dev/null
-wait_since "door: kept false · chosen «Тест»" 20 || fail "the gecko connection stayed (or the choice moved)"
-since | grep -q "the server's gecko door is gone: its connection removed" || fail "the gecko connection was not removed"
-echo "gecko door: its connection removed, the choice kept"
+adb shell "am start -n $ACT --es test_door '$DOOR'" >/dev/null
+wait_since "door: kept false · chosen «Тест»" 20 || fail "the extra doors' connections stayed (or the choice moved)"
+since | grep -q "the server's extra doors are gone: their connections removed" || fail "the extra doors' connections were not removed"
+echo "extra doors: their connections removed, the choice kept"
 
 # a real update of the app over itself: the next build (version + 1) through the app's own installer, then
 step "a real update of the app over itself: the next build (version + 1) through the app's own i"

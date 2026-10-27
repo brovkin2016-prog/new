@@ -144,9 +144,8 @@ func (f *Family) Preparing() bool {
 }
 
 // SyncServer: the family server, asked by its name, gives this computer's own current links for this login: when it
-// moved to a new address the saved ones are renewed in place, and its salamander door («маскировка»: Hysteria with
-// salamander on its own port) is kept as one more connection — after the renewal, so a door already there (at the old
-// address too) is renewed in place, not added again. Whether the saved links were renewed.
+// moved to a new address the saved ones are renewed in place; (v39) the connections through its extra doors (salamander
+// «маскировка», gecko — gone from the server) are removed. Whether the saved links were renewed.
 func (f *Family) SyncServer(auth string) bool {
 	if auth == "" {
 		return false
@@ -154,7 +153,6 @@ func (f *Family) SyncServer(auth string) bool {
 	var out struct {
 		Link  string `json:"link"`
 		Hop   string `json:"hop"`
-		Obfs  string `json:"obfs"`
 		Owner *bool  `json:"owner"`
 	}
 	if !f.post("/api/winger_profile", map[string]string{"auth": auth}, &out) {
@@ -168,19 +166,12 @@ func (f *Family) SyncServer(auth string) bool {
 		return false
 	}
 	hop, _ := ParseLink(out.Hop)
-	door, _ := ParseLink(out.Obfs)
-	if door != nil && (door.Bridge || door.Obfs != "salamander" || door.Auth != auth) {
-		door = nil
-	}
-	changed := f.st.Renew(auth, main, hop, door, nil)
+	changed := f.st.Renew(auth, main, hop, nil, nil)
 	if changed {
 		Logf("the family server moved: its link renewed")
 	}
-	if door != nil && f.st.Keep(door) {
-		Logf("the server's salamander door kept as a connection")
-	}
-	if f.st.DropGecko(auth) { // (v39) the server's gecko door is gone: its connection too
-		Logf("the server's gecko door is gone: its connection removed")
+	if f.st.DropDoors(auth) { // (v39) the server's extra doors are gone: their connections too
+		Logf("the server's extra doors are gone: their connections removed")
 	}
 	return changed
 }

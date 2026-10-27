@@ -292,14 +292,16 @@ func TestGeckoDoorRenewedApart(t *testing.T) {
 	}
 }
 
-// (v39) the server's gecko door is gone: this login's gecko connection goes, another login's stays, the choice stays
-func TestGeckoConnectionDropped(t *testing.T) {
+// (v39) the server's extra doors are gone: this login's salamander and gecko connections go, another login's stays,
+// the choice stays
+func TestExtraDoorsDropped(t *testing.T) {
 	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:8443/?sni=vpn.example.ru&obfs=salamander&obfs-password=Salam-0123456789abc#Маскировка"))
 	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:8444/?sni=vpn.example.ru&obfs=gecko&obfs-password=Gecko-0123456789abc#Геккон"))
 	st.Add(mustParse(t, "hysteria2://v:j@2.2.2.2:8444/?sni=other.example.ru&obfs=gecko&obfs-password=Gecko-0123456789abc#Чужой"))
 	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"))
-	if !st.DropGecko("u:k") || st.DropGecko("u:k") {
-		t.Fatal("this login's gecko connection: removed once")
+	if !st.DropDoors("u:k") || st.DropDoors("u:k") {
+		t.Fatal("this login's extra doors' connections: removed once")
 	}
 	all := st.Profiles()
 	if len(all) != 2 || all[0].Name != "Чужой" || all[1].Name != "Дом" || st.Chosen().Name != "Дом" {
