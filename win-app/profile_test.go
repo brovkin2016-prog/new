@@ -292,6 +292,21 @@ func TestGeckoDoorRenewedApart(t *testing.T) {
 	}
 }
 
+// (v39) the server's gecko door is gone: this login's gecko connection goes, another login's stays, the choice stays
+func TestGeckoConnectionDropped(t *testing.T) {
+	st := OpenStore(t.TempDir())
+	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:8444/?sni=vpn.example.ru&obfs=gecko&obfs-password=Gecko-0123456789abc#Геккон"))
+	st.Add(mustParse(t, "hysteria2://v:j@2.2.2.2:8444/?sni=other.example.ru&obfs=gecko&obfs-password=Gecko-0123456789abc#Чужой"))
+	st.Add(mustParse(t, "hysteria2://u:k@1.1.1.1:443/?sni=vpn.example.ru#Дом"))
+	if !st.DropGecko("u:k") || st.DropGecko("u:k") {
+		t.Fatal("this login's gecko connection: removed once")
+	}
+	all := st.Profiles()
+	if len(all) != 2 || all[0].Name != "Чужой" || all[1].Name != "Дом" || st.Chosen().Name != "Дом" {
+		t.Fatalf("another login's kept, the choice kept: %+v", all)
+	}
+}
+
 // one call carries one device: a bridge that is not the laptop's own (the phone's) is never gone to by itself — not by
 // the tray's one-tap switch, not by the automatic choice — only by a tap on it; with no own calls known, all are as before
 func TestPhonesBridgeNeverTakenByItself(t *testing.T) {

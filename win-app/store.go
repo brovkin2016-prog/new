@@ -209,6 +209,35 @@ func (st *Store) Keep(p *Profile) bool {
 	return changed
 }
 
+// DropGecko (v39): the server's gecko door is gone (the owner, 27.10: the operator lets only UDP 443 through, so it
+// never carried): this login's gecko connection goes too; what was chosen stays chosen (the first when it was that
+// one). Whether one went.
+func (st *Store) DropGecko(auth string) bool {
+	gone := false
+	st.Update(func(s *Settings) {
+		chosen := ""
+		if s.Current >= 0 && s.Current < len(s.Profiles) {
+			chosen = s.Profiles[s.Current].Link
+		}
+		kept := s.Profiles[:0]
+		for _, sv := range s.Profiles {
+			if p, err := ParseLink(sv.Link); err == nil && !p.Bridge && p.Obfs == "gecko" && p.Auth == auth {
+				gone = true
+				continue
+			}
+			kept = append(kept, sv)
+		}
+		s.Profiles = kept
+		s.Current = 0
+		for i, sv := range s.Profiles {
+			if sv.Link == chosen {
+				s.Current = i
+			}
+		}
+	})
+	return gone
+}
+
 // same: where the same connection already is (-1: nowhere) — the last one, as on the phone.
 func same(list []Saved, p *Profile) int {
 	at := -1

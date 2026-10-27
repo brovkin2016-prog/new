@@ -155,7 +155,6 @@ func (f *Family) SyncServer(auth string) bool {
 		Link  string `json:"link"`
 		Hop   string `json:"hop"`
 		Obfs  string `json:"obfs"`
-		Gecko string `json:"gecko"` // (v37) the gecko door
 		Owner *bool  `json:"owner"`
 	}
 	if !f.post("/api/winger_profile", map[string]string{"auth": auth}, &out) {
@@ -173,19 +172,15 @@ func (f *Family) SyncServer(auth string) bool {
 	if door != nil && (door.Bridge || door.Obfs != "salamander" || door.Auth != auth) {
 		door = nil
 	}
-	gecko, _ := ParseLink(out.Gecko)
-	if gecko != nil && (gecko.Bridge || gecko.Obfs != "gecko" || gecko.Auth != auth) {
-		gecko = nil
-	}
-	changed := f.st.Renew(auth, main, hop, door, gecko)
+	changed := f.st.Renew(auth, main, hop, door, nil)
 	if changed {
 		Logf("the family server moved: its link renewed")
 	}
 	if door != nil && f.st.Keep(door) {
 		Logf("the server's salamander door kept as a connection")
 	}
-	if gecko != nil && f.st.Keep(gecko) {
-		Logf("the server's gecko door kept as a connection")
+	if f.st.DropGecko(auth) { // (v39) the server's gecko door is gone: its connection too
+		Logf("the server's gecko door is gone: its connection removed")
 	}
 	return changed
 }

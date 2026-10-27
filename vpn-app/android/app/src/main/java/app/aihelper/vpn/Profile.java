@@ -335,6 +335,31 @@ final class Profile {
         return changed;
     }
 
+    /**
+     * (v39) The server's gecko door is gone (the owner, 27.10: the operator lets only UDP 443 through, so it never carried):
+     * this login's gecko connection goes too; what was chosen stays chosen (the first one when it was the gecko one).
+     * True when one went.
+     */
+    static synchronized boolean dropGecko(Context c, String auth) {
+        List<Profile> list = all(c);
+        int cur = current(c);
+        String chosen = cur >= 0 && cur < list.size() ? list.get(cur).link : null;
+        boolean gone = false;
+        for (java.util.Iterator<Profile> it = list.iterator(); it.hasNext(); ) {
+            Profile p = it.next();
+            if (!p.bridge && "gecko".equalsIgnoreCase(p.obfs) && auth.equals(p.auth)) {
+                it.remove();
+                gone = true;
+            }
+        }
+        if (!gone) return false;
+        save(c, list);
+        int at = 0;
+        for (int i = 0; i < list.size(); i++) if (list.get(i).link.equals(chosen)) at = i;
+        select(c, at);
+        return true;
+    }
+
     /** Adds or renews a server without choosing it (the bridge the family server keeps ready for the owner). */
     static synchronized boolean keep(Context c, Profile p) {
         List<Profile> list = all(c);
