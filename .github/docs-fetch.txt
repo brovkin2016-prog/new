@@ -5,3 +5,5 @@ https://hugging-apps-bfs-best-face-swap.hf.space/gradio_api/info
 https://briaai-fibo-2-0-editing.hf.space/gradio_api/info
 https://briaai-fibo-edit.hf.space/gradio_api/info
 https://lightricks-ltx-2-3.hf.space/gradio_api/info
+https://kandinskylab-kandinsky-6-0-pro-distill-5s.hf.space/gradio_api/info
+https://hugging-apps-kandinsky-6-lite-distill-5s.hf.space/gradio_api/info
