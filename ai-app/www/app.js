@@ -2045,12 +2045,20 @@
       const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
       const video = t.kind === "video";
       let secs = 10;  // (v36) the clip's length: 10 s unless 5 is chosen
+      let swap = false;  // (v37) «🎭 Я в ролике-примере»: the example clip with you in it (MiniMax-H3, with sound, 5 s)
       const schips = el("div", { class: "chips", style: "margin:0 0 6px" });
+      const mchips = el("div", { class: "chips how-chips", style: "margin:0 0 6px;flex-wrap:wrap;overflow:visible" });
+      const secsHead = el("div", { class: "menu-sec", text: "Длина ролика" });
       const paintSecs = () => {
         schips.innerHTML = "";
         for (const [k, v] of [[10, "10 секунд"], [5, "5 секунд — быстрее"]]) {
           schips.append(el("button", { class: "chip" + (k === secs ? " on" : ""), "aria-pressed": k === secs ? "true" : "false", text: v, onclick: () => { secs = k; paintSecs(); } }));
         }
+        mchips.innerHTML = "";
+        for (const [k, v] of [[false, "🎬 Оживить сцену"], [true, "🎭 Я в примере · со звуком"]]) {
+          mchips.append(el("button", { class: "chip" + (k === swap ? " on" : ""), "aria-pressed": k === swap ? "true" : "false", text: v, onclick: () => { swap = k; paintSecs(); } }));
+        }
+        schips.style.display = secsHead.style.display = swap ? "none" : "";
       };
       paintSecs();
       const big = el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }));
@@ -2083,19 +2091,20 @@
         if (!goBtn.isConnected) return;
         close();
         if (th.name === "photo" && S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
-        await th.run("/api/trend", Object.assign({ trend: t.id, images, consent: true }, video ? { seconds: secs } : {}),
-          { role: "me", image: photos[0], text: "🔥 " + t.title + (video ? " · " + secs + " с" : "") });
+        await th.run("/api/trend", Object.assign({ trend: t.id, images, consent: true }, video ? (swap ? { swap: true } : { seconds: secs }) : {}),
+          { role: "me", image: photos[0], text: "🔥 " + t.title + (video ? (swap ? " · я в ролике" : " · " + secs + " с") : "") });
       } });
       paintRows();
       box.append(
         big,
         el("h2", { class: "trend-name" }, t.title, t.hit ? el("span", { class: "tcard-hit inline", text: "ХИТ" }) : null),
         el("p", { class: "muted", style: "margin:0 0 10px;font-size:15px", text: t.desc }),
-        video ? el("div", { class: "menu-sec", text: "Длина ролика" }) : null, video ? schips : null,
+        video && t.swap ? el("div", { class: "menu-sec", text: "Как сделать" }) : null, video && t.swap ? mchips : null,
+        video ? secsHead : null, video ? schips : null,
         el("div", { class: "menu-sec", text: t.photos.length > 1 ? "Ваши фото" : "Ваше фото" }), rows,
         el("div", { class: "sheet-foot" },
           el("label", { class: "agree" }, check, el("span", { text: t.photos.length > 1 ? "Это мои фото, или люди на них согласны" : "Это моё фото, или человек согласен" })),
-          el("p", { class: "muted", style: "margin:4px 0;font-size:13px", text: video ? "Ролик будет готов за 2–6 минут, с пометкой «ИИ»." : "Обычно готово за минуту, с пометкой «ИИ»." }),
+          el("p", { class: "muted", style: "margin:4px 0;font-size:13px", text: video ? "Ролик будет готов за 2–6 минут (в ролике-примере — до 10), с пометкой «ИИ»." : "Обычно готово за минуту, с пометкой «ИИ»." }),
           why, goBtn));
     });
   }

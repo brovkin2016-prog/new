@@ -592,6 +592,10 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         applyBtn.textContent = n ? `✅ Применить отмеченное (${n})` : "✅ Применить отмеченное";
         applyBtn.disabled = !n || !!st.applying;
       };
+      const body = (x) => {  // what comes after the heading, up to the meta (👍 ➕ ➖ 🔗), at most 600 letters
+        const t = clean(x.text), m = t.match(/\s+[—|]\s+/);
+        return m ? t.slice(m.index + m[0].length).split(/\s+\|\s+(?=👍|➕|➖|🔗)/)[0].slice(0, 600) : "";
+      };
       const item = (x) => {
         const rec = x.rec && REC[x.rec];
         const chips = el("div", { class: "chips patrol-by", style: "flex-wrap:wrap;margin:6px 0 2px;gap:6px" });
@@ -607,6 +611,8 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         paintChips();
         return el("div", { class: "ow-row patrol-item", "data-id": x.id, style: "align-items:flex-start;flex-direction:column;gap:2px" },
           el("div", { class: "ow-t", style: "width:100%" }, el("div", { style: "font-weight:500", text: (x.kind === "fix" ? "🔴 " : "🟡 ") + clean(x.text).split(/\s+[—|]\s+/)[0] }),
+            // (v37, the audit) the whole finding before it is ticked, not its heading only (a version: what changed in it)
+            body(x) ? el("div", { class: "patrol-body", style: "font-size:13px;line-height:1.35;margin-top:2px;white-space:pre-wrap", text: body(x) }) : null,
             el("small", { style: "font-size:12px;margin-top:3px", text: [x.agent ? ((st.agents || []).find((a) => a.id === x.agent) || {}).name : x.theme, when(x.first), x.times > 1 ? `замечено ${x.times} раза` : ""].filter(Boolean).join(" · ") })),
           rec || x.pros || x.cons ? el("div", { class: "patrol-why", style: "font-size:13px;line-height:1.35;color:var(--muted);width:100%" },
             rec ? el("div", { text: rec + (x.by ? " · советует: " + ((BY.find((b) => b[0] === x.by) || [])[1] || "") : "") }) : null,
