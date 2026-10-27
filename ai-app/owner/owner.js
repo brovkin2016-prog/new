@@ -439,6 +439,9 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         for (const x of m.steps.slice(0, 60)) det.append(stepLine(STEP_ICON[x.tool] || "🔧", x.what));
         wrap.append(det);
       }
+      // (v37) who answered: Claude on the key (and its dollars) or the free models (and why, when Claude was meant)
+      if (m.role !== "me" && (m.model || m.free)) wrap.append(el("div", { class: "who-answered", style: "font-size:12px;margin:2px 4px 0;color:var(--muted)",
+        text: m.model ? `🟠 ${m.model}` + (m.cost ? ` · $${(+m.cost).toFixed(2)}` : "") : "🆓 Бесплатные модели" + (m.fell ? " — " + m.fell : "") }));
       if (m.files && m.files.length) {
         const det = el("details", { style: "font-size:13px;color:var(--muted);margin:2px 4px 0" }, el("summary", { text: `📝 Изменено файлов: ${m.files.length}` }));
         for (const f of m.files) det.append(stepLine("·", f));
@@ -732,7 +735,10 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
             el("button", { class: "btn line", text: "✕ Отклонить", onclick: rejectPlan }))));
       }
       // who answers here, in one line; a tap — the choice
-      const name = d.paid_key && d.on_claude
+      // (v37) the month's cap spent: the free models answer — said here, not «Claude» while they do
+      const name = d.paid_key && d.on_claude && d.capped
+        ? `🆓 Бесплатные — предел Claude на месяц исчерпан ($${(+d.spent || 0).toFixed(2)} из $${(+d.cap || 0).toFixed(2)})`
+        : d.paid_key && d.on_claude
         ? "🟠 Claude · " + ((d.model || "auto") === "auto" ? "авто" : (((d.models || []).find((m) => m.id === d.model) || {}).name || d.model))
         : d.engines.length ? "🧠 " + d.engines[0] : "нет ключей — «Ещё» → «🔑 Ключи»";
       scroll.append(el("button", { class: "ow-model", onclick: () => modelSheet(d) }, "Модель: " + name + " ›"));
@@ -878,7 +884,12 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           box.append(el("div", { class: "chips", style: "margin:0 0 10px;flex-wrap:wrap" },
             chip((d.model || "auto") === "auto", "Авто", { op: "agent_model", model: "auto" }),
             ...(d.models || []).map((m) => chip(d.model === m.id, m.name.replace(/\s+[\d.]+$/, ""), { op: "agent_model", model: m.id }))),
-          el("p", { class: "ow-note", text: (d.model || "auto") === "auto" ? "Авто: модель по сложности вопроса, «Выполнить» — не ниже Sonnet." : "Все ответы — эта модель." }));
+          el("p", { class: "ow-note", text: (d.model || "auto") === "auto" ? "Авто: модель по сложности вопроса, «Выполнить» — не ниже Sonnet." : "Все ответы — эта модель." }),
+          // (v37) the month's dollars on the key, and what happens when they are spent
+          el("p", { class: "ow-note claude-spent", text: `Потрачено в этом месяце: $${(+d.spent || 0).toFixed(2)} из $${(+d.cap || 0).toFixed(2)}`
+            + ` (ещё $${(+d.reserve || 0).toFixed(0)} — запас спасательной консоли). `
+            + (d.capped ? "⚠️ Предел исчерпан — до 1-го числа отвечают бесплатные модели. Поднять: спасательная консоль → «Предел»."
+              : "Кончится — ответят бесплатные модели (здесь это будет видно).") }));
           return;
         }
         const list = el("div", { class: "ow-list" });
