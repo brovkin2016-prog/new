@@ -1047,14 +1047,18 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         const w = b.winger || (bridgeKind(b) ? "" : "nolink");
         const sub = [(b.ok ? "работает " + dur(b.since) : UNIT[b.state] || b.state) + (+b.restarts ? `, перезапусков: ${b.restarts}` : ""), WINGER[w] || ""]
           .filter(Boolean).join(" · ");
-        list.append(line(b.ok ? "🟢" : "🔴", b.label, [sub, b.ok && w !== "nolink" ? "" : "bad"], null, () => bridgeSheet(b), b.ok ? "ok" : "bad"));
+        // (v37) the owner: «в приложении кнопка добавить мост (определённый) в Winger» — this one bridge, right on its row
+        const wl = wingerLink(b);
+        const add = wl ? el("a", { class: "ow-btn bridge-to-winger", href: wl, style: "text-decoration:none;display:inline-flex;align-items:center;flex:none",
+          "aria-label": "Добавить этот мост в Winger", text: "📲 В Winger", onclick: (e) => { e.stopPropagation(); toast("📲 Открываю Winger: мост «" + b.label.replace(/^\S+\s/, "") + "» добавится отдельно", 4000); } }) : null;
+        list.append(line(b.ok ? "🟢" : "🔴", b.label, [sub, b.ok && w !== "nolink" ? "" : "bad"], add, () => bridgeSheet(b), b.ok ? "ok" : "bad"));
       }
       if (!d.bridges.length) list.append(line("🌉", "Мостов пока нет", "Мост нужен, когда сервер напрямую не открывается (белые списки).", null, null, "off"));
       const missing = BRIDGES.filter(([p]) => !d.bridges.some((b) => b.id.startsWith(p + "-")));
       if (missing.length) list.append(line("➕", "Добавить мост", "не подключены: " + missing.map(([, name]) => name.replace(/^\S+\s(?=WB)/, "")).join(", "),
         null, () => addBridge(d, missing)));
       return [section("🌉 Мосты · " + d.bridges.length), list,
-        el("p", { class: "ow-note", style: "margin-top:-4px", text: "Winger берёт мосты сам, по одному на сервис. Кому дать мост — в карточке человека («🌉 Мост»)." })];
+        el("p", { class: "ow-note", style: "margin-top:-4px", text: "Winger берёт мосты сам, по одному на сервис; «📲 В Winger» — добавить один мост сразу, отдельно от остальных. Кому дать мост — в карточке человека («🌉 Мост»)." })];
     }
     // a bridge of the server as a Winger link, with its service's best settings ("" when its call is not there)
     // dual: Telemost's two-track trial (the screenshare as a second track) — a link of its own beside the usual one
