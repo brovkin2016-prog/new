@@ -12,9 +12,12 @@ import http.client
 import ipaddress
 import itertools
 import json
+import os
 import re
 import socket
 import ssl
+import subprocess
+import tempfile
 import time
 import zlib
 from html import unescape
@@ -412,7 +415,8 @@ def focus(text, query, limit):
 
 
 def read_page(url, limit=4000, query=None):
-    """(title, text up to limit characters) of one public web page; with a query, its part about it (focus)."""
+    """(title, text up to limit characters) of one public web page; with a query, its part about it (focus). (v37) A page
+    whose text its own scripts draw (almost nothing in the HTML) is read once more by a small browser (moli)."""
     final, ctype, raw = fetch(url)
     if "pdf" in ctype or final.lower().endswith(".pdf"):
         raise Blocked("PDF")
@@ -422,7 +426,66 @@ def read_page(url, limit=4000, query=None):
     if "text/plain" in ctype:
         return "", focus(text, query, limit)
     title, body = page_text(text)
+    if len(body) < 300 and "<script" in text.lower():
+        drawn = js_page(final)
+        if drawn and len(drawn) > len(body) + 100:
+            body = drawn
     return title, focus(body, query, limit)
+
+
+# ---------- (v37) a page its scripts draw: moli, a small headless browser (~50 MB, Apache-2.0/MIT) ----------
+# Only the pages that came back almost empty; only public addresses (its own guard against private and local addresses,
+# and this server's own public addresses too); writing only in its temporary folder (FENCE: the helper's sandbox);
+# 15 s and 3 MB at most; its output is text, its scripts' requests stay in it.
+MOLI = os.environ.get("WEB_MOLI", "/opt/aibot/moli/moli")
+MOLI_SEC = 15
+FENCE = None  # set by the helper: the command fenced in (aibot.fenced)
+_own = []
+
+
+def own_cidrs():
+    """This server's own public addresses (a page's script must not reach the server through them either)."""
+    if not _own:
+        found = set()
+        try:
+            out = subprocess.run(["ip", "-o", "addr", "show", "scope", "global"], capture_output=True, text=True, timeout=5).stdout
+            for m in re.finditer(r"\binet6?\s+([0-9a-fA-F:.]+)/", out):
+                ip = ipaddress.ip_address(m.group(1))
+                found.add(f"{ip}/{32 if ip.version == 4 else 128}")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        _own.append(sorted(found))
+    return _own[0]
+
+
+def js_page(url):
+    """The text of a page as its scripts draw it, or "" (no moli here, not a public address, nothing in time)."""
+    if not (os.path.isfile(MOLI) and os.access(MOLI, os.X_OK)):
+        return ""
+    try:
+        u = urlsplit(url)
+        if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
+            return ""
+        public_address(u.hostname, u.port or (443 if u.scheme == "https" else 80))
+    except (Blocked, ValueError, OSError):
+        return ""
+    cmd = [MOLI, "fetch", "--block-private-networks", "--dump", "markdown", "--timeout", str(MOLI_SEC * 1000),
+           "--http-max-response-size", "3000000", "--disable-subframes", "-H", "User-Agent: " + UA]
+    for c in own_cidrs():
+        cmd += ["--block-cidrs", c]
+    cmd.append(url)
+    with tempfile.TemporaryDirectory(prefix="moli-") as tmp:
+        try:
+            p = subprocess.run(FENCE(cmd) if FENCE else cmd, capture_output=True, timeout=MOLI_SEC + 10, cwd=tmp,
+                               env={"PATH": "/usr/bin:/bin", "HOME": tmp, "TMPDIR": tmp, "MOLI_BLOCK_PRIVATE_NETWORKS": "1"})
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    if p.returncode != 0:
+        return ""
+    text = p.stdout[:PAGE_BYTES].decode("utf-8", "replace")
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)  # pictures
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)  # links: their words only
+    return re.sub(r"[ \t]+", " ", re.sub(r"\n{3,}", "\n\n", text)).strip()
 
 
 # ---------- search pages ----------
