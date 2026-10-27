@@ -2001,7 +2001,7 @@
       data = r;
       const p = r.pics || {};
       if (S.me.panel && p.all && p.drawn < p.all) {
-        pics.textContent = `🎨 Картинки карточек: ${p.drawn} из ${p.all} — дорисовываю` + (p.why ? ` (последний ответ: ${p.why})` : "");
+        pics.textContent = `🎨 Картинки карточек: ${p.drawn} из ${p.all}` + (p.why ? ` — ${p.why}` : " — дорисовываю");
         pics.classList.remove("hidden");
       }
       paint();

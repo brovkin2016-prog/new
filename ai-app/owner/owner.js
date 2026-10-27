@@ -1560,9 +1560,10 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           // each key: where it works (v30) and what its last check said; the ones in first, then the ones not
           const row = (k) => {
             const where = (k.places || []).map((p) => KEY_PLACE[p]).filter(Boolean).join(" · ");
-            const bad = k.on && k.test === "unknown";
+            const bad = k.on && k.test === "unknown", busy = k.on && k.test === "busy";  // (v37) busy: the key good, its limit now
             const r = line(!k.on ? "➖" : bad ? "⚠️" : "✅", k.id === "hf" ? "Видео из фото (Hugging Face)" : k.name,
-              [(where || k.use) + (bad ? " · ⚠️ при проверке не ответил" + (k.why ? ": " + k.why : "") : "") + (k.paid ? " · 💳 платный" : ""), bad ? "bad" : ""], null,
+              [(where || k.use) + (bad ? " · ⚠️ при проверке не ответил" + (k.why ? ": " + k.why : "") : "")
+                + (busy ? " · 🕓 ключ в порядке, сервис сейчас на лимите — работают другие" : "") + (k.paid ? " · 💳 платный" : ""), bad ? "bad" : ""], null,
               () => (k.id === "hf" ? openHf(k, fill) : keyOne(k, fill)), k.on ? (bad ? "bad" : "ok") : "off");
             r.dataset.key = k.id;
             return r;
