@@ -116,6 +116,7 @@ public class MainActivity extends Activity implements State.Listener {
         super.onResume();
         State.listen(this);
         changed();
+        paintSleep();  // (v37) back from Android's battery screen: what it says now
         Updater.check(this, false);
         BridgeSync.run(this, false);  // the owner's bridge, kept ready (nobody else gets one)
         ticker.removeCallbacks(tick);
@@ -267,6 +268,23 @@ public class MainActivity extends Activity implements State.Listener {
             Toast.makeText(this, on ? "Если подключение перестанет работать, Winger сам перейдёт на мост, который работает в этой сети"
                     : "Winger останется на выбранном подключении; на мост — нажав на него в списке", Toast.LENGTH_LONG).show();
         }));
+        // (v37) «Не рвать во сне»: asleep the connection holds — the processor kept awake while the VPN is on and the screen
+        // off, and Android's battery saving off for Winger (else it cuts the network of a sleeping phone)
+        TextView sleepName = label("", 13, muted, false);
+        sleepRow = sleepName;
+        addTo(settings, setting("🌙", "Не рвать во сне", sleepName, v -> {
+            if (Apps.keepAwake(this) && !batteryFree()) {  // on, but Android may still cut it: the one thing missing
+                askBattery();
+                return;
+            }
+            boolean on2 = !Apps.keepAwake(this);
+            Apps.setKeepAwake(this, on2);
+            paintSleep();
+            Toast.makeText(this, on2 ? "Соединение держится и во сне: связь не рвётся, батарея тратится чуть больше"
+                    : "Во сне соединение может засыпать: после пробуждения Winger переподключится за секунды", Toast.LENGTH_LONG).show();
+            if (on2 && !batteryFree()) askBattery();
+        }));
+        paintSleep();
         addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
         addTo(settings, addRow);
         // which Winger this is, and a check right now (otherwise it looks for a new version every few hours by itself)
@@ -294,6 +312,35 @@ public class MainActivity extends Activity implements State.Listener {
             v.setTranslationY(dp(18));
             v.animate().alpha(1f).translationY(0).setStartDelay(80L + i * 40L).setDuration(400)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        }
+    }
+
+    private TextView sleepRow;
+
+    /** Android does not cut Winger's network in deep sleep (its battery saving is off for it). */
+    private boolean batteryFree() {
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        return Build.VERSION.SDK_INT < 23 || pm == null || pm.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    private void paintSleep() {
+        if (sleepRow == null) return;
+        sleepRow.setText(!Apps.keepAwake(this) ? "выкл." : batteryFree() ? "вкл." : "вкл. · ⚠️ разрешите");
+    }
+
+    /** Android's own question: Winger without battery saving (a VPN that must not sleep). */
+    private void askBattery() {
+        try {
+            startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:" + getPackageName())));
+            Toast.makeText(this, "Нажмите «Разрешить»: иначе Android во сне отключает интернет у Winger", Toast.LENGTH_LONG).show();
+        } catch (RuntimeException e) {  // a phone without that screen: its list of apps instead
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                Toast.makeText(this, "Найдите Winger и выберите «Не экономить» / «Без ограничений»", Toast.LENGTH_LONG).show();
+            } catch (RuntimeException ignored) {
+                Toast.makeText(this, "Откройте Настройки → Батарея → Winger → «Без ограничений»", Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -507,6 +554,11 @@ public class MainActivity extends Activity implements State.Listener {
         Intent i = new Intent(this, VpnSvc.class).setAction(VpnSvc.START);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
         else startService(i);
+        // (v37) the first time on: Android's battery saving off for Winger, asked once (else a sleeping phone loses it)
+        if (Apps.keepAwake(this) && !batteryFree() && !getSharedPreferences("vpn", MODE_PRIVATE).getBoolean("askedBattery", false)) {
+            getSharedPreferences("vpn", MODE_PRIVATE).edit().putBoolean("askedBattery", true).apply();
+            ticker.postDelayed(this::askBattery, 1500);
+        }
     }
 
     @Override

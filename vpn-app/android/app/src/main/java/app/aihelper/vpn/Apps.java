@@ -196,6 +196,15 @@ final class Apps {
         prefs(c).edit().putBoolean("autoBridge2", on).apply();
     }
 
+    /** (v37) «Не рвать во сне»: the processor stays awake while the VPN is on and the screen is off (on unless switched off). */
+    static boolean keepAwake(Context c) {
+        return prefs(c).getBoolean("keepAwake", true);
+    }
+
+    static void setKeepAwake(Context c, boolean on) {
+        prefs(c).edit().putBoolean("keepAwake", on).apply();
+    }
+
     /** The VPN should come back by itself after a reboot unless the owner of the phone switched it off. */
     static boolean keepOn(Context c) {
         return prefs(c).getBoolean("keepOn", false);

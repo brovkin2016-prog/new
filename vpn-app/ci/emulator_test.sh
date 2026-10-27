@@ -29,6 +29,7 @@ wait_log() {  # text, seconds
 
 adb install -r -g "$APK" || fail "install"
 adb shell appops set $PKG ACTIVATE_VPN allow  # the "allow VPN" question, answered for the test
+adb shell dumpsys deviceidle whitelist +$PKG  # (v37) Android's battery saving off for Winger (its own question, answered)
 adb logcat -c
 adb shell "am start -a android.intent.action.VIEW -d '$LINK' -n $ACT"
 sleep 3
@@ -61,6 +62,25 @@ grep -q "UDP request" /tmp/t/hy.log || fail "the server saw no UDP through the t
 curl -s http://127.0.0.1:7653/traffic && echo
 sleep 3
 adb exec-out screencap -p > "$OUT/3-traffic.png"
+
+# (v37) asleep the connection holds: the screen off, Android's deep sleep (Doze) forced for two minutes — the processor
+# kept awake by Winger, the tunnel not reopened, a page through it at once after
+step "asleep: the screen off, deep sleep forced, the tunnel holds"
+adb logcat -c
+adb shell input keyevent KEYCODE_SLEEP
+wait_log "screen off: kept awake" 20 || fail "the screen went off but Winger did not keep the connection awake"
+adb shell dumpsys deviceidle force-idle >/dev/null
+sleep 120
+adb shell dumpsys deviceidle unforce >/dev/null
+B1=$(TUNNELED)
+R=$(page)
+echo "after two minutes of deep sleep: $R"
+echo "$R" | grep -q "HTTP/1" || fail "after deep sleep no page came through the VPN"
+[ "$(TUNNELED)" -gt "$B1" ] || fail "after deep sleep the page did not go through the tunnel"
+adb logcat -d -s AIVPN:V | grep -E "retry [0-9]|reconnecting" && fail "the tunnel was reopened during deep sleep (it should have held)"
+adb shell input keyevent KEYCODE_WAKEUP
+adb shell wm dismiss-keyguard >/dev/null 2>&1
+echo "asleep: the connection held through two minutes of deep sleep"
 
 # the speed of a connection: the one that is on, through itself
 step "the speed of a connection: the one that is on, through itself"

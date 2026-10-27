@@ -211,6 +211,7 @@ public final class VpnSvc extends VpnService {
         }
         if (on) stop(null);
         else stopParts();  // already stopped: the reason it stopped stays on the screen
+        unwatchScreen();
         switcher.shutdown();
         super.onDestroy();
     }
@@ -267,6 +268,7 @@ public final class VpnSvc extends VpnService {
                 }
                 since = SystemClock.elapsedRealtime();
                 State.set(State.Phase.ON, "");
+                watchScreen();  // (v37) asleep the connection holds: the processor kept awake while the screen is off
                 Diag.i(this, "connected via " + profile.host + (profile.bridge ? " (" + profile.platformOrDefault() + ", " + profile.modeLabel(tunnel) + ")" : ""));
                 ping();
                 err = watch(own[0]);
@@ -499,8 +501,12 @@ public final class VpnSvc extends VpnService {
         if ("salamander".equalsIgnoreCase(p.obfs)) {
             y.append("obfs:\n  type: salamander\n  salamander:\n    password: ").append(q(p.obfsPassword == null ? "" : p.obfsPassword)).append('\n');
         }
-        // a phone that dozes a little (Xiaomi, Android power saving) keeps its connection: the server waits as long
+        // a phone that dozes a little (Xiaomi, Android power saving) keeps its connection: the server waits as long.
+        // (v37) Hysteria 2.11+ looks like Chrome by default and then fixes the wait at 30 s: behind salamander nothing of
+        // it shows anyway, so there it is off and the 90 s hold; a plain door keeps the look (its keep-alive every 10 s
+        // and the processor kept awake hold it)
         y.append("quic:\n  keepAlivePeriod: 10s\n  maxIdleTimeout: 90s\n");
+        if ("salamander".equalsIgnoreCase(p.obfs)) y.append("  disableChromeParrot: true\n");
         y.append("fastOpen: true\n");
         y.append("socks5:\n  listen: 127.0.0.1:").append(port).append('\n');
         return y.toString();
@@ -1067,7 +1073,64 @@ public final class VpnSvc extends VpnService {
         if (mine()) stop(why);
     }
 
+    // ---------- (v37) «Не рвать во сне»: the processor awake while the VPN is on and the screen is off ----------
+    // Asleep, the phone stops the client's keep-alive: after 30–90 s the server and the operator's NAT forget the
+    // connection, and nothing reaches the phone until it wakes. A partial wake lock (the screen stays off) only while
+    // connected with the screen off; released when the screen comes on, the VPN goes off or the setting is off.
+    private android.os.PowerManager.WakeLock awake;
+    private android.content.BroadcastReceiver screen;
+
+    private void keepAwake(boolean screenOff) {
+        boolean on = Apps.keepAwake(this);
+        synchronized (lock) {
+            boolean want = screenOff && wanted && on;
+            if (want && awake == null) {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                if (pm == null) return;
+                awake = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "winger:tunnel");
+                awake.setReferenceCounted(false);
+                awake.acquire();
+                Diag.i(this, "screen off: kept awake (the connection holds)");
+            } else if (!want && awake != null) {
+                if (awake.isHeld()) awake.release();
+                awake = null;
+            }
+        }
+    }
+
+    private void watchScreen() {
+        synchronized (lock) {
+            if (screen != null) return;
+            screen = new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context c, Intent i) {
+                    keepAwake(Intent.ACTION_SCREEN_OFF.equals(i.getAction()));
+                }
+            };
+            android.content.IntentFilter f = new android.content.IntentFilter(Intent.ACTION_SCREEN_OFF);
+            f.addAction(Intent.ACTION_SCREEN_ON);
+            registerReceiver(screen, f);
+        }
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        keepAwake(pm != null && !pm.isInteractive());  // started with the screen already off (after a reboot)
+    }
+
+    private void unwatchScreen() {
+        synchronized (lock) {
+            if (screen != null) {
+                try {
+                    unregisterReceiver(screen);
+                } catch (RuntimeException ignored) {
+                    // not registered
+                }
+                screen = null;
+            }
+        }
+        keepAwake(false);
+    }
+
     private void stop(String why) {
+        unwatchScreen();
         synchronized (lock) {
             asked++;  // a switch still waiting does not open anything after this
             wanted = false;
