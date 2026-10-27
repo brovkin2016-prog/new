@@ -296,6 +296,7 @@ public final class VpnSvc extends VpnService {
                 State.set(State.Phase.RETRYING, "Сеть сменилась — переподключаюсь…");
                 update();
                 if (!sleep(300)) break;
+                whiteJump();  // (v37) a white-list on the new network: a bridge at once
                 continue;
             }
             fails++;
@@ -589,6 +590,7 @@ public final class VpnSvc extends VpnService {
         boolean bridge = false;
         for (Profile x : Profile.all(this)) bridge |= x.bridge;
         if (!bridge) return;
+        if (!byHand && whiteJump()) return;
         Profile at = profile;
         for (int i = 0; i < 6 && !at.bridge && mine() && !probeServer(at); i++) {
             if (i == 0 && moved(at)) return;  // the chosen server is there, at its new address
@@ -615,6 +617,33 @@ public final class VpnSvc extends VpnService {
         return true;
     }
 
+    /**
+     * (v37) A server in use, the network lets only white-listed sites through (Scout.whiteList: a few seconds, kept half
+     * an hour): the servers' doors are shut there too — the best bridge at once (the chosen server is looked at again
+     * later, BACK). True when it switched.
+     */
+    private boolean whiteJump() {
+        if (profile.bridge || !Apps.autoBridge(this) || preferred == null || !mine() || !Scout.whiteList(this)) return false;
+        Profile best = bestBridge();
+        if (best == null || !mine()) return false;
+        switchTo(best, true, "В этой сети открыты только сайты из белого списка — включаю мост через " + service(best) + "…");
+        return true;
+    }
+
+    /** The bridge to try first here (Scout.rank: carrying here now, then not looked at, then failing here, VK last). */
+    private Profile bestBridge() {
+        List<Profile> bridges = new java.util.ArrayList<>();
+        for (Profile x : Profile.all(this)) if (x.bridge) bridges.add(x);
+        List<Profile> ranked = Scout.rank(this, bridges, goodBridge());
+        return ranked.isEmpty() ? null : ranked.get(0);
+    }
+
+    /** The bridge that last carried data (in the last 3 days), or "". */
+    private String goodBridge() {
+        android.content.SharedPreferences v = getSharedPreferences("vpn", MODE_PRIVATE);
+        return System.currentTimeMillis() - v.getLong("goodBridgeAt", 0) < 3 * 86_400_000L ? v.getString("goodBridge", "") : "";
+    }
+
     /** The next connection to try when the one in use does not answer: the chosen one, other servers, then bridges. */
     private Profile nextChoice() {
         return nextChoice(profile);
@@ -624,14 +653,14 @@ public final class VpnSvc extends VpnService {
         if (!Apps.autoBridge(this) || preferred == null) return null;
         List<Profile> order = new java.util.ArrayList<>();
         order.add(preferred);
-        for (Profile x : Profile.all(this)) if (!x.bridge && !x.link.equals(preferred.link)) order.add(x);
+        // (v37) a white-list here lately: the other servers are not tried (their doors are shut too) — bridges only
+        boolean white = Scout.whiteListSeen(this);
+        for (Profile x : Profile.all(this)) if (!x.bridge && !x.link.equals(preferred.link) && !white) order.add(x);
         // the bridges (v32): those carrying here now by the scout first, then the one that last carried data (in the last
         // 3 days), those just seen failing here last (Scout.rank) — not a slow or dead one before a working one
-        android.content.SharedPreferences v = getSharedPreferences("vpn", MODE_PRIVATE);
-        String good = System.currentTimeMillis() - v.getLong("goodBridgeAt", 0) < 3 * 86_400_000L ? v.getString("goodBridge", "") : "";
         List<Profile> bridges = new java.util.ArrayList<>();
         for (Profile x : Profile.all(this)) if (x.bridge && !x.link.equals(preferred.link)) bridges.add(x);
-        order.addAll(Scout.rank(this, bridges, good));
+        order.addAll(Scout.rank(this, bridges, goodBridge()));
         if (order.size() < 2) return null;
         int at = 0;
         for (int i = 0; i < order.size(); i++) if (order.get(i).link.equals(from.link)) at = i;

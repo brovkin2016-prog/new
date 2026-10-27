@@ -358,6 +358,21 @@ adb shell am start -n $ACT --ez test_disconnect true >/dev/null
 wait_log "stopped" 20 || fail "did not switch off (by itself to a bridge)"
 echo "by itself to a bridge: the dead chosen server left after two failures, a bridge tried"
 
+# (v37) a white-list here (only white-listed sites open: Google shut, Yandex open — made by the test): the chosen server's
+# door is shut there too, so a bridge at once — the server not tried first (no minute of failed tries)
+step "a white-list here (v37): a bridge at once, the chosen server not tried first"
+adb logcat -c
+mark
+adb shell am start -n $ACT --es test_select Тест --ez test_auto true --ez test_white true --ez test_connect true >/dev/null
+wait_since "auto: В этой сети открыты только сайты из белого списка — включаю мост через" 60 || fail "a white-list: did not go to a bridge at once"
+since | grep -q "network: a white-list" || fail "a white-list: not said in the journal"
+since | sed '/auto: /,$d' | grep -q "connected via" && fail "a white-list: the server was tried first"
+adb shell am start -n $ACT --ez test_disconnect true --ez test_white false >/dev/null
+wait_log "stopped" 20 || fail "did not switch off (a white-list)"
+adb shell am start -n $ACT --es test_select Запасной >/dev/null  # (the next step: «Запасной» chosen again)
+sleep 1
+echo "white-list: a bridge at once, the chosen server not tried first"
+
 # switched off (as it was from 13.10, the owner: it ran over all the connections): the chosen server does not answer →
 # Winger stays on it and tries again, its button says so; once it answers (a second test server comes up on its port) it is on
 step "no going over by itself (switched off): the chosen server does not answer → Winger stays on it and tries"

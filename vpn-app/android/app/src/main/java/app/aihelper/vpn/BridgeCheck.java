@@ -230,14 +230,18 @@ final class BridgeCheck {
 
     /** One site straight from this phone: its answer and time, or why not (no name, no answer, a certificate not its own). */
     static JSONObject site(String name, String url) throws Exception {
+        return site(name, url, 8000);
+    }
+
+    static JSONObject site(String name, String url, int waitMs) throws Exception {
         JSONObject o = new JSONObject().put("name", name).put("host", Uri.parse(url).getHost());
         long t0 = SystemClock.elapsedRealtime();
         HttpURLConnection h = null;
         try {
             h = (HttpURLConnection) new URL(url).openConnection();
             h.setInstanceFollowRedirects(false);
-            h.setConnectTimeout(8000);
-            h.setReadTimeout(8000);
+            h.setConnectTimeout(waitMs);
+            h.setReadTimeout(waitMs);
             h.setUseCaches(false);
             int code = h.getResponseCode();
             o.put("ok", true).put("code", code).put("ms", SystemClock.elapsedRealtime() - t0);
@@ -416,7 +420,11 @@ final class BridgeCheck {
         return s == null ? "" : s.length() > 300 ? s.substring(0, 300) + "…" : s;
     }
 
-    /** The phone's own network under the VPN: mobile or Wi-Fi, and the operator. */
+    /**
+     * The phone's own network under the VPN: mobile or Wi-Fi, and the operator. (v37) A Wi-Fi's «mark»: a short hash of
+     * its IPv4 subnet, gateway, DNS servers and domain (no location permission, unlike its name); «captive» — behind a
+     * sign-in page.
+     */
     static JSONObject network(Context c) throws Exception {
         JSONObject o = new JSONObject().put("type", "none");
         ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -427,12 +435,35 @@ final class BridgeCheck {
                         || !nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
                 o.put("type", nc.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? "mobile"
                         : nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ? "wifi" : "other");
-                if (nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) break;  // the phone uses Wi-Fi first
+                o.put("captive", nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL));
+                if (nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    String mark = wifiMark(cm.getLinkProperties(n));
+                    if (mark != null) o.put("mark", mark);
+                    break;  // the phone uses Wi-Fi first
+                }
             }
         }
         TelephonyManager tm = (TelephonyManager) c.getSystemService(Context.TELEPHONY_SERVICE);
         if (tm != null) o.put("operator", String.valueOf(tm.getNetworkOperatorName())).put("sim", String.valueOf(tm.getSimOperatorName()));
         return o;
+    }
+
+    /** (v37) A Wi-Fi told from another by what it hands out (IPv4 only: IPv6 addresses change by themselves). */
+    static String wifiMark(android.net.LinkProperties lp) {
+        if (lp == null) return null;
+        java.util.TreeSet<String> parts = new java.util.TreeSet<>();
+        for (android.net.LinkAddress a : lp.getLinkAddresses()) {
+            if (!(a.getAddress() instanceof java.net.Inet4Address)) continue;
+            byte[] b = a.getAddress().getAddress();
+            int len = a.getPrefixLength(), ip = (b[0] & 255) << 24 | (b[1] & 255) << 16 | (b[2] & 255) << 8 | (b[3] & 255);
+            parts.add("net " + Integer.toHexString(len == 0 ? 0 : ip & (-1 << (32 - len))) + "/" + len);
+        }
+        for (android.net.RouteInfo r : lp.getRoutes())
+            if (r.getGateway() instanceof java.net.Inet4Address && !r.getGateway().isAnyLocalAddress()) parts.add("gw " + r.getGateway().getHostAddress());
+        for (InetAddress d : lp.getDnsServers()) if (d instanceof java.net.Inet4Address) parts.add("dns " + d.getHostAddress());
+        if (lp.getDomains() != null) parts.add("dom " + lp.getDomains());
+        if (parts.isEmpty()) return null;
+        return String.format(Locale.ROOT, "%08x", android.text.TextUtils.join(";", parts).hashCode());
     }
 
     private static JSONObject vpn(Context c) throws Exception {

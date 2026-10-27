@@ -28,10 +28,15 @@ final class Scout {
 
     private Scout() {}
 
-    /** This network: «wifi/t2», «mobile/t2» (its kind and the SIM's operator). */
+    /**
+     * This network: «mobile/t2» (its kind and the SIM's operator); (v37) a Wi-Fi by its own marks («wifi/3fa2…»: its
+     * addresses, gateway, DNS and domain — the home's and the work's Wi-Fi are not one network any more), no
+     * location permission needed.
+     */
     static String net(Context c) {
         try {
             JSONObject n = BridgeCheck.network(c);
+            if ("wifi".equals(n.optString("type")) && !n.optString("mark").isEmpty()) return "wifi/" + n.optString("mark");
             String op = n.optString("sim", "");
             if (op.isEmpty() || "null".equals(op)) op = n.optString("operator", "");
             return n.optString("type", "none") + "/" + op.toLowerCase(Locale.ROOT);
@@ -49,13 +54,21 @@ final class Scout {
         record(c, net(c), p, result, ms, "");
     }
 
-    /** ... on that network (the one there was when the look began: a look that ends on another network is not its word). */
+    /**
+     * ... on that network (the one there was when the look began: a look that ends on another network is not its word).
+     * (v37) Behind a Wi-Fi's sign-in page (a café, a train) nothing gets through until the person signs in: a failure there
+     * is not the bridge's, and it is not kept.
+     */
     static synchronized void record(Context c, String key, Profile p, String result, int ms, String mode) {
         try {
+            if (!"ok".equals(result) && BridgeCheck.network(c).optBoolean("captive")) return;
             JSONObject all = new JSONObject(prefs(c).getString(key, "{}"));
             String id = String.valueOf(p.link.hashCode());
             JSONObject was = all.optJSONObject(id);
-            int same = was != null && result.equals(was.optString("r")) ? was.optInt("n") + 1 : 0;  // the same word again
+            String before = was == null ? "" : was.optString("r");
+            // the same word again (v37: any «does not carry» after another counts as the same)
+            int same = was != null && (result.equals(before) || !"ok".equals(result) && !before.isEmpty() && !"ok".equals(before))
+                    ? was.optInt("n") + 1 : 0;
             JSONObject o = new JSONObject().put("r", result).put("ms", ms).put("at", System.currentTimeMillis()).put("n", same);
             if (mode != null && !mode.isEmpty()) o.put("m", mode);  // (v34) the way that carried here: "video"
             all.put(id, o);
@@ -76,7 +89,74 @@ final class Scout {
     /** A bridge's word here, if fresh; null when it was not looked at lately. */
     static JSONObject seen(Context c, Profile p) {
         JSONObject o = raw(c, p);
-        return o != null && System.currentTimeMillis() - o.optLong("at") < FRESH ? o : null;
+        return o != null && System.currentTimeMillis() - o.optLong("at") < Math.max(FRESH, pause(o)) ? o : null;
+    }
+
+    /**
+     * (v37) How long until a bridge is looked at again: one that carries — half an hour (an hour once it said so twice);
+     * one that does not, again and again — longer each time (30 min, 1 h, 2 h, 4 h at most: each look is a call), and
+     * its «does not carry here» counts for as long. It is still tried in turn when nothing else carries.
+     */
+    static long pause(JSONObject s) {
+        if (s == null) return 0;
+        int n = Math.max(0, s.optInt("n"));
+        if ("ok".equals(s.optString("r"))) return n >= 2 ? 2 * EVERY : EVERY;
+        return EVERY << Math.min(n, 3);
+    }
+
+    // ---------- (v37) a white-list here: only the sites on it open (Google does not, Yandex does) ----------
+    static final long VERDICT = 30 * 60_000L;  // what the look said counts for this long on this network
+    private static final java.util.Map<String, long[]> verdicts = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile String outside = "https://www.gstatic.com/generate_204", inside = "https://ya.ru/";
+
+    /** The emulator test only: «a white-list here» made (a shut address for Google's) or undone; the words kept go. */
+    static void testWhite(boolean on) {
+        outside = on ? "https://10.0.2.2:1/" : "https://www.gstatic.com/generate_204";
+        inside = on ? "https://www.gstatic.com/generate_204" : "https://ya.ru/";
+        verdicts.clear();
+    }
+
+    /**
+     * True when this network lets only white-listed sites through (Google shut, Yandex open): then the servers' doors
+     * are shut as well (the white-list goes by address) and a bridge is the way at once — no minute of the servers'
+     * failed tries first. Looked at in a few seconds (both sites at once, straight from this phone), kept half an hour
+     * for this network; no internet at all — no word kept.
+     */
+    static boolean whiteList(Context c) {
+        String key = net(c);
+        long[] v = verdicts.get(key);
+        if (v != null && System.currentTimeMillis() - v[0] < VERDICT) return v[1] == 1;
+        boolean[] ok = new boolean[2];
+        String out = outside, in = inside;
+        Thread g = new Thread(() -> ok[0] = opens("Google", out), "white-g");
+        Thread y = new Thread(() -> ok[1] = opens("Яндекс", in), "white-y");
+        g.start();
+        y.start();
+        try {
+            g.join(8000);
+            y.join(8000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        boolean white = !ok[0] && ok[1];
+        if ((ok[0] || ok[1]) && key.equals(net(c))) verdicts.put(key, new long[]{System.currentTimeMillis(), white ? 1 : 0});
+        Diag.i(c, "network: " + (white ? "a white-list (Google shut, Yandex open) — bridges first" : ok[0] ? "open" : "no internet"));
+        return white;
+    }
+
+    /** The word kept for this network, without looking: true — a white-list here lately. */
+    static boolean whiteListSeen(Context c) {
+        long[] v = verdicts.get(net(c));
+        return v != null && v[1] == 1 && System.currentTimeMillis() - v[0] < VERDICT;
+    }
+
+    private static boolean opens(String name, String url) {
+        try {
+            return BridgeCheck.site(name, url, 3000).optBoolean("ok");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** For a connection's button: true — it carried here lately, false — it did not, null — not looked at (or VK). */
@@ -167,8 +247,7 @@ final class Scout {
                     if (!p.bridge || sameCall(p, active) || "vk".equals(p.platformOrDefault())) continue;
                     JSONObject s = raw(app, p);
                     long at = s == null ? 0 : s.optLong("at");
-                    long every = s != null && s.optInt("n") >= 2 ? 2 * EVERY : EVERY;  // the same word again and again: less often
-                    if (System.currentTimeMillis() - at >= every && at < oldest) {
+                    if (System.currentTimeMillis() - at >= pause(s) && at < oldest) {  // the same word again and again: less often
                         oldest = at;
                         due = p;
                     }
