@@ -67,3 +67,6 @@ vpn-app/android/local.properties
 vpn-app/android/app/hev/
 vpn-app/android/app/.cxx/
 vpn-app/android/app/src/main/jniLibs/
+
+# design skills' working files (impeccable: screenshots, config)
+.impeccable/

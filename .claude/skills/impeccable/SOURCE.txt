@@ -1,0 +1,1 @@
+impeccable 4.8.0 — https://github.com/pbakaus/impeccable (Apache-2.0), skill-v4.8.0 universal.zip sha256 82e6f6ff3a2b18f46f0f2fc388c1ab7abf3ccc52bbfc522456396d13011d6706; the engine is fetched on first use and checked against scripts/engine-checksums.txt
