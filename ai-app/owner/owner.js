@@ -953,6 +953,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       const bad = [];
       if (!d.vpn.ok) bad.push("VPN не работает");
       if (d.obfs && !d.obfs.ok) bad.push("Hysteria с маскировкой не работает");
+      if (d.gecko && !d.gecko.ok) bad.push("Hysteria-геккон не работает");
       if (d.vless && !d.vless.ok) bad.push("запасной VLESS не работает");
       if (d.tgproxy && !d.tgproxy.ok) bad.push("Telegram без VPN не работает");
       const brBad = d.bridges.filter((b) => !b.ok);
@@ -1948,6 +1949,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
             + (u.laptop ? ` · 💻 ноутбук: ${u.laptop.online ? "в сети" : "не в сети"}, ↓${bytes(u.laptop.tx)} ↑${bytes(u.laptop.rx)}` : "") }));
         const kinds = [["hy2", "Hysteria", "основной, быстрый (UDP)"],
           ["obfs", "Маскировка", "Hysteria с маскировкой salamander: если обычный режут, пакеты выглядят как шум. Winger берёт его сам"],
+          ["gecko", "Геккон", "Hysteria с маскировкой gecko: тот же шум, но и начало связи режется на куски случайного размера — на случай, если salamander научатся узнавать. Winger берёт его сам"],
           ["vless", "VLESS", "запасной, когда режут UDP"],
           ["tg", "Telegram", "Только Telegram, без VPN — для iPhone или компьютера без Winger: Telegram сам ходит через этот прокси (ключ общий для всех)"]].filter((k) => u.links[k[0]]);
         const pane = el("div");
