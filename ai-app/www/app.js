@@ -21,6 +21,7 @@
       if (k === "class") n.className = v;
       else if (k === "text") n.textContent = v;
       else if (k === "html") n.innerHTML = v;
+      else if (k === "icon") n.append(icon(v));  // the sprite's icon, before the words
       else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
       else n.setAttribute(k, v === true ? "" : v);
     }
@@ -517,6 +518,39 @@
   // emoji some phones draw as plain black signs without the «picture» mark (U+FE0F): only this app's own words and the
   // server's labels in the family's screens get it (never everywhere: the owner's code matches its texts as they are)
   const emo = (s) => String(s).replace(/(🖼|🌫|🎞|🖌|🗑|🗂|🗣|🛡|🏖|↩|⏹)(?!️)/gu, "$1️");
+  // the icons: one sprite in index.html (a 24px grid of strokes, shared with Winger). The sign a button's words began
+  // with picks its icon: «📷 Снять фото» → the camera and «Снять фото»; a sign with no icon stays as it was
+  const SVGNS = "http://www.w3.org/2000/svg";
+  function icon(name) {
+    const s = document.createElementNS(SVGNS, "svg"), u = document.createElementNS(SVGNS, "use");
+    s.setAttribute("class", "i");
+    s.setAttribute("aria-hidden", "true");
+    s.setAttribute("focusable", "false");
+    u.setAttribute("href", "#i-" + name);
+    u.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#i-" + name);  // (older WebViews)
+    s.appendChild(u);
+    return s;
+  }
+  const ICONS = { "⏰": "alarm", "🗣": "translate", "🎉": "cake", "✉": "letter", "💬": "reply", "🍳": "pot", "🧒": "bulb", "💡": "bulb",
+    "📋": "copy", "🎁": "gift", "📣": "megaphone", "🧳": "suitcase", "🔎": "search", "🔍": "search", "✨": "sparkle", "🪄": "wand",
+    "⬜": "square", "🌫": "fog", "🙂": "smile", "👴": "restore", "🎨": "palette", "📑": "scan", "⬛": "contrast", "🎞": "film", "🌈": "sun",
+    "✏": "pen", "✍": "pen", "🖍": "crayon", "🎭": "smile", "🖼": "photo", "🖌": "brush", "🦸": "smile", "🎬": "film", "🔥": "flame",
+    "📸": "people", "🧰": "more", "📷": "camera", "📄": "doc", "📝": "doc", "🌐": "globe", "📚": "study", "🧮": "calc", "🎌": "brush",
+    "🧸": "smile", "🌻": "brush", "🏖": "sun", "🚶": "user-x", "⏱": "timer", "📖": "study", "✕": "x", "🔑": "key", "🗂": "history", "➕": "plus",
+    "🧹": "sweep", "⬇": "download", "📤": "share", "🔊": "speaker", "✂": "scissors", "🔄": "refresh", "↩": "undo", "🗑": "trash",
+    "🔔": "bell", "📌": "pin", "⏹": "stop", "🎤": "mic", "➤": "send" };
+  // the ready tasks by their key (the server's signs: «📋 План» is a plan, not «copy»)
+  const IDEA_ICONS = { congrats: "cake", letter: "letter", reply: "reply", recipe: "pot", explain: "bulb", plan: "list", gift: "gift",
+    post: "megaphone", trip: "suitcase", check: "search" };
+  const iconOf = (e) => ICONS[String(e || "").replace(/[️‍]/g, "")] || "";
+  function lead(text) {
+    const s = String(text), i = s.indexOf(" "), name = iconOf(i > 0 ? s.slice(0, i) : s);
+    if (!name) return [s];
+    const rest = i > 0 ? s.slice(i + 1) : "";
+    return rest ? [icon(name), el("span", { text: rest })] : [icon(name)];
+  }
+  // a well with the icon for a sign (or the sign itself when there is no icon for it)
+  const well = (cls, sign, name) => el("span", { class: cls }, name || iconOf(sign) ? icon(name || iconOf(sign)) : sign || "•");
   function toast(text, ms) {
     document.querySelectorAll(".toast").forEach((t) => t.remove());
     const t = el("div", { class: "toast", role: "status", text });
@@ -527,7 +561,7 @@
     const bg = el("div", { class: "sheet-bg" });
     const close = () => bg.remove();
     const box = el("div", { class: "sheet" }, el("div", { class: "sheet-head" }, title ? el("h2", { text: title }) : el("span", { style: "flex:1" }),
-      el("button", { class: "sheet-x", "aria-label": "Закрыть", text: "✕", onclick: close })));
+      el("button", { class: "sheet-x", "aria-label": "Закрыть", onclick: close }, icon("x"))));
     bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
     build(box, close);
     bg.append(box);
@@ -541,15 +575,17 @@
       for (const it of items) {
         if (!it) continue;
         if (typeof it === "string") { list.append(el("div", { class: "menu-sec", text: it })); continue; }
-        list.append(el("button", { onclick: () => { close(); it[2](); } }, el("span", { class: "ic", text: it[0] }), el("span", { text: it[1] })));
+        list.append(el("button", { onclick: () => { close(); it[2](); } },
+          it[0] instanceof Node ? el("span", { class: "ic" }, it[0]) : well("ic", it[0]), el("span", { text: it[1] })));
       }
       box.append(list);
     });
   }
-  // a big tile of a tool: «🪄 Убрать фон» — the icon and the words
-  function tool(text, onclick) {
+  // a row of a tool: «🪄 Убрать фон» — the icon in its well and the words (the words last: fitTools() measures them);
+  // name: an icon chosen by the caller rather than by the sign
+  function tool(text, onclick, name) {
     const s = emo(text), i = s.indexOf(" ");
-    return el("button", { class: "tool", onclick }, el("span", { class: "ic", text: i > 0 ? s.slice(0, i) : "•" }), el("span", { text: i > 0 ? s.slice(i + 1) : s }));
+    return el("button", { class: "tool", onclick }, well("ic", i > 0 ? s.slice(0, i) : "", name), el("span", { text: i > 0 ? s.slice(i + 1) : s }));
   }
   // the tiles in a grid: two a row while every word fits its tile, else one a row. The CSS (9.6em columns) does it where
   // a large system font grows «em»; Android's text zoom may grow only the letters, so the words themselves are measured
@@ -612,23 +648,31 @@
     kids.forEach((k) => k.remove());
     row.classList.add("gone");
     const timer = setTimeout(commit, 5000);
-    row.append(el("div", { class: "grow", text: said }), el("button", { class: "act", text: "↩️ Вернуть", onclick: () => {
+    row.append(el("div", { class: "grow", text: said }), el("button", { class: "act", onclick: () => {
       clearTimeout(timer);
       row.innerHTML = "";
       row.classList.remove("gone");
       kids.forEach((k) => row.append(k));
-    } }));
+    } }, ...lead("↩️ Вернуть")));
   }
   function viewer(blob, name, extra) {
     const v = el("div", { class: "viewer" });
     const close = () => v.remove();
     v.append(el("div", { class: "img", onclick: close }, el("img", { src: urlOf(blob) })),
       el("div", { class: "bar2" },
-        el("button", { text: "⬇️ Сохранить", onclick: () => { saveBlob(blob, name); toast("Сохранено"); } }),
-        el("button", { text: "📤 Поделиться", onclick: () => shareBlob(blob, name) }),
-        extra ? el("button", { text: extra[0], onclick: () => { close(); extra[1](); } }) : null,
-        el("button", { text: "✕ Закрыть", onclick: close })));
+        el("button", { onclick: () => { saveBlob(blob, name); toast("Сохранено"); } }, ...lead("⬇️ Сохранить")),
+        el("button", { onclick: () => shareBlob(blob, name) }, ...lead("📤 Поделиться")),
+        extra ? el("button", { onclick: () => { close(); extra[1](); } }, ...lead(extra[0])) : null,
+        el("button", { onclick: close }, ...lead("✕ Закрыть"))));
     document.body.append(v);
+  }
+  // the composer's main button: the microphone while there is nothing to send, the arrow once there is (drawn only on change)
+  function voiceOrSend(b, send) {
+    if (b.dataset.send === (send ? "1" : "") && b.firstChild) return;
+    b.dataset.send = send ? "1" : "";
+    b.innerHTML = "";
+    b.append(icon(send ? "send" : "mic"));
+    b.setAttribute("aria-label", send ? "Отправить" : "Сказать голосом");
   }
   function autoGrow(ta) {
     ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; });
@@ -651,7 +695,7 @@
     const c = s.match(/\b([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})\b/);
     return c ? { host: "", code: c[1] } : null;
   }
-  const NO_CODE = "Не вижу кода. Скопируйте сообщение от владельца помощника целиком и нажмите «📋\u00a0Вставить скопированное».";  // the sign stays with its word; the name may wrap at a big font
+  const NO_CODE = "Не вижу кода. Скопируйте сообщение от владельца помощника целиком и нажмите «Вставить скопированное».";  // the button's name as it reads on it
   function renderLogin(message) {
     const app = $("#app");
     app.innerHTML = "";
@@ -663,7 +707,7 @@
       if (!p) { err.textContent = NO_CODE; return; }
       if (Native) {
         const host = p.host || (Native.getHost && Native.getHost());
-        if (!host) { err.textContent = "Нужна вся строка из сообщения, а не только код. Скопируйте её целиком и нажмите «📋\u00a0Вставить скопированное»."; return; }
+        if (!host) { err.textContent = "Нужна вся строка из сообщения, а не только код. Скопируйте её целиком и нажмите «Вставить скопированное»."; return; }
         Native.setHost(host);
       }
       go.disabled = true;
@@ -680,13 +724,13 @@
     go.onclick = login;
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
     // the usual way: the whole message from the owner is copied — one tap reads it and signs in
-    const paste = el("button", { class: "btn wide", text: "📋 Вставить скопированное", onclick: async () => {
+    const paste = el("button", { class: "btn wide", onclick: async () => {
       let t = "";
       try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
       if (!t || !t.trim()) { toast("Ничего не скопировано — скопируйте строку из сообщения"); return; }
       inp.value = t.trim();
       if (parseLogin(t)) login(); else err.textContent = NO_CODE;
-    } });
+    } }, ...lead("📋 Вставить скопированное"));
     // the owner without a signed-in phone: a new code to the owner's mailbox, no server console needed
     const mail = el("button", { class: "btn line wide", style: "margin-top:18px", text: "✉️ Я владелец — прислать код на почту", onclick: async () => {
       if (Native) {
@@ -703,7 +747,7 @@
       err.textContent = "";
       try {
         const r = await api("/api/owner_mail", {});
-        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «📋\u00a0Вставить скопированное».`;
+        err.textContent = `✉️ Код отправлен на ${r.to}. Скопируйте строку из письма и нажмите «Вставить скопированное».`;
       } catch (e) {
         err.textContent = problem(e);
       }
@@ -712,7 +756,7 @@
     // only on the owner's phone (or after five taps on the star): the family's app shows no owner's buttons
     let taps = 0;
     if (!store.get("wasOwner", false)) mail.classList.add("hidden");
-    const logo = el("div", { class: "logo", text: "✦", onclick: () => { if (++taps >= 5) mail.classList.remove("hidden"); } });
+    const logo = el("div", { class: "logo", onclick: () => { if (++taps >= 5) mail.classList.remove("hidden"); } }, icon("logo"));
     app.append(el("div", { class: "login" },
       logo, el("h1", { text: "ИИ-помощник" }),
       el("p", { text: "Отвечает на вопросы, помогает с уроками, улучшает и меняет фото, рисует и переводит." }),
@@ -733,11 +777,13 @@
   }
 
   // ---------- the main screen ----------
-  const TABS = [["chat", "💬", "Чат"], ["study", "📚", "Учёба"], ["photo", "🖼️", "Фото"], ["video", "🎬", "Видео"], ["more", "☰", "Ещё"]];
-  const TITLES = { chat: "Чат", study: "Учёба", photo: "Фото", video: "Видео", vpn: "Управление", more: "Ещё" };
-  // (v36) the family has four tabs (the owner: «чат, фото, видео и учёба»); «Ещё» — the ☰ in the header (reminders,
-  // translator, memory, settings); the owner keeps «Управление» and «Ещё» as tabs
-  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "🛡️", "Управление"]], TABS.slice(4)) : TABS.slice(0, 4));
+  // [key, icon, name]
+  const TABS = [["chat", "chat", "Чат"], ["study", "study", "Учёба"], ["photo", "photo", "Фото"], ["video", "video", "Видео"], ["more", "more", "Ещё"]];
+  // the chat is the helper's home: its header carries the helper's name (the tab below says «Чат»)
+  const TITLES = { chat: "Помощник", study: "Учёба", photo: "Фото", video: "Видео", vpn: "Управление", more: "Ещё" };
+  // (v41, design B) everyone has «Ещё» as the last tab (reminders, translator, memory, settings) — a tab is found where a
+  // ☰ in the header was not; the owner keeps «Управление» before it
+  const tabsFor = (me) => (me && me.panel ? TABS.slice(0, 4).concat([["vpn", "shield", "Управление"]], TABS.slice(4)) : TABS);
   // «Управление» is not in this app: the server gives its code only to the owner's signed-in phone
   async function ownerCode() {
     try {
@@ -768,7 +814,7 @@
       if (e instanceof HttpError && e.status < 500) { renderLogin(problem(e)); return; }
       const app = $("#app");
       app.innerHTML = "";
-      app.append(el("div", { class: "login" }, el("div", { class: "logo", text: "✦" }), el("p", { text: problem(e) }),
+      app.append(el("div", { class: "login" }, el("div", { class: "logo" }, icon("logo")), el("p", { text: problem(e) }),
         el("button", { class: "btn wide", text: "Повторить", onclick: start })));
       if (Date.now() - wingerAt < 2 * 60000) setTimeout(start, 8000);  // Winger is coming up over a bridge: again by itself
       return;
@@ -785,7 +831,7 @@
     S.viewsEl = el("div", { class: "views" });
     const tabs = el("div", { class: "tabs" + (tabsFor(S.me).length === 6 ? " six" : "") });
     for (const [key, ic, name] of tabsFor(S.me)) {
-      tabs.append(el("button", { class: "tab", "data-tab": key, onclick: () => show(key) }, el("span", { class: "ic", text: ic }), el("span", { text: name })));
+      tabs.append(el("button", { class: "tab", "data-tab": key, onclick: () => show(key) }, el("span", { class: "ic" }, icon(ic)), el("span", { class: "lb", text: name })));
     }
     shell.append(S.top, S.viewsEl, tabs);
     app.append(shell);
@@ -814,12 +860,13 @@
     const v = S.views[tab];
     S.top.innerHTML = "";
     const sub = v.sub ? v.sub() : "";
-    const family = !(S.me && S.me.panel);
-    if (family && tab === "more") S.top.append(el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => show(S.back || "chat") }));
-    else if (family) S.back = tab;
-    S.top.append(el("h1", {}, TITLES[tab], sub ? el("span", { class: "sub", text: sub }) : null));
-    for (const b of v.buttons ? v.buttons() : []) S.top.append(el("button", { class: "icon-btn pill", title: b[1], onclick: b[2] }, b[0]));
-    if (family && tab !== "more") S.top.append(el("button", { class: "icon-btn", text: "☰", title: "Ещё: напоминания, переводчик, настройки", "aria-label": "Ещё", onclick: () => show("more") }));
+    S.top.append(el("span", { class: "mark", "aria-hidden": "true" }, icon("logo")),
+      el("h1", {}, TITLES[tab], sub || tab === "chat" ? el("span", { class: "sub", text: sub || "для всей семьи" }) : null));
+    // a button's sign picks its icon («🗂️ Чаты» → the clock and «Чаты»); a sign alone is a round icon button
+    for (const b of v.buttons ? v.buttons() : []) {
+      const parts = lead(b[0]), only = parts.length === 1 && parts[0] instanceof Node;
+      S.top.append(el("button", { class: "icon-btn pill" + (only ? " only" : ""), title: b[1], "aria-label": only ? b[1] : null, onclick: b[2] }, ...parts));
+    }
     if (v.onShow) v.onShow();
   }
   function refreshTop() { if (S.views[S.tab]) show(S.tab); }
@@ -828,7 +875,7 @@
   const REMIND_ASK = /^\s*(?:пожалуйста,?\s+)?(напомни|напомнить|поставь\s+напоминание)(?![а-яё])/i;
   function remindSet(r) {
     if (!Native) return "\n\nНапоминания звенят только в приложении «ИИ-помощник» на телефоне.";
-    if (!Native.remindAdd) return "\n\nЧтобы телефон напоминал сам, обновите приложение: «☰ Ещё» → «Проверить обновление».";
+    if (!Native.remindAdd) return "\n\nЧтобы телефон напоминал сам, обновите приложение: вкладка «Ещё» → «Проверить обновление».";
     const id = Native.remindAdd(JSON.stringify(r));
     if (!id) return "\n\n⚠️ Не получилось поставить напоминание на телефоне.";
     if (Native.askNotify && !store.get("askedNotify", false)) {
@@ -839,15 +886,15 @@
     // the phone does not let it show notifications: said now, not found out when it never rings
     if (Native.notifyOn && !Native.notifyOn()) {
       if (Native.askNotify) Native.askNotify();
-      return "\n\n⚠️ Уведомления приложения выключены — напоминание не прозвенит. Включите: «☰ Ещё» → «⏰ Напоминания» → «🔔 Включить уведомления».";
+      return "\n\n⚠️ Уведомления приложения выключены — напоминание не прозвенит. Включите: вкладка «Ещё» → «⏰ Напоминания» → «🔔 Включить уведомления».";
     }
-    return "\n\nТелефон напомнит сам, даже без интернета. Отменить — «☰ Ещё» → «⏰ Напоминания».";
+    return "\n\nТелефон напомнит сам, даже без интернета. Отменить — вкладка «Ещё» → «⏰ Напоминания».";
   }
   function remindersCard(redraw) {
     const card = el("div", { class: "card" }, el("h3", { text: "⏰ Напоминания" }));
     if (Native.notifyOn && !Native.notifyOn()) {
       card.append(el("div", { style: "font-size:14px;color:var(--danger-ink);margin:0 0 8px", text: "⚠️ Уведомления приложения выключены — напоминания не звенят." }),
-        el("button", { class: "btn soft wide", style: "margin-bottom:8px", text: "🔔 Включить уведомления", onclick: () => Native.notifySettings && Native.notifySettings() }));
+        el("button", { class: "btn soft wide", style: "margin-bottom:8px", onclick: () => Native.notifySettings && Native.notifySettings() }, ...lead("🔔 Включить уведомления")));
     }
     let list = [];
     try { list = JSON.parse(Native.reminders() || "[]"); } catch (e) { /* none */ }
@@ -860,7 +907,7 @@
       const row = el("div", { class: "row" }, el("div", { class: "grow" }, r.text, el("small", { text: at + (again[r.repeat] || "") })));
       // only this row goes: another row deleted just now keeps its «↩️ Вернуть»; the whole card is drawn again when it
       // is empty (its «Пока нет» words) or was drawn anew meanwhile
-      row.append(el("button", { class: "icon-btn", text: "🗑️", title: "Удалить", onclick: () => softDelete(row, "Напоминание удалено", () => {
+      row.append(el("button", { class: "icon-btn", icon: "trash", title: "Удалить", "aria-label": "Удалить", onclick: () => softDelete(row, "Напоминание удалено", () => {
         Native.remindDel(r.id);
         row.remove();
         if (!card.isConnected || !card.querySelector(".row")) redraw();
@@ -907,7 +954,7 @@
     const lab = m.label && (S.me.panel ? m.label : m.label.split(" · ").slice(1)
       .filter((x) => x && x !== S.me.modes.chat && !(thread === "study" && /класс|курс|Взрослый/.test(x))).join(" · "));
     if (lab) wrap.append(el("div", { class: "label", text: lab }));
-    const act = (text, onclick) => el("button", { class: "act", text, onclick });
+    const act = (text, onclick) => el("button", { class: "act", onclick }, ...lead(text));
     const file = m.result || m.video || m.pdf;
     if (file) {  // a picture, video or PDF that came out: keep it, share it, or (in Photo) work on it further
       wrap.append(el("div", { class: "acts" },
@@ -1210,8 +1257,8 @@
     try { sid = await Rec.start(); } catch (e) { toast("Нет доступа к микрофону"); return; }
     const time = el("span", { class: "time", text: "0:00" });
     const recRow = el("div", { class: "rec" }, el("span", { class: "dot" }), time,
-      el("button", { class: "round ghost", text: "✕", "aria-label": "Отменить", onclick: () => finish(false) }),
-      el("button", { class: "round main", text: "✓", "aria-label": "Готово", onclick: () => finish(true) }));
+      el("button", { class: "round ghost", icon: "x", "aria-label": "Отменить", onclick: () => finish(false) }),
+      el("button", { class: "round main", icon: "check", "aria-label": "Готово", onclick: () => finish(true) }));
     row.replaceWith(recRow);
     const tick = setInterval(() => {
       const s = Math.floor((Date.now() - Rec.t0) / 1000);
@@ -1240,8 +1287,8 @@
       } catch (e) { why = problem(e); }
       if (!why) { wait.replaceWith(row); onText(ev.text); return; }
       const again = el("div", { class: "rec" }, el("span", { class: "what", text: why }),
-        el("button", { class: "round ghost", text: "✕", "aria-label": "Отменить", onclick: () => again.replaceWith(row) }),
-        el("button", { class: "round main", text: "↻", "aria-label": "Распознать ещё раз", onclick: () => { again.replaceWith(row); hear(r); } }));
+        el("button", { class: "round ghost", icon: "x", "aria-label": "Отменить", onclick: () => again.replaceWith(row) }),
+        el("button", { class: "round main", icon: "refresh", "aria-label": "Распознать ещё раз", onclick: () => { again.replaceWith(row); hear(r); } }));
       wait.replaceWith(again);
     }
   }
@@ -1260,18 +1307,24 @@
     const first = (S.msgs[chatName(c.id)] || []).find((m) => m.role === "me" && m.text);
     return first ? cut40(first.text) : c.id === "main" ? "Первый чат" : "Новый чат";
   }
-  const IDEAS_SHOWN = ["congrats", "letter", "reply", "recipe", "explain", "gift"];  // the rest: «💡 Другие готовые задачи»
+  const IDEAS_SHOWN = ["congrats", "letter", "reply", "recipe", "explain", "gift"];  // the rest: «Другие задачи»
   function chatView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
-    const empty = () => el("div", { class: "empty" }, el("div", { class: "emoji", text: "✦" }), el("h2", { text: "Спросите что угодно" }),
-      el("p", { text: "Пишите или нажмите 🎤 и говорите. Фото и документы — через 📎." }),
-      el("p", { class: "empty-sec", text: "Готовые задачи" }),
-      tools(
-        Native && Native.remindAdd ? tool("⏰ Напомнить", () => { ta.value = "Напомни "; sync(); ta.focus(); }) : null,
-        tool("🗣️ Переводчик", translator),
-        IDEAS_SHOWN.filter((k) => S.me.ideas[k]).map((k) => tool(S.me.ideas[k][0], () => pickIdea(k)))),
-      el("button", { class: "btn line wide", style: "margin-top:12px", text: "💡 Другие готовые задачи", onclick: ideasMenu }));
+    // (design B) the first screen: the orb to talk to (Winger's power button, the same «on» colour), «Чем помочь?», and
+    // the ready tasks as rows of one list — «Другие задачи» the last of them
+    const empty = () => el("div", { class: "empty home" },
+      el("div", { class: "home-hero" },
+        el("button", { class: "orb", "aria-label": "Сказать голосом", icon: "mic", onclick: () => record() }),
+        el("h2", { text: "Чем помочь?" }),
+        el("p", { text: "Нажмите на шар и скажите — я слушаю. Или напишите внизу; фото и документы — через скрепку." })),
+      el("div", { class: "home-tasks" },
+        el("h3", { class: "empty-sec", text: "Готовые задачи" }),
+        tools(
+          Native && Native.remindAdd ? tool("⏰ Напомнить", () => { ta.value = "Напомни "; sync(); ta.focus(); }) : null,
+          tool("🗣️ Переводчик", translator),
+          IDEAS_SHOWN.filter((k) => S.me.ideas[k]).map((k) => tool(S.me.ideas[k][0], () => pickIdea(k), IDEA_ICONS[k])),
+          tool("🧰 Другие задачи", ideasMenu))));
     let cur = store.get("chatCur", "main"), th = null;
     if (!chatsAll().some((c) => c.id === cur)) cur = chatsAll()[0].id;
     const attach = el("div", { class: "attach-row hidden" });
@@ -1279,23 +1332,22 @@
     const ideaHint = el("div", { class: "idea-hint hidden" });
     const ta = el("textarea", { rows: 1, placeholder: "Сообщение" });
     autoGrow(ta);
-    const clip = el("button", { class: "round ghost", text: "📎", title: "Прикрепить", onclick: attachMenu });
-    const act = el("button", { class: "round main", text: "🎤" });
+    const clip = el("button", { class: "round ghost", icon: "clip", title: "Прикрепить", "aria-label": "Прикрепить", onclick: attachMenu });
+    const act = el("button", { class: "round main" });
+    voiceOrSend(act, false);
     const row = el("div", { class: "inrow" }, clip, ta, act);
     const composer = el("div", { class: "composer" }, attach, chips, ideaHint, row);
     root.append(scroll, composer);
     let image = null, doc = null;
 
     function sync() {
-      const has = ta.value.trim() || image || doc;
-      act.textContent = has ? "➤" : "🎤";
-      act.setAttribute("aria-label", has ? "Отправить" : "Сказать голосом");
+      voiceOrSend(act, !!(ta.value.trim() || image || doc));
       attach.innerHTML = "";
       attach.classList.toggle("hidden", !(image || doc || S.idea));
       if (image) attach.append(el("img", { src: urlOf(image), alt: "" }));
       if (doc) attach.append(el("div", { class: "chip", text: (doc.video ? "🎬 " : "📄 ") + doc.name }));
       if (S.idea) attach.append(el("div", { class: "chip on", text: S.me.ideas[S.idea][0] }));
-      if (image || doc || S.idea) attach.append(el("button", { class: "x", text: "✕", "aria-label": "Убрать", onclick: () => { image = doc = null; S.idea = null; sync(); } }));
+      if (image || doc || S.idea) attach.append(el("button", { class: "x", icon: "x", "aria-label": "Убрать", onclick: () => { image = doc = null; S.idea = null; sync(); } }));
       ideaHint.textContent = S.idea ? S.me.ideas[S.idea][1] : "";
       ideaHint.classList.toggle("hidden", !S.idea);
       ta.placeholder = S.idea ? "Напишите здесь" : "Сообщение";
@@ -1401,17 +1453,17 @@
           const day = c.upd ? new Date(c.upd).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "";
           box.append(el("div", { class: "row chat-row" + (c.id === cur ? " cur" : ""), onclick: () => { close(); openChat(c.id); } },
             el("div", { class: "grow" }, el("span", { class: "t", text: chatTitle(c) }), el("small", { text: c.id === cur ? "открыт сейчас" : day })),
-            el("button", { class: "round ghost", text: "✏️", title: "Переименовать", "aria-label": "Переименовать", onclick: async (e) => {
+            el("button", { class: "round ghost", icon: "pen", title: "Переименовать", "aria-label": "Переименовать", onclick: async (e) => {
               e.stopPropagation(); close();
               const t = await ask("Название чата", "Например: Ремонт кухни", chatTitle(c));
               if (t) { const chats = chatsAll(); const x = chats.find((y) => y.id === c.id); if (x) { x.title = t.slice(0, 60); store.set("chats", chats); refreshTop(); } }
             } }),
-            el("button", { class: "round ghost", text: "🗑️", title: "Удалить", "aria-label": "Удалить",
+            el("button", { class: "round ghost", icon: "trash", title: "Удалить", "aria-label": "Удалить",
               onclick: (e) => { e.stopPropagation(); close(); delChat(c); } })));
         }
       });
     }
-    act.onclick = () => (act.textContent === "➤" ? sendNow() : record());
+    act.onclick = () => (act.dataset.send ? sendNow() : record());
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); sendNow(); } });
 
     function record() {
@@ -1432,7 +1484,7 @@
     function ideasMenu() {
       menu("Готовые задачи", Object.entries(S.me.ideas).map(([k, v]) => {
         const s = emo(v[0]), i = s.indexOf(" ");
-        return [s.slice(0, i), s.slice(i + 1), () => pickIdea(k)];
+        return [IDEA_ICONS[k] ? icon(IDEA_ICONS[k]) : s.slice(0, i), s.slice(i + 1), () => pickIdea(k)];
       }));
     }
     bind();
@@ -1443,7 +1495,7 @@
       // the answer mode first: a long chat title is the one cut short, never the mode
       sub: () => [S.me.mode !== "chat" ? S.me.modes[S.me.mode] : "",
         chatsAll().length > 1 ? chatTitle(chatsAll().find((c) => c.id === cur) || { id: cur }) : ""].filter(Boolean).join(" · "),
-      buttons: () => [["🗂️ Чаты", "Чаты", chatsSheet], ["➕ Новый", "Новый чат", newChat]],
+      buttons: () => [["🗂️ Чаты", "Чаты", chatsSheet], ["✏️ Новый", "Новый чат", newChat]],
       attachImage(im) { image = im; sync(); },
       onShow: () => th.down(),
     };
@@ -1473,23 +1525,20 @@
     // with typed words the bubble keeps only the mode's sign: «✅ Реши: 2x + 5 = 17», not «✅ Решить: Реши: …»
     const modeSign = () => STUDY_MODES[mode][0].split(" ")[0];
     const tail = () => (S.msgs.study.length ? el("div", { class: "tail big-actions next" },
-      el("button", { class: "btn", text: "📷 Новое задание", onclick: () => shoot(true) }),
-      el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => shoot(false) })) : null);
+      el("button", { class: "btn", onclick: () => shoot(true) }, ...lead("📷 Новое задание")),
+      el("button", { class: "btn line", onclick: () => shoot(false) }, ...lead("🖼️ Из галереи"))) : null);
     const th = thread("study", scroll, null, tail);
     th.onRedraw = () => drawHead();
     scroll.append(head, th.box);
     const ta = el("textarea", { rows: 1, placeholder: "Ваш вопрос" });
     autoGrow(ta);
-    const cam = el("button", { class: "round ghost", text: "📷", title: "Фото задания", onclick: () => shoot(true) });
-    const act = el("button", { class: "round main", text: "🎤", "aria-label": "Сказать голосом" });
+    const cam = el("button", { class: "round ghost", icon: "camera", title: "Фото задания", "aria-label": "Фото задания", onclick: () => shoot(true) });
+    const act = el("button", { class: "round main" });
+    voiceOrSend(act, false);
     const row = el("div", { class: "inrow" }, cam, ta, act);
     const composer = el("div", { class: "composer" }, row);
     root.append(scroll, composer);
-    const syncAct = () => {
-      const has = !!ta.value.trim();
-      act.textContent = has ? "➤" : "🎤";
-      act.setAttribute("aria-label", has ? "Отправить" : "Сказать голосом");
-    };
+    const syncAct = () => voiceOrSend(act, !!ta.value.trim());
     ta.addEventListener("input", syncAct);
     act.onclick = () => (ta.value.trim() ? submit() : dictate(row, (t) => { ta.value = t; submit(); }));
 
@@ -1498,22 +1547,22 @@
       const has = S.msgs.study.length > 0;
       if (has && !open) {
         head.append(el("button", { class: "card study-line", onclick: () => { open = true; drawHead(); } },
-          el("span", { class: "grow", text: gradeName() + " · " + STUDY_MODES[mode][0] }), el("span", { class: "muted", text: "Изменить ›" })));
+          el("span", { class: "grow mode-line" }, gradeName() + " · ", ...lead(STUDY_MODES[mode][0])), el("span", { class: "muted chev-after", text: "Изменить" }, icon("chev"))));
       } else {
         const sel = el("select", { "aria-label": "Кто учится", onchange: () => { grade = sel.value; store.set("grade", grade); refreshTop(); } });
         for (const [k, v] of GRADES) sel.append(el("option", { value: k, text: v, selected: k === grade }));
         const seg = el("div", { class: "seg grid2", style: "margin-top:8px" });
         for (const [k, v] of Object.entries(STUDY_MODES)) {
-          seg.append(el("button", { class: k === mode ? "on" : "", "aria-pressed": k === mode ? "true" : "false", text: v[0],
-            onclick: () => { mode = k; store.set("studyMode", k); open = false; drawHead(); } }));
+          seg.append(el("button", { class: k === mode ? "on" : "", "aria-pressed": k === mode ? "true" : "false",
+            onclick: () => { mode = k; store.set("studyMode", k); open = false; drawHead(); } }, ...lead(v[0])));
         }
         head.append(el("div", { class: "card" },
           el("div", { class: "row" }, el("div", { class: "grow" }, "Кто учится"), sel),
           seg, el("div", { class: "study-desc", text: STUDY_MODES[mode][1] })));
         if (!has) {
           head.append(el("div", { class: "big-actions", style: "margin-bottom:12px" },
-            el("button", { class: "big primary", onclick: () => shoot(true) }, el("span", { class: "ic", text: "📷" }), "Снять задание"),
-            el("button", { class: "big", onclick: () => shoot(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи")));
+            el("button", { class: "big primary", onclick: () => shoot(true) }, well("ic", "", "camera"), "Снять задание"),
+            el("button", { class: "big", onclick: () => shoot(false) }, well("ic", "", "photo"), "Из галереи")));
         }
       }
       ta.placeholder = mode === "essay" ? "Тема сочинения" : S.msgs.study.length ? "Что непонятно?"
@@ -1566,10 +1615,12 @@
   }
 
   // ---------- Photo: send a photo and say what to do; without a photo, describe a picture to draw ----------
-  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan"];  // on the chosen photo; the rest under «🧰 Другое» or in words
+  // on the chosen photo (each only when the server has it); the rest under «🧰 Другое» or in words. (1040) «coloring»: a
+  // colouring page for children; «neat»: a handwritten letter rewritten neatly
+  const QUICK = ["enhance", "removebg", "restore", "colorize", "scan", "coloring", "neat"];
   // clearer names for some of the server's tools (only renames: the tools themselves are the server's)
   const OP_NAMES = { restore: "👴 Восстановить старое", scan: "📑 Скан документа", bw: "⬛ Чёрно-белое", cartoon: "🦸 Мульт",
-    oil: "🖌️ Картина маслом", blurbg: "🌫️ Размыть фон", vintage: "🎞️ Винтаж" };
+    oil: "🖌️ Картина маслом", blurbg: "🌫️ Размыть фон", vintage: "🎞️ Винтаж", coloring: "🖍️ Раскраска", neat: "📝 Переписать аккуратно" };
   const STYLE_ASKS = { anime: ["🎌", "В стиле аниме", "Перерисуй в стиле аниме"], toon: ["🧸", "Как в мультфильме", "Сделай как кадр из мультфильма Pixar, 3D"],
     gogh: ["🌻", "Как картина Ван Гога", "Перерисуй как картину Ван Гога"], sea: ["🏖️", "Фон — море", "Замени фон на берег моря"],
     people: ["🚶", "Убрать лишних людей", "Убери посторонних людей на заднем плане"] };
@@ -1584,22 +1635,22 @@
     const empty = () => (photo ? null : el("div", { class: "empty" }, el("h2", { text: "Что сделать с фото?" }),
       el("p", { text: "Пришлите фото и скажите или напишите, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»." }),
       el("div", { class: "big-actions", style: "margin:16px 0 4px" },
-        el("button", { class: "big primary", onclick: () => pick(true) }, el("span", { class: "ic", text: "📷" }), "Снять фото"),
-        el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи"),
-        trendsOk() ? el("button", { class: "big wide", onclick: () => trendsSheet(th, "photo") }, el("span", { class: "ic", text: "🔥" }),
+        el("button", { class: "big primary", onclick: () => pick(true) }, well("ic", "", "camera"), "Снять фото"),
+        el("button", { class: "big", onclick: () => pick(false) }, well("ic", "", "photo"), "Из галереи"),
+        trendsOk() ? el("button", { class: "big wide", onclick: () => trendsSheet(th, "photo") }, well("ic", "", "flame"),
           el("span", {}, "Фото-тренды", el("small", { text: "в один клик: Хэллоуин, фигурка в коробке, обнять себя в детстве" }))) : null,
-        shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, el("span", { class: "ic", text: "📸" }),
+        shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, well("ic", "", "people"),
           el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до четырёх) на фото по теме: море, Новый год, журнал…" }))) : null,
-        has("animate") ? el("button", { class: "big wide", onclick: liven }, el("span", { class: "ic", text: "🎬" }),
+        has("animate") ? el("button", { class: "big wide", onclick: liven }, well("ic", "", "film"),
           el("span", {}, "Оживить фото", el("small", { text: "фото станет коротким роликом: улыбка, взгляд, лёгкое движение" }))) : null),
-      S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите — я нарисую:" }),
+      S.me.can.draw ? [el("h3", { class: "empty-sec", text: "Или опишите — я нарисую:" }),
         el("div", { class: "hints" }, DRAW_HINTS.map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.dispatchEvent(new Event("input")); ta.focus(); } })))] : null));
     const has = (op) => !!(S.me.photo_ops[op] || S.me.ai_ops[op]);
     // the chosen photo, big, with what can be done to it; with no photo under the results, the big ways to the next one
     // (the empty screen with them is gone once there is a result)
     const chosen = () => (photo ? el("div", { class: "tail chosen" },
       el("div", { class: "preview" }, el("img", { src: urlOf(photo), alt: "", onclick: () => viewer(photo, "photo.jpg") }),
-        el("button", { class: "x", text: "✕", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
+        el("button", { class: "x", icon: "x", "aria-label": "Убрать фото", onclick: () => { photo = null; sync(); th.redraw(); refreshTop(); } })),
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
       tools(QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
         tool("✍️ Своё изменение", own),
@@ -1611,10 +1662,10 @@
       : S.scan.length ? null
       : S.msgs.photo.length ? el("div", { class: "tail big-actions next", style: "grid-template-columns:1fr 1fr" },
         el("div", { class: "menu-sec", style: "grid-column:1/-1;padding:4px 2px 0", text: "Новое фото" }),
-        el("button", { class: "btn", text: "📷 Снять фото", onclick: () => pick(true) }),
-        el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => pick(false) }),
-        trendsOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🔥 Фото-тренды", onclick: () => trendsSheet(th, "photo") }) : null,
-        shootOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "📸 Фотосессия", onclick: () => shootSheet(th) }) : null)
+        el("button", { class: "btn", onclick: () => pick(true) }, ...lead("📷 Снять фото")),
+        el("button", { class: "btn line", onclick: () => pick(false) }, ...lead("🖼️ Из галереи")),
+        trendsOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", onclick: () => trendsSheet(th, "photo") }, ...lead("🔥 Фото-тренды")) : null,
+        shootOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", onclick: () => shootSheet(th) }, ...lead("📸 Фотосессия")) : null)
       : null);
     const th = thread("photo", scroll, empty, chosen);
     scroll.append(th.box);
@@ -1622,11 +1673,12 @@
     const ownHint = el("div", { class: "idea-hint hidden" });  // «✍️ Своё»: what to say, above the input
     const ta = el("textarea", { rows: 1 });
     autoGrow(ta);
-    const cam = el("button", { class: "round ghost", text: "📷", title: "Выбрать фото", onclick: () => menu("Выбрать фото", [
+    const cam = el("button", { class: "round ghost", icon: "camera", title: "Выбрать фото", "aria-label": "Выбрать фото", onclick: () => menu("Выбрать фото", [
       ["📷", "Снять фото", () => pick(true)], ["🖼️", "Из галереи", () => pick(false)],
       trendsOk() ? ["🔥", "Фото-тренды", () => trendsSheet(th, "photo")] : null,
       shootOk() ? ["📸", "Фотосессия", () => shootSheet(th)] : null]) });
-    const act = el("button", { class: "round main", text: "🎤" });
+    const act = el("button", { class: "round main" });
+    voiceOrSend(act, false);
     const row = el("div", { class: "inrow" }, cam, ta, act);
     root.append(scroll, el("div", { class: "composer" }, scanBar, ownHint, row));
 
@@ -1637,29 +1689,27 @@
       return m && m.role === "ai" && m.result && /^image\//.test(m.result.type || "") ? m.result : null;
     }
     function sync() {
-      const typed = !!ta.value.trim();
-      act.textContent = typed ? "➤" : "🎤";
-      act.setAttribute("aria-label", typed ? "Отправить" : "Сказать голосом");
+      voiceOrSend(act, !!ta.value.trim());
       // a placeholder stays one line even at a large font (1.3× on 360: under ~16 letters); a longer «how» goes into
       // ownHint above the input
-      ta.placeholder = photo ? "Что сделать?" : lastPic() ? "Что изменить?" : S.me.can.draw ? "Что нарисовать?" : "Пришлите фото 📷";
+      ta.placeholder = photo ? "Что сделать?" : lastPic() ? "Что изменить?" : S.me.can.draw ? "Что нарисовать?" : "Сначала пришлите фото";
       if (!photo) ownHint.classList.add("hidden");
       scanBar.innerHTML = "";
       scanBar.classList.toggle("hidden", !S.scan.length);
       if (S.scan.length) {
         // while pages are collected, this is the one place for the next step: the tail under the result steps aside.
         // «Собрать PDF» is the filled one; its count is on the line just above (with it, it no longer fits one line at 360)
-        scanBar.append(el("span", { class: "grow", text: `📑 Страниц для PDF: ${S.scan.length}` }),
-          el("button", { class: "act", text: "✕", "aria-label": "Убрать страницы", onclick: async () => {
+        scanBar.append(el("span", { class: "grow", icon: "scan" }, ` Страниц для PDF: ${S.scan.length}`),
+          el("button", { class: "act", icon: "x", "aria-label": "Убрать страницы", onclick: async () => {
             if (!(await confirmBox(`Убрать собранные страницы (${S.scan.length})? PDF не соберётся.`, "Убрать", true))) return;
             S.scan = [];
             sync();
             th.redraw();
           } }),
           el("div", { class: "banner-acts" },
-            el("button", { class: "btn line", text: "📷 Ещё страница", onclick: () => menu("Ещё страница", [
-              ["📷", "Снять", () => page(true)], ["🖼️", "Из галереи", () => page(false)]]) }),
-            el("button", { class: "btn", text: "📄 Собрать PDF", onclick: makePdf })));
+            el("button", { class: "btn line", onclick: () => menu("Ещё страница", [
+              ["📷", "Снять", () => page(true)], ["🖼️", "Из галереи", () => page(false)]]) }, ...lead("📷 Ещё страница")),
+            el("button", { class: "btn", onclick: makePdf }, ...lead("📄 Собрать PDF"))));
       }
     }
     ta.addEventListener("input", sync);
@@ -1667,7 +1717,7 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !("ontouchstart" in window)) { e.preventDefault(); send(); } });
     function own() {
       ta.placeholder = "Что изменить?";  // the examples are in ownHint over it: a placeholder fits one line at a large font
-      ownHint.textContent = "Скажите 🎤 или напишите, что изменить: «сделай зиму», «добавь шляпу»";
+      ownHint.textContent = "Скажите или напишите, что изменить: «сделай зиму», «добавь шляпу»";
       ownHint.classList.remove("hidden");
       ta.focus();
     }
@@ -1737,7 +1787,7 @@
       if (!text) return;
       if (S.busy.photo) { toast("Подождите, предыдущее ещё делается"); return; }
       if (!photo && !(/^\s*нарису/i.test(text) && S.me.can.draw)) photo = lastPic();
-      if (!photo && !S.me.can.draw) { toast("Сначала пришлите фото: 📷 слева"); return; }
+      if (!photo && !S.me.can.draw) { toast("Сначала пришлите фото: кнопка с фотоаппаратом слева"); return; }
       ta.value = "";
       ta.style.height = "auto";
       ownHint.classList.add("hidden");
@@ -1811,11 +1861,13 @@
       grid.innerHTML = "";
       const list = mine.filter((t) => (!cat || t.cats.includes(cat)) && (!q || (t.title + " " + t.desc).toLowerCase().includes(q)));
       for (const t of list) {
-        grid.append(el("button", { class: "tcard", "aria-label": t.title + (t.hit ? " — хит" : ""), onclick: () => { if (before) before(); trendCard(th, t); } },
-          t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
-          t.fresh ? el("span", { class: "tcard-new", text: "НОВОЕ" }) : null,  // (a trend found on the web this week)
-          t.clip ? el("span", { class: "tcard-play", "aria-hidden": "true", text: "▶" }) : null,  // (v36) an example clip inside
-          // (v40) «ХИТ» beside the name: the picture's own «ИИ» mark (top left) stays in sight
+        // (design B) the picture (cut from the bottom only: its own «ИИ» mark, top left, stays in sight) and the name
+        // under it, «ХИТ» beside the name
+        grid.append(el("button", { class: "tcard" + (t.hit ? " hit" : ""), "aria-label": t.title + (t.hit ? " — хит" : ""), onclick: () => { if (before) before(); trendCard(th, t); } },
+          el("span", { class: "tcard-pic" },
+            t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", icon: "sparkle" }),
+            t.fresh ? el("span", { class: "tcard-new", text: "НОВОЕ" }) : null,  // (a trend found on the web this week)
+            t.clip ? el("span", { class: "tcard-play", "aria-hidden": "true", icon: "play" }) : null),  // (v36) an example clip inside
           el("span", { class: "tcard-name" }, t.title, t.hit ? el("span", { class: "tcard-hit inline", text: "ХИТ" }) : null)));
       }
       if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: q ? "Ничего не нашлось — попробуйте другое слово." : "В этом разделе пока пусто." }));
@@ -1884,7 +1936,7 @@
         schips.style.display = secsHead.style.display = swap ? "none" : "";
       };
       paintSecs();
-      const big = el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }));
+      const big = el("div", { class: "tcard-big" }, t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", icon: "sparkle" }));
       if (t.clip) {  // (v36) the example clip: what will be made, the card's picture brought to life
         api("/api/trend_clip", { id: t.id }).then((r) => {
           if (!big.isConnected && !document.body.contains(big)) return;
@@ -2062,7 +2114,7 @@
       : el("div", { class: "empty trends-home" }, trendsPanel(th, "video")));
     const th = thread("video", scroll, empty);
     scroll.append(th.box);
-    const trBtn = el("button", { class: "btn", text: "🔥 Видео-тренды", onclick: () => trendsSheet(th, "video") });
+    const trBtn = el("button", { class: "btn", onclick: () => trendsSheet(th, "video") }, ...lead("🔥 Видео-тренды"));
     const bar = el("div", { class: "vbar" });
     const paintBar = () => {  // with the clips made under them, the trends a tap away (with none, they are the screen)
       bar.innerHTML = "";
@@ -2177,10 +2229,10 @@
     const frame = el("iframe", { sandbox: "allow-scripts allow-forms allow-modals", title: m.name });
     frame.srcdoc = maPage(m.html);
     const pin = Native && Native.pinApp
-      ? el("button", { class: "icon-btn", title: "На главный экран", text: "📌", onclick: () => { if (!Native.pinApp(m.id, m.name, m.icon)) toast("Этот телефон не умеет ставить значки"); } })
+      ? el("button", { class: "icon-btn", title: "На главный экран", "aria-label": "На главный экран", icon: "pin", onclick: () => { if (!Native.pinApp(m.id, m.name, m.icon)) toast("Этот телефон не умеет ставить значки"); } })
       : null;
     const box = el("div", { class: "ma-view", role: "dialog", "aria-label": m.name },
-      el("div", { class: "ma-head" }, el("button", { class: "icon-btn", "aria-label": "Назад", text: "←", onclick: () => box.close() }),
+      el("div", { class: "ma-head" }, el("button", { class: "icon-btn", "aria-label": "Назад", icon: "back", onclick: () => box.close() }),
         el("b", { class: "grow", text: m.icon + " " + m.name }), pin), frame);
     box.close = () => { box.remove(); if (maOpen && maOpen.el === box) maOpen = null; };
     maOpen = { id: m.id, frame, el: box };
@@ -2224,15 +2276,15 @@
       // the owner's «Ещё» is for work: no translator, reminders or memory (the family keeps them)
       if (!me.panel) scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: translator },
-          el("span", { style: "font-size:24px", text: "🗣️" }),
+          well("well", "", "translate"),
           el("div", { class: "grow" }, "Переводчик", el("small", { text: "Скажите фразу — переведу и прочитаю вслух" })),
-          el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
+          el("span", { class: "chev", icon: "chev" }))));
       // the owner's keys: the same list as in «Управление» (its code comes from the server; without it — that tab)
       if (me.panel) scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => (S.views.vpn && S.views.vpn.keys ? S.views.vpn.keys() : show("vpn")) },
-          el("span", { style: "font-size:24px", text: "🔑" }),
+          well("well", "", "key"),
           el("div", { class: "grow" }, "Ключи", el("small", { text: "Все ключи помощника и Claude: какие подключены, каких нет" })),
-          el("span", { class: "muted", style: "font-size:22px", text: "›" }))));
+          el("span", { class: "chev", icon: "chev" }))));
       if (!me.panel && Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
       for (const [k, v] of Object.entries(me.modes)) modeSel.append(el("option", { value: k, text: v, selected: k === me.mode }));
@@ -2260,7 +2312,7 @@
       if (!me.memory.length) mem.append(el("div", { class: "muted", style: "font-size:14px", text: "Пока ничего. Скажите в чате: «Запомни, что…»" }));
       for (const f of me.memory) {
         const row = el("div", { class: "row" }, el("div", { class: "grow", text: f }));
-        row.append(el("button", { class: "icon-btn", text: "✕", title: "Забыть", "aria-label": "Забыть", onclick: () => softDelete(row, "Удалено из памяти", async () => {
+        row.append(el("button", { class: "icon-btn", icon: "x", title: "Забыть", "aria-label": "Забыть", onclick: () => softDelete(row, "Удалено из памяти", async () => {
           const r = await api("/api/memory", { forget: f }).catch(() => null);
           if (!r) { toast("Не получилось забыть — проверьте интернет"); draw(); return; }
           S.me.memory = r.memory;
@@ -2269,10 +2321,10 @@
         }) }));
         mem.append(row);
       }
-      mem.append(el("button", { class: "btn soft wide", style: "margin-top:8px", text: "➕ Добавить", onclick: async () => {
+      mem.append(el("button", { class: "btn soft wide", style: "margin-top:8px", icon: "plus", onclick: async () => {
         const t = await ask("Что запомнить?", "Например: у меня двое детей, младшему 7 лет");
         if (t) { const r = await api("/api/memory", { add: t }).catch((e) => toast(problem(e))); if (r) { S.me.memory = r.memory; draw(); } }
-      } }));
+      } }, "Добавить"));
       if (!me.panel) scroll.append(mem);
       const theme = el("select", { "aria-label": "Тема", onchange: () => { store.set("theme", theme.value); applyTheme(); } });
       for (const [k, v] of Object.entries(THEMES)) theme.append(el("option", { value: k, text: v, selected: k === store.get("theme", "system") }));
@@ -2306,18 +2358,18 @@
     // «…или на английском»
     const hintText = () => "Нажмите и говорите — по-русски или на " + me.langs[target][1].toLowerCase().replace(/ий$/, "ом");
     const scr = el("div", { class: "viewer", style: "background:var(--bg)" });
-    const top = el("div", { class: "top" }, el("button", { class: "icon-btn", text: "←", "aria-label": "Назад", onclick: () => scr.close() }), el("h1", { text: "Переводчик" }));
+    const top = el("div", { class: "top" }, el("button", { class: "icon-btn", icon: "back", "aria-label": "Назад", onclick: () => scr.close() }), el("h1", { text: "Переводчик" }));
     const langs = el("div", { class: "chips fade", style: "padding:10px 12px 0" });  // the fade shows there are more to the right
     // what to do, until the first phrase
     const list = el("div", { class: "scroll" }, el("div", { class: "empty tr-empty" },
-      el("p", { text: "Выберите язык сверху, нажмите 🎤 и скажите фразу — перевод появится здесь и прозвучит вслух." })));
+      el("p", { text: "Выберите язык сверху, нажмите на шар и скажите фразу — перевод появится здесь и прозвучит вслух." })));
     const firstCard = () => list.querySelectorAll(".tr-empty").forEach((x) => x.remove());
     const ta = el("textarea", { rows: 1, placeholder: "Или напишите текст" });
     autoGrow(ta);
-    const mic = el("button", { class: "mic-big", text: "🎤", "aria-label": "Говорить" });
+    const mic = el("button", { class: "mic-big", icon: "mic", "aria-label": "Говорить" });
     const hint = el("div", { style: "text-align:center;color:var(--muted);font-size:14px;margin:8px 0", text: hintText() });
     const bottom = el("div", { class: "composer" }, mic, hint, el("div", { class: "inrow" }, ta,
-      el("button", { class: "round main", text: "➤", "aria-label": "Перевести", onclick: () => {
+      el("button", { class: "round main", icon: "send", "aria-label": "Перевести", onclick: () => {
         const t = ta.value.trim();
         if (!t) return;
         ta.value = "";
@@ -2347,13 +2399,15 @@
         if (!scr.isConnected) { Rec.stop(false); return; }  // closed while the microphone was being asked for
         recording = true;
         mic.classList.add("on");
-        mic.textContent = "⏹️";
+        mic.innerHTML = "";
+        mic.append(icon("stop"));
         hint.textContent = "Говорите… нажмите ещё раз, когда закончите";
         return;
       }
       recording = false;
       mic.classList.remove("on");
-      mic.textContent = "🎤";
+      mic.innerHTML = "";
+      mic.append(icon("mic"));
       hint.textContent = hintText();
       const r = Rec.stop(true);
       if (!r || r.duration < 0.6) return;
@@ -2380,8 +2434,8 @@
         const audio = ev.audio ? blobOf(ev.audio, "audio/ogg") : null;
         card.append(el("div", { class: "src", text: ev.src + " " + text }), el("div", { class: "dst", text: ev.dst + " " + ev.translation }),
           el("div", { class: "acts", style: "margin-top:8px" },
-            audio ? el("button", { class: "act", text: "🔊 Ещё раз", onclick: () => playAudio(audio) }) : null,
-            el("button", { class: "act", text: "📋 Копировать", onclick: () => copyText(ev.translation) })));
+            audio ? el("button", { class: "act", onclick: () => playAudio(audio) }, ...lead("🔊 Ещё раз")) : null,
+            el("button", { class: "act", onclick: () => copyText(ev.translation) }, ...lead("📋 Копировать"))));
         if (audio) playAudio(audio);
       } catch (e) { card.remove(); toast(problem(e)); }
       list.scrollTop = list.scrollHeight;
