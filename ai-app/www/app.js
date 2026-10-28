@@ -1589,7 +1589,9 @@
         trendsOk() ? el("button", { class: "big wide", onclick: () => trendsSheet(th, "photo") }, el("span", { class: "ic", text: "🔥" }),
           el("span", {}, "Фото-тренды", el("small", { text: "в один клик: Хэллоуин, фигурка в коробке, обнять себя в детстве" }))) : null,
         shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, el("span", { class: "ic", text: "📸" }),
-          el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до четырёх) на фото по теме: море, Новый год, журнал…" }))) : null),
+          el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до четырёх) на фото по теме: море, Новый год, журнал…" }))) : null,
+        has("animate") ? el("button", { class: "big wide", onclick: liven }, el("span", { class: "ic", text: "🎬" }),
+          el("span", {}, "Оживить фото", el("small", { text: "фото станет коротким роликом: улыбка, взгляд, лёгкое движение" }))) : null),
       S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите — я нарисую:" }),
         el("div", { class: "hints" }, DRAW_HINTS.map((t) => el("button", { class: "hint", text: t, onclick: () => { ta.value = t; ta.dispatchEvent(new Event("input")); ta.focus(); } })))] : null));
     const has = (op) => !!(S.me.photo_ops[op] || S.me.ai_ops[op]);
@@ -1694,6 +1696,13 @@
       if (S.busy.photo) { toast(BUSY); return; }
       const f = await pickFile("image/*", camera);
       if (f) set(f);
+    }
+    async function liven() {  // (v40) «🎬 Оживить фото» on the empty screen: a photo, then straight to «Оживить»
+      if (S.busy.photo) { toast(BUSY); return; }
+      const f = await pickFile("image/*", false);
+      if (!f) return;
+      photo = f;
+      runOp("animate");
     }
     async function page(camera) {  // one more page for the PDF: straight to «Скан»
       if (S.busy.photo) { toast(BUSY); return; }
