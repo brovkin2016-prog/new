@@ -538,7 +538,7 @@
     "📸": "people", "🧰": "more", "📷": "camera", "📄": "doc", "📝": "doc", "🌐": "globe", "📚": "study", "🧮": "calc", "🎌": "brush",
     "🧸": "smile", "🌻": "brush", "🏖": "sun", "🚶": "user-x", "⏱": "timer", "📖": "study", "✕": "x", "🔑": "key", "🗂": "history", "➕": "plus",
     "🧹": "sweep", "⬇": "download", "📤": "share", "🔊": "speaker", "✂": "scissors", "🔄": "refresh", "↩": "undo", "🗑": "trash",
-    "🔔": "bell", "📌": "pin", "⏹": "stop", "🎤": "mic", "➤": "send" };
+    "🔔": "bell", "📌": "pin", "⏹": "stop", "🎤": "mic", "➤": "send", "🎮": "gamepad" };
   // the ready tasks by their key (the server's signs: «📋 План» is a plan, not «copy»)
   const IDEA_ICONS = { congrats: "cake", letter: "letter", reply: "reply", recipe: "pot", explain: "bulb", plan: "list", gift: "gift",
     post: "megaphone", trip: "suitcase", check: "search" };
@@ -2269,6 +2269,14 @@
     maWanted = "";
     if (S.me.panel) openMiniapp(id);
   }
+  // (v41) «🎮 Игры»: in a browser — the same site, so the same sign-in; the Android app shows only its own screens, so
+  // there the phone's browser opens them (TCP 8443, as the owner's links)
+  function openGames() {
+    if (!Native) { location.href = "/app/games/"; return; }
+    const host = Native.getHost ? Native.getHost() : "";
+    if (!host) { toast("Адрес сервера не задан — игры не открыть"); return; }
+    window.open("https://" + host + ":8443/app/games/", "_blank", "noopener");
+  }
   function moreView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
@@ -2290,6 +2298,12 @@
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: () => (S.views.vpn && S.views.vpn.keys ? S.views.vpn.keys() : show("vpn")) },
           well("well", "", "key"),
           el("div", { class: "grow" }, "Ключи", el("small", { text: "Все ключи помощника и Claude: какие подключены, каких нет" })),
+          el("span", { class: "chev", icon: "chev" }))));
+      // (v41) «🎮 Игры»: the family's games with their tables of records — pages of the server (/app/games/)
+      scroll.append(el("div", { class: "card" },
+        el("button", { class: "row", style: "width:100%;text-align:left", onclick: openGames },
+          well("well", "", "gamepad"),
+          el("div", { class: "grow" }, "Игры", el("small", { text: "Змейка, теннис, гонки, карты — с рекордами семьи" })),
           el("span", { class: "chev", icon: "chev" }))));
       if (!me.panel && Native && Native.reminders) scroll.append(remindersCard(draw));
       const modeSel = el("select", { "aria-label": "Как отвечать в чате", onchange: () => setPref({ mode: modeSel.value }) });
