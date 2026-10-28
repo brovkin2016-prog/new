@@ -682,7 +682,7 @@
   const CW = 31, CH = 43, MW = 19, MH = 27;
   const TABLE_Y = 66, HAND_Y = 168;
   const DECK = { x: 22, y: 78 }, TRUMP = { x: 6, y: 84 }, DISC = { x: 336, y: 80 };
-  const BTN = { x: 318, y: 132, w: 60, h: 17 };
+  const BTN = { x: 318, y: 139, w: 60, h: 17 };
   const INK_T = ["#FFFFFF", "#FFFFFF", "#EAF0FA", "#EAF0FA", "#C9D6F2", "#C9D6F2", "#A9B6CD"];
   const GOLD_T = ["#FFF0C2", "#FFF0C2", "#FFD27A", "#FFD27A", "#FFD27A", "#C98A1B", "#C98A1B"];
   const RED_T = ["#FFC2C9", "#FFC2C9", "#FF8F8F", "#FF8F8F", "#FF6B7A", "#D93644", "#D93644"];
@@ -1108,7 +1108,7 @@
           S.panelT += dt;
           if (S.phase === "intro" || S.phase === "pick" || S.phase === "between") { panelInput(S.phase); return; }
           if (S.phase === "won" || S.phase === "lost") { S.endT += dt; if (S.endT > (S.phase === "won" ? 1.4 : 0.8)) finish(); return; }
-          if (S.phase === "deal") { layout(); S.wait -= dt; return; }
+          if (S.phase === "deal") { S.dealT += dt; layout(); S.wait -= dt; return; }
           if (S.phase !== "play") return;
           const G = S.G;
           S.playMs += dt0 * 1000;
@@ -1147,7 +1147,7 @@
         // the window: the sky, then hills and pines drifting past at their own speeds
         g.save();
         g.beginPath(); g.rect(15, 5, 74, 26); g.clip();
-        WG.art.sky(g, 15, 5, 74, 26, t, { seed: 3, top: "#04070F", bottom: "#142449", curtain: 0.55, amount: 1 });
+        WG.art.sky(g, 15, 5, 74, 26, t, { seed: 3, top: "#04070F", bottom: "#1A2C5A", curtain: 0.32, amount: 1.25 });
         WG.art.moon(g, 76, 10, 3);
         const cam = t * 4 + (S.cursor || 0) * 3;
         g.translate(15, 5);
@@ -1185,12 +1185,12 @@
         g.fillStyle = "#FFD27A"; g.fillRect(183 + sw, 9, 18, 1);
         // dust in the light
         for (const m of motes) { if (Math.sin(t * 1.3 + m.p * 4) < 0.2) continue; g.fillStyle = "rgba(255,240,194,.45)"; g.fillRect(Math.round(m.x + sw), Math.round(m.y), 1, 1); }
-        // the opponent's name on a brass plate
+        // the opponent's name on a brass plate on the wall
         const nm = S.opp.name.toUpperCase();
         const w = WG.textWidth(nm) + 8;
-        g.fillStyle = "#2A1E00"; g.fillRect(232 - 1, 35, w + 2, 9);
-        g.fillStyle = "#C98A1B"; g.fillRect(232, 36, w, 7); g.fillStyle = "#FFD27A"; g.fillRect(232, 36, w, 1);
-        WG.text(g, nm, 236, 36, { color: "#2A1E00" });
+        g.fillStyle = "#2A1E00"; g.fillRect(213, 23, w + 2, 10);
+        g.fillStyle = "#C98A1B"; g.fillRect(214, 24, w, 8); g.fillStyle = "#FFD27A"; g.fillRect(214, 24, w, 1); g.fillStyle = "#6B4A0A"; g.fillRect(214, 31, w, 1);
+        WG.text(g, nm, 218, 24, { color: "#2A1E00" });
         if (S.bubble) drawBubble(g, S.bubble);
       }
       function drawBoard(g) {
@@ -1216,7 +1216,7 @@
       function drawBubble(g, b) {
         const lines = wrap(b.text, 86);
         const w = Math.max(...lines.map((l) => WG.textWidth(l))) + 10, h = lines.length * 9 + 6;
-        const x = 214, y = Math.max(2, 18 - h);
+        const x = 214, y = Math.max(1, 21 - h);
         const k = Math.min(1, b.t / 0.12);
         if (k < 1 && Math.floor(b.t * 30) % 2) return;
         g.fillStyle = "#0A0F1E"; g.fillRect(x - 1, y, w + 2, h); g.fillRect(x, y - 1, w, h + 2);
@@ -1247,7 +1247,7 @@
         else img = ART.face(c);
         if (fw === img.width && h === img.height) g.drawImage(img, x, y0);
         else g.drawImage(img, x, y0, fw, h);
-        if (extra && extra.dim) WG.art.dither(g, x + 1, y0 + 1, fw - 2, h - 2, null, "rgba(6,12,24,.55)", 0.5);
+        if (extra && extra.dim) { g.fillStyle = "rgba(8,14,30,.42)"; g.fillRect(x, y0, fw, h); }
         if (extra && extra.ring) {
           const on = Math.floor(S.t * 4) % 2 ? "#7FE6F4" : "#D2FAFF";
           g.fillStyle = on;
@@ -1297,14 +1297,20 @@
       function drawHud(g) {
         const G = S.G;
         if (!G || S.phase === "pick" || S.phase === "intro") return;
-        // the deck count and the trump badge
+        // the deck count on the deck, the trump's suit under it
+        if (G.deck.length > 1) {
+          const n = String(G.deck.length), top = Math.floor((G.deck.length - 1) / 5);
+          const w = WG.textWidth(n) + 6, x = DECK.x + CW - w + 3 - top, y = DECK.y - 5 - top;
+          g.fillStyle = "#04070F"; g.fillRect(x - 1, y, w + 2, 9); g.fillRect(x, y - 1, w, 11);
+          g.fillStyle = "#26324F"; g.fillRect(x, y, w, 9);
+          WG.text(g, n, x + 3, y + 1, { color: "#EAF0FA" });
+        }
         if (G.deck.length) {
-          const n = String(G.deck.length);
-          const x = DECK.x + 15, y = DECK.y + 46;
-          WG.text(g, n, x, y, { align: "center", color: "#EAF0FA", shadow: "#04231A" });
           const sp = ART.suit(G.trump, 7);
-          g.drawImage(sp, 6, 127);
-          WG.text(g, "козырь", 15, 127, { color: "#8FB8AA" });
+          const lw = WG.textWidth("козырь") + 10;
+          const x0 = DECK.x + 15 - Math.round(lw / 2);
+          g.drawImage(sp, x0, 127);
+          WG.text(g, "козырь", x0 + 10, 127, { color: "#8FB8AA" });
         }
         if (G.discard.length) WG.text(g, "БИТО " + G.discard.length, DISC.x + 15, DISC.y + 50, { align: "center", color: "#8FB8AA" });
         // the status line and the action button
@@ -1318,27 +1324,31 @@
           else msg = "Твой ход — выбери карту";
           if (S.hintT > 0 && S.hint) { msg = S.hint; col = "#FFD27A"; }
         }
-        if (msg && S.wait <= 0) WG.text(g, msg, 192, 125, { align: "center", color: col, shadow: "#04231A" });
-        const lab = actionLabel();
-        if (lab && S.wait <= 0) drawButton(g, BTN.x, BTN.y, BTN.w, BTN.h, lab, S.btnDown > 0, G.phase === "defend" && !legalSet().size);
-        // the opponent's card count
+        if (msg && S.wait <= 0 && !S.toast) WG.text(g, msg, 192, 125, { align: "center", color: col, shadow: "#04231A" });
+        // the opponent's card count, a small pill under the fan
         if (G.hands[1].length && !S.revealed) {
-          const [x] = oppPos(G.hands[1].length, G.hands[1].length - 1);
-          WG.text(g, String(G.hands[1].length), x + MW + 4, 45, { color: "#EAF0FA", shadow: "#04231A" });
+          const n = G.hands[1].length, [x, y] = oppPos(n, n - 1);
+          const t = String(n), w = WG.textWidth(t) + 6;
+          g.fillStyle = "#04070F"; g.fillRect(x + MW - 3, y + MH - 4, w + 2, 10);
+          g.fillStyle = "#7E1A2E"; g.fillRect(x + MW - 2, y + MH - 3, w, 8);
+          WG.text(g, t, x + MW + 1, y + MH - 3, { color: "#FFE1E5" });
         }
         // toasts
         if (S.toast) {
           const T = S.toast, k = T.t;
           if (!(k > 1.4 && Math.floor(k * 20) % 2)) {
-            const y = 129 - Math.round((1 - ease(Math.min(1, k / 0.18))) * 8);
+            const y = 112 - Math.round((1 - ease(Math.min(1, k / 0.18))) * 8);
             const pw = Math.max(WG.textWidth(T.text, 2), T.sub ? WG.textWidth(T.sub) : 0) + 20;
             const ph = T.sub ? 30 : 20;
-            g.fillStyle = "rgba(4,7,15,.72)"; g.fillRect(192 - pw / 2, y - 4, pw, ph);
-            g.fillStyle = "#26324F"; g.fillRect(192 - pw / 2, y - 4, pw, 1); g.fillRect(192 - pw / 2, y - 4 + ph - 1, pw, 1);
+            const x0 = Math.round(192 - pw / 2);
+            g.fillStyle = "rgba(4,7,15,.78)"; g.fillRect(x0, y - 4, pw, ph);
+            g.fillStyle = "#26324F"; g.fillRect(x0, y - 4, pw, 1); g.fillRect(x0, y - 4 + ph - 1, pw, 1);
             WG.text(g, T.text, 192, y, { scale: 2, align: "center", color: T.color, outline: "#04070F" });
             if (T.sub) WG.text(g, T.sub, 192, y + 17, { align: "center", color: "#C9D6F2" });
           }
         }
+        const lab = actionLabel();
+        if (lab && S.wait <= 0) drawButton(g, BTN.x, BTN.y, BTN.w, BTN.h, lab, S.btnDown > 0, G.phase === "defend" && !legalSet().size);
       }
       function drawButton(g, x, y, w, h, label, down, hot) {
         const o = down ? 1 : 0;
@@ -1351,7 +1361,7 @@
         if (!down) { g.fillStyle = "#127A52"; g.fillRect(x, y + h, w, 1); }
       }
       function panelBox(g, x, y, w, h) {
-        WG.art.dither(g, 0, 0, 384, 216, null, "rgba(4,7,15,.82)", 0.6);
+        g.fillStyle = "rgba(4,7,15,.62)"; g.fillRect(0, 0, 384, 216);
         g.fillStyle = "#04070F"; g.fillRect(x - 2, y - 2, w + 4, h + 4);
         g.fillStyle = "#121B31"; g.fillRect(x, y, w, h);
         g.fillStyle = "#26324F"; g.fillRect(x, y, w, 1); g.fillRect(x, y, 1, h);
@@ -1422,10 +1432,10 @@
         const won = S.phase === "won";
         const k = Math.min(1, S.endT / 0.3);
         if (stage) {
-          WG.art.dither(g, 0, 70, 384, 70, null, "rgba(4,7,15,.7)", 0.5 * k);
+          g.fillStyle = "rgba(4,7,15," + (0.55 * k).toFixed(2) + ")"; g.fillRect(0, 70, 384, 70);
           WG.text(g, won ? "СЕРИЯ ВЗЯТА!" : "СЕРИЯ ПРОИГРАНА", 192, 96, { scale: 3, align: "center", color: won ? GOLD_T : RED_T, outline: "#04070F" });
         } else {
-          WG.art.dither(g, 0, 70, 384, 70, null, "rgba(4,7,15,.7)", 0.5 * k);
+          g.fillStyle = "rgba(4,7,15," + (0.55 * k).toFixed(2) + ")"; g.fillRect(0, 70, 384, 70);
           WG.text(g, "ПОБЕД ПОДРЯД: " + S.wins, 192, 96, { scale: 2, align: "center", color: GOLD_T, outline: "#04070F" });
         }
       }

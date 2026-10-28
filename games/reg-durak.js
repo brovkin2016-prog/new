@@ -298,19 +298,20 @@
     g.fillStyle = "#0B4A33"; g.fillRect(52, 3, 24, 4); g.fillStyle = "#1FA874"; g.fillRect(54, 3, 20, 1);
     g.fillStyle = "#FFF0C2"; g.fillRect(53, 7, 22, 1); g.fillStyle = "#FFD27A"; g.fillRect(56, 8, 16, 1);
     art.dither(g, 50, 9, 28, 12, null, "rgba(255,210,122,.18)", 0.4);
-    // the deck with the trump under it, a hand fanned out, and a card on its way to the felt
-    g.fillStyle = "rgba(4,7,15,.45)"; g.fillRect(6, 30, 34, 40);
-    g.drawImage(trump(3 * 9 + 8), 3, 36);
-    for (let i = 0; i < 4; i++) g.drawImage(back(), 12 - i, 28 - i);
-    const hand = [1 * 9 + 5, 2 * 9 + 6, 0 * 9 + 7, 3 * 9 + 8];
-    for (let i = 0; i < hand.length; i++) {
-      const x = 50 + i * 14, y = 30 - [0, 3, 4, 3][i];
-      g.fillStyle = "rgba(4,7,15,.35)"; g.fillRect(x + 2, y + 3, CW, CH - 2);
-      g.drawImage(face(hand[i]), x, y);
+    // the deck with the trump across under it; two attacks on the felt, each beaten — the second by a trump
+    const shadow = (x, y, w, hh) => { g.fillStyle = "rgba(4,10,9,.42)"; g.fillRect(x + 2, y + 3, w, hh - 1); };
+    shadow(2, 40, CH, CW); g.drawImage(trump(3 * 9 + 8), 1, 40);
+    shadow(11, 27, CW, CH);
+    for (let i = 0; i < 4; i++) g.drawImage(back(), 13 - i, 28 - i);
+    const pairs = [[44, 26, 1 * 9 + 3, 1 * 9 + 6], [84, 26, 2 * 9 + 7, 3 * 9 + 2]];
+    for (const [x, y, a1, d1] of pairs) {
+      shadow(x, y, CW, CH); g.drawImage(face(a1), x, y);
+      shadow(x + 7, y + 9, CW, CH); g.drawImage(face(d1), x + 7, y + 9);
     }
-    g.fillStyle = "rgba(4,7,15,.4)"; g.fillRect(104, 41, CW - 6, CH - 10);
-    g.drawImage(back(), 100, 33);
-    for (const [x, y] of [[96, 30], [124, 62], [46, 25], [118, 28]]) { g.fillStyle = "#FFF0C2"; g.fillRect(x, y, 1, 1); g.fillStyle = "rgba(255,240,194,.5)"; g.fillRect(x - 1, y, 1, 1); g.fillRect(x + 1, y, 1, 1); g.fillRect(x, y - 1, 1, 1); g.fillRect(x, y + 1, 1, 1); }
+    // a spark where the trump landed
+    for (const [x, y, c] of [[116, 33, "#FFF0C2"], [121, 44, "#7FE6F4"], [82, 30, "#FFD27A"], [40, 24, "#FFF0C2"]]) {
+      g.fillStyle = c; g.fillRect(x, y, 1, 1); g.fillStyle = "rgba(255,240,194,.55)"; g.fillRect(x - 1, y, 1, 1); g.fillRect(x + 1, y, 1, 1); g.fillRect(x, y - 1, 1, 1); g.fillRect(x, y + 1, 1, 1);
+    }
   }
 
   WG.registry.push({
