@@ -1595,7 +1595,6 @@
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     let photo = null;  // the photo chosen now; a job takes it away, the next step is chosen again
-    const tplOk = () => !!(canTpl("photo") || S.me.panel);
     const shootOk = () => !!((S.me.can || {}).shoot || S.me.panel) && !!S.me.shoot;
     const empty = () => (photo ? null : el("div", { class: "empty" }, el("h2", { text: "Что сделать с фото?" }),
       el("p", { text: "Пришлите фото и скажите или напишите, что сделать: «убери фон», «раскрась», «сделай в стиле аниме»." }),
@@ -1604,8 +1603,6 @@
         el("button", { class: "big", onclick: () => pick(false) }, el("span", { class: "ic", text: "🖼️" }), "Из галереи"),
         trendsOk() ? el("button", { class: "big wide", onclick: () => trendsSheet(th, "photo") }, el("span", { class: "ic", text: "🔥" }),
           el("span", {}, "Фото-тренды", el("small", { text: "в один клик: Хэллоуин, фигурка в коробке, обнять себя в детстве" }))) : null,
-        tplOk() ? el("button", { class: "big wide", onclick: () => templatesSheet("photo", th) }, el("span", { class: "ic", text: "🎭" }),
-          el("span", {}, "Я на фото", el("small", { text: "вы на готовой картинке: в сказке, в космосе, на празднике" }))) : null,
         shootOk() ? el("button", { class: "big wide", onclick: () => shootSheet(th) }, el("span", { class: "ic", text: "📸" }),
           el("span", {}, "Фотосессия", el("small", { text: "вы и близкие (до четырёх) на фото по теме: море, Новый год, журнал…" }))) : null),
       S.me.can.draw ? [el("p", { class: "empty-sec", text: "🎨 Или опишите — я нарисую:" }),
@@ -1622,7 +1619,6 @@
         // «pick my photo, then put me in a picture»: the photo chosen here is offered in who-is-who
         has("animate") ? tool("🎬 Оживить", () => runOp("animate")) : null,
         trendsOk() ? tool("🔥 Фото-тренды", () => trendsSheet(th, "photo")) : null,
-        tplOk() ? tool("🎭 Я на фото", () => templatesSheet("photo", th)) : null,
         shootOk() ? tool("📸 Фотосессия", () => shootSheet(th)) : null,
         tool("🧰 Другое", more)))
       // pages for a PDF being collected: their banner over the input is the next step (no second «📷» here)
@@ -1632,7 +1628,6 @@
         el("button", { class: "btn", text: "📷 Снять фото", onclick: () => pick(true) }),
         el("button", { class: "btn line", text: "🖼️ Из галереи", onclick: () => pick(false) }),
         trendsOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🔥 Фото-тренды", onclick: () => trendsSheet(th, "photo") }) : null,
-        tplOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "🎭 Я на фото", onclick: () => templatesSheet("photo", th) }) : null,
         shootOk() ? el("button", { class: "btn line", style: "grid-column:1/-1", text: "📸 Фотосессия", onclick: () => shootSheet(th) }) : null)
       : null);
     const th = thread("photo", scroll, empty, chosen);
@@ -1644,7 +1639,6 @@
     const cam = el("button", { class: "round ghost", text: "📷", title: "Выбрать фото", onclick: () => menu("Выбрать фото", [
       ["📷", "Снять фото", () => pick(true)], ["🖼️", "Из галереи", () => pick(false)],
       trendsOk() ? ["🔥", "Фото-тренды", () => trendsSheet(th, "photo")] : null,
-      tplOk() ? ["🎭", "Я на фото", () => templatesSheet("photo", th)] : null,
       shootOk() ? ["📸", "Фотосессия", () => shootSheet(th)] : null]) });
     const act = el("button", { class: "round main", text: "🎤" });
     const row = el("div", { class: "inrow" }, cam, ta, act);
