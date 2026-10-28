@@ -331,26 +331,6 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .mic-big.on { background: var(--danger); color: #fff; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { transform: scale(1.06); } }
 @media (min-width: 720px) { .scroll, .composer > * { max-width: 760px; margin-left: auto; margin-right: auto; } .scroll { width: 100%; } }
-/* (v40) a 1280×800 tablet: tiles in four even columns, the icon above the label (no «Поздравлени-е», no last tile across the
-   row), trend cards four across, the study modes three across, the header and the tabs centred over the column */
-@media (min-width: 720px) {
-  .tools { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  .tools > :last-child:nth-child(odd) { grid-column: auto; }
-  .tool { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 14px 8px; gap: 8px; font-size: 16px; }
-  .tool .ic { font-size: 32px; }
-  .empty > .btn.line.wide { width: auto; margin-left: auto; margin-right: auto; padding: 12px 28px; }
-  .trend-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
-  .seg.grid2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .empty .empty-sec + .hints { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-  .empty .empty-sec + .hints .hint { width: auto; }
-}
-@media (min-width: 900px) {
-  .top { padding-left: max(16px, calc(50vw - 360px)); padding-right: max(8px, calc(50vw - 360px)); }
-  .tabs { justify-content: center; }
-  .tab { flex: 0 1 128px; }
-  .tab .ic { font-size: 26px; }
-  .tab span:last-child { font-size: 14px; }
-}
 
 /* the owner's Управление tab */
 .badge { position: absolute; top: 4px; margin-left: 22px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
@@ -395,17 +375,38 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .tcard-hit { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 800; font-style: italic;
   color: #3b2a00; background: linear-gradient(180deg, #ffd96a, #e7a92b); }
 .tcard-new { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 800;
-  color: #fff; background: linear-gradient(180deg, #34c77b, #1f9d5c); }
+  color: #fff; background: #157a45; }  /* (v40) solid: white on it ≥ 4.5:1 */
 .tcard-play { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: 44px; height: 44px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center; padding-left: 3px; font-size: 18px; color: #fff; background: rgba(0, 0, 0, .45); }
 .tcard-big video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tcard-hit.inline { position: static; display: inline-block; margin-left: 8px; vertical-align: middle; }
 .tcard-kind { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; background: rgba(0, 0, 0, .55); }
 .tcard-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 10px 10px; font-size: 14px; font-weight: 600; line-height: 1.25; color: #fff;
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .72)); }
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .62) 40%, rgba(0, 0, 0, .82)); text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+  -webkit-hyphens: auto; hyphens: auto; overflow-wrap: break-word; }  /* (v40) readable on a pale picture too; «видео-поздравление» split, not cut */
 .tcard-big { position: relative; width: min(56%, 210px); aspect-ratio: 9 / 16; margin: 0 auto 10px; border-radius: 18px; overflow: hidden; background: var(--raise); }
 .trend-name { margin: 0 0 6px; font-size: 20px; }
 /* (v35) the Видео tab is the trends: the panel on its screen, left-aligned like the rest of it */
 .empty.trends-home { text-align: left; padding-top: 4px; }
 .vbar.hidden { display: none; }
 .trends-home .sheet-stick { top: 0; margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; background: var(--bg); }
+/* (v40) a 1280×800 tablet: tiles in four even columns, the icon above the label (no «Поздравлени-е», no last tile across the
+   row), trend cards four across (last in the file: these win over the phone rules above), the study modes three across, the header and the tabs centred over the column */
+@media (min-width: 720px) {
+  .tools { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .tools > :last-child:nth-child(odd) { grid-column: auto; }
+  .tool { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 14px 8px; gap: 8px; font-size: 16px; }
+  .tool .ic { font-size: 32px; }
+  .empty > .btn.line.wide { width: auto; margin-left: auto; margin-right: auto; padding: 12px 28px; }
+  .trend-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+  .seg.grid2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .empty .empty-sec + .hints { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .empty .empty-sec + .hints .hint { width: auto; }
+}
+@media (min-width: 900px) {
+  .top { padding-left: max(16px, calc(50vw - 360px)); padding-right: max(8px, calc(50vw - 360px)); }
+  .tabs { justify-content: center; }
+  .tab { flex: 0 1 128px; }
+  .tab .ic { font-size: 26px; }
+  .tab span:last-child { font-size: 14px; }
+}
