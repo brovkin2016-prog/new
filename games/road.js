@@ -307,6 +307,18 @@
     g.drawImage(ia, 33 - (ia.width >> 1), 21); g.drawImage(ib, 99 - (ib.width >> 1), 21);
     return (SIGNS[key] = KIT.outline(c, "#05070D"));
   }
+  function sideSign(name, dir) {
+    const key = "side|" + name + "|" + dir;
+    if (SIGNS[key]) return SIGNS[key];
+    const { c, r, g } = KIT.pen(70, 52);
+    r(dir < 0 ? 54 : 12, 30, 4, 22, "#6B7694"); r(dir < 0 ? 54 : 12, 30, 1, 22, "#9AA5C0");
+    r(0, 0, 70, 32, "#E3EBF8"); r(2, 2, 66, 28, "#14507E"); r(2, 2, 66, 1, "#2A6FA6");
+    if (dir < 0) { arrow(r, 6, 5, -1); WG.text(g, SCN[name].short, 22, 6, { color: "#FFFFFF" }); }
+    else { arrow(r, 63, 5, 1); WG.text(g, SCN[name].short, 48, 6, { color: "#FFFFFF", align: "right" }); }
+    const ic = WG.sprite(ICON_ROWS[SCN[name].icon], { w: "#FFFFFF", y: "#FFD27A" });
+    g.drawImage(ic, 35 - (ic.width >> 1), 18);
+    return (SIGNS[key] = KIT.outline(c, "#05070D"));
+  }
   function buildLib() {
     const L = {};
     L.pine = [KIT.pine(36, { seed: 3 }), KIT.pine(48, { seed: 8 }), KIT.pine(62, { seed: 12 })];
@@ -582,6 +594,7 @@
       s.zone = "post"; s.fork = fork;
     }
     T.get(fork.gate).gate = { kind: o.finish ? "finish" : "check" };
+    for (const d of [70, 30]) { const q = T.get(f0 - d); if (q) q.signs = fork; }
     linkRoads(T, f0 - 1, fork.mergeEnd, null);
     return fork;
   }
@@ -633,10 +646,17 @@
       };
       const near = (d) => { for (let j = -d; j <= d; j++) { const q = T.get(i + j); if (q && q.gate) return true; } return false; };
       const sc = s.sc;
+      s.water = sc === "coast" ? -1 : sc === "lakes" && Math.floor(i / 260) % 2 ? 1 : 0;
       if (s.fork && s.zone === "fork") {
         const f = s.fork;
         if (i >= f.island && i < f.gate - 3 && (i - f.island) % 3 === 0 && i !== f.island + 15) add(L.barrier, 0, 1.3, 0.2);
-        if (i === f.island + 15) add(forkSign(f.scL, f.scR), 0, 1.5, 0.62);
+        if (i === f.island + 15) add(forkSign(f.scL, f.scR), 0, 1.7, 0.62);
+      }
+
+      if (s.signs) {
+        const f = s.signs, k = 1.9;
+        for (const side of [-1, 1]) { const im = sideSign(side < 0 ? f.scL : f.scR, side); const half = (im.width * k) / UNIT / 2; add(im, side < 0 ? el - 0.35 - half : er + 0.35 + half, k, half * 0.5); }
+        continue;
       }
       if (near(3)) continue;
       const lampsAt = sc === "city" ? 8 : 0;
@@ -659,7 +679,6 @@
         if (rnd() < 0.3) put(sd(), 2.8 + rnd() * 2.5, pick(L.bldg), 2.6, 0.8);
         if (rnd() < 0.014) put(sd(), 0.45, pick(L.board), 2.0, 0.8);
       } else if (sc === "coast") {
-        s.water = -1;
         if (rnd() < 0.35) put(1, 0.3 + rnd() * 1.5, pick(L.rock), 2.0 + rnd() * 0.5, 0.7);
         if (rnd() < 0.3) put(1, 1.2 + rnd() * 2.5, pick(L.pine), 2.4 + rnd() * 0.4, 0.3);
         if (rnd() < 0.05) put(-1, 1.3 + rnd() * 3, pick(L.rock), 2.5, 0.7);
@@ -671,7 +690,6 @@
         if (rnd() < 0.006) put(sd(), 0.5 + rnd(), L.snowman, 1.9, 0.6);
         if (rnd() < 0.004) put(sd(), 2.2, L.cabinSnow, 2.4, 0.8);
       } else if (sc === "lakes") {
-        s.water = Math.floor(i / 260) % 2 ? 1 : 0;
         if (s.water) {
           if (rnd() < 0.3) put(1, 0.15 + rnd() * 0.2, pick(L.reeds), 1.6, 0);
           if (rnd() < 0.6) put(-1, 0.5 + rnd() * 1.6, pick(L.birch), 2.3 + rnd() * 0.5, 0.25);
@@ -693,13 +711,13 @@
   const G0 = 14; // the start line
   // the time limits: the best possible time over a stretch (full speed, slower only where a bend would throw the car
   // off the road), stretched by PACE — the share of that ideal the clock asks for
-  const PACE = 0.8;
+  const PACE = 0.72;
   function secsFor(T, a, b) {
     let t = 0;
     for (let i = a; i < b; i++) { const s = T.get(i); const v = s ? Math.min(1, 1 / Math.max(0.01, Math.abs(s.curve) * CENTRIFUGAL)) : 1; t += 1 / (60 * v); }
     return t / PACE;
   }
-  function buildStage(n) {
+  function buildStage(n, skill) {
     const T = new Track(), rnd = WG.rng(7919 * n + 13), diff = (n - 1) / 7;
     const sc = sceneryOf(n);
     const total = 2300 + 300 * (n - 1);
@@ -729,11 +747,12 @@
     }
     // the time: enough to reach the first checkpoint at the reference pace, then each leg's worth at each checkpoint
     const legs = [G0, ...checks.map((c) => c.idx), finish];
-    const start = Math.round(secsFor(T, legs[0], legs[1]) + 5);
-    checks.forEach((c, k) => { c.add = Math.round(secsFor(T, legs[k + 1], legs[k + 2])); });
+    const lvK = 1 + 0.1 * clamp(skill, 0, 1);   // denser traffic on the harder levels costs time: a little more on the clock
+    const start = Math.round(secsFor(T, legs[0], legs[1]) * lvK + 8);
+    checks.forEach((c, k) => { c.add = Math.round(secsFor(T, legs[k + 1], legs[k + 2]) * lvK); });
     const budget = start + checks.reduce((a, c) => a + c.add, 0);
     decorate(T, 0, T.end, 4242 + n * 17);
-    return { T, sc, checks, finish, fork, start, budget, par2: Math.max(6, Math.round(budget * 0.13)), diff };
+    return { T, sc, checks, finish, fork, start, budget, par2: Math.max(5, Math.round(budget * 0.1)), diff };
   }
   const pairFor = (rnd, cur) => {
     const pool = SC_LIST.filter((s) => s !== cur);
@@ -766,6 +785,7 @@
     if (!c) { c = KIT.car(kind, ramp, o); CAR_IMG.set(key, c); }
     return c;
   }
+  const fmt = (n) => String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   const clock = (sec) => Math.floor(sec / 60) + ":" + String(Math.floor(sec % 60)).padStart(2, "0");
   const clockMs = (ms) => clock(ms / 1000) + "." + String(Math.floor((ms % 1000) / 10)).padStart(2, "0");
 
@@ -782,7 +802,7 @@
       if (!LIB) LIB = buildLib();
       const skill = clamp(api.skill === undefined ? 0.45 : api.skill, 0, 1);
       const endless = !api.stage;
-      const ST = endless ? null : buildStage(api.stage);
+      const ST = endless ? null : buildStage(api.stage, skill);
       let T, forks = [], checks = [], finishIdx = Infinity;
       const erng = WG.rng(((Date.now() / 1000) | 0) ^ 0x5eed);
       if (ST) { T = ST.T; checks = ST.checks.map((c) => Object.assign({ done: false }, c)); finishIdx = ST.finish; if (ST.fork) forks.push(ST.fork); }
@@ -811,7 +831,7 @@
       const cars = [];
       const playerZ0 = S.pos + PLAYER_Z;
       if (ST) {
-        const grid = [[0.6, -0.45], [0.6, 0.45], [3.2, -0.45], [3.2, 0.45], [5.8, 0]];
+        const grid = [[0.6, -0.45], [0.6, 0.45], [3.6, -0.45], [3.6, 0.45], [6.6, 0]];
         RIVALS.forEach((R, k) => {
           cars.push({ rival: true, kind: "coupe", ramp: R.ramp, wing: R.wing, dot: R.dot, z: playerZ0 + grid[k][0] * SEG + 90, x: grid[k][1], lane: grid[k][1] < 0 ? -0.66 : grid[k][1] > 0 ? 0.66 : 0,
             branch: "M", speed: 0, hw: 0.22, top: Math.min(0.99, 0.77 + 0.2 * skill + 0.02 * ST.diff + [-0.06, -0.03, 0, 0.03, 0.05][k]),
@@ -820,7 +840,7 @@
       }
       function spawnTraffic(from, to, diff) {
         const rnd = WG.rng((from * 31 + to) ^ 0x7a11);
-        const per100 = (0.35 + 1.1 * skill) * (0.8 + 0.4 * diff);
+        const per100 = (0.35 + 0.75 * skill) * (0.8 + 0.4 * diff);
         const n = Math.round(((to - from) / 100) * per100);
         for (let k = 0; k < n; k++) {
           const i = from + Math.floor(((k + rnd() * 0.8) / n) * (to - from));
@@ -894,15 +914,30 @@
         if (f && s.roads.length > 1) { const id = f.side ? f.chosenId : S.autoSide < 0 ? "L" : "R"; st = stripOf(s, id); }
         const c0 = st ? st.c : 0, hw = st ? st.hw : 1;
         const sp = S.speed / MAXV, look = SEG * (8 + 24 * sp);
-        const clear = (x) => !cars.some((c) => c.z > z - SEG * 0.8 && c.z < z + look && (Math.abs(c.x - x) < CAR_HW + c.hw + 0.1 ||
-          (c.z < z + SEG * (3 + 10 * sp) && (c.x - S.x) * (c.x - x) < 0)));
+        // the distance to the first car in the way if we hold line x (crossing in front of a near car counts)
+        const room = (x) => {
+          let d = look;
+          for (const c of cars) {
+            const dz = c.z - z;
+            if (dz < -SEG * 0.8 || dz > look) continue;
+            if (Math.abs(c.x - x) < CAR_HW + c.hw + 0.1 || (dz < SEG * (3 + 10 * sp) && (c.x - S.x) * (c.x - x) < 0)) d = Math.min(d, Math.max(0, dz));
+          }
+          return d;
+        };
         const cands = [];
         for (let v = -0.72; v <= 0.73; v += 0.24) cands.push(c0 + v * hw);
-        cands.sort((a, b) => Math.abs(a - S.x) - Math.abs(b - S.x));
-        const ok = cands.find(clear);
-        if (ok !== undefined) S.autoX = ok;
-        if (S.autoX === undefined || Math.abs(S.autoX - c0) > hw) S.autoX = c0;
+        let bestX = S.autoX === undefined ? c0 : S.autoX, bestR = -1;
+        for (const x of cands) { const r = room(x) - Math.abs(x - S.x) * SEG * 2; if (r > bestR + 1) { bestR = r; bestX = x; } }
+        S.autoX = bestX;
+        if (Math.abs(S.autoX - c0) > hw) S.autoX = c0;
         tx = S.autoX;
+        let ok = true;
+        for (const c of cars) {
+          const dz = c.z - z;
+          if (dz < 0 || dz > look || Math.abs(c.x - S.x) > CAR_HW + c.hw + 0.05) continue;
+          const close = (S.speed - c.speed) / MAXV;
+          if (close > 0 && dz < close * SEG * 30 + SEG * 1.5) ok = undefined;
+        }
         let maxC = 0;
         for (let k = 0; k < 40; k++) { const q = T.get(s.i + k); if (q) maxC = Math.max(maxC, Math.abs(q.curve)); }
         const lim = 1 / Math.max(0.0001, maxC * CENTRIFUGAL * 1.05);
@@ -975,7 +1010,7 @@
           if (!p.solid || Math.abs(S.x - hx) >= CAR_HW + p.solid) continue;
           if (p.img === LIB.barrier) continue;
           const back = hx === 0 ? (S.x < 0 ? -1 : 1) : hx > 0 ? -1 : 1;
-          S.why = "side:" + p.img.width + "@" + p.x.toFixed(2) + "|" + S.x.toFixed(2); crash(sp2 > 0.25, 192);
+          crash(sp2 > 0.25, 192);
           if (sp2 <= 0.25) S.speed = Math.min(S.speed, MAXV * 0.05);
           S.x = hx + back * (CAR_HW + p.solid + 0.03);
           S.pos -= SEG * 0.4;
@@ -1001,9 +1036,9 @@
           if (ox > lim * 0.9) continue;
           if (dz > SEG * 0.5 && S.speed > c.speed) {
             const rel = S.speed - c.speed;
-            S.why = "car:" + c.kind + "@" + c.x.toFixed(2) + "|" + S.x.toFixed(2) + " sp" + (S.speed / MAXV).toFixed(2); const hard = rel > MAXV * 0.5 && S.spin <= 0;
+            const hard = rel > MAXV * 0.5 && S.spin <= 0;
             crash(hard, 192 + (c.x - S.camX) * UNIT * 0.9);
-            S.speed = c.speed * (hard ? 0.5 : 0.85);
+            S.speed = c.speed * (hard ? 0.5 : 0.92);
             S.pos = c.z - PLAYER_Z - SEG * 0.55;
             c.speed = Math.min(MAXV, c.speed + rel * 0.2);
             c.x += (c.x >= S.x ? 1 : -1) * 0.05;
@@ -1100,7 +1135,8 @@
               const order = lanes.slice().sort((a, b) => Math.abs(a - c.lane) - Math.abs(b - c.lane));
               for (const l of order) if (l !== c.lane && laneFree(c, st.c + l * st.hw, look, k)) { c.lane = l; break; }
             }
-          } else if (skill >= 0.7 && gap > 0 && gap < 7 && S.speed > c.speed * 0.95 && Math.random() < (skill - 0.6) * 1.6) {
+          } else if (skill >= 0.7 && gap > 0 && gap < 7 && S.speed > c.speed * 0.95 && S.t > (c.blockT || 0) && Math.random() < (skill - 0.6) * 1.2) {
+            c.blockT = S.t + 4;
             // the strong ones close the door on you
             const want = clamp((S.x - st.c) / st.hw, lanes[0], lanes[lanes.length - 1]);
             c.lane = lanes.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a));
@@ -1150,7 +1186,7 @@
             if (!ST) {
               S.cps++;
               const next = forks[forks.indexOf(f) + 1];
-              const add = next ? Math.max(14, Math.round(secsFor(T, f.gate, next.gate) * (1 - Math.min(0.2, S.sector * 0.02)))) : 20;
+              const add = next ? Math.max(12, Math.round(secsFor(T, f.gate, next.gate) * Math.max(0.62, 0.92 - 0.05 * S.cps))) : 20;
               S.timeLeft += add;
               S.bonus += 500 * S.cps;
               api.sfx("road_check"); api.flash("#7FE6F4", 0.18);
@@ -1504,9 +1540,9 @@
           const side = i % 2 ? 1 : -1;
           const ang = (side > 0 ? 0 : Math.PI) + side * (-0.5 + ((i * 0.37) % 1) * 1.05);
           const ph = (S.t * (1.6 + (i % 5) * 0.25) + i * 0.137) % 1;
-          const r0 = 90 + ph * 220, len = 10 + 26 * k * ph;
+          const r0 = 80 + ph * 230, len = 12 + 34 * k * ph;
           const ca = Math.cos(ang), sa = Math.sin(ang);
-          g.fillStyle = "rgba(210,250,255," + (0.18 + 0.32 * k * ph).toFixed(2) + ")";
+          g.fillStyle = "rgba(210,250,255," + (0.25 + 0.45 * k * ph).toFixed(2) + ")";
           for (let d = 0; d < len; d += 1) {
             const x = Math.round(192 + ca * (r0 + d)), y = Math.round(HOR + 10 + sa * (r0 + d) * 0.55);
             if (x < 0 || x >= W || y < 0 || y >= H) break;
@@ -1516,8 +1552,14 @@
       }
 
       // ---------- drawing: the dashboard ----------
+      function plate(g, x, y, w, h) {
+        g.fillStyle = "rgba(4,7,15,.5)"; g.fillRect(x + 1, y, w - 2, h); g.fillRect(x, y + 1, w, h - 2);
+      }
       function hud(g) {
         const sp = S.speed / MAXV, sh = "#04070F";
+        plate(g, 3, 2, Math.max(44, WG.textWidth(String(Math.max(0, Math.ceil(S.timeLeft))), 3) + 10), 37);
+        plate(g, 3, 175, 86, 39);
+        plate(g, 376 - WG.textWidth(clockMs(S.playMs), 2) - 6, 192, WG.textWidth(clockMs(S.playMs), 2) + 10, 20);
         // time
         const tl = Math.max(0, Math.ceil(S.timeLeft));
         WG.text(g, "ВРЕМЯ", 8, 5, { color: "#A9B6CD", shadow: sh });
@@ -1542,6 +1584,7 @@
           g.fillStyle = "#FF6B7A"; g.fillRect(px - 2, by - 5, 5, 1); g.fillRect(px - 1, by - 4, 3, 1); g.fillRect(px, by - 3, 1, 1);
           // place
           const pl = S.finished ? S.place : placeNow();
+          plate(g, 330, 2, 51, 37);
           WG.text(g, "МЕСТО", 376, 5, { align: "right", color: "#A9B6CD", shadow: sh });
           const w2 = WG.textWidth("/6", 2);
           WG.text(g, "/6", 376, 22, { align: "right", scale: 2, color: "#A9B6CD", shadow: sh });
@@ -1561,10 +1604,11 @@
             g.fillStyle = "#FFD27A"; g.fillRect(bx + bw, by - 2, 2, 8);
           }
           WG.text(g, (Math.floor(S.dist / 100) / 10).toFixed(1).replace(".", ",") + " КМ", 192, 24, { align: "center", color: "#A9B6CD", shadow: sh });
+          plate(g, 376 - Math.max(40, WG.textWidth(fmt(S.score), 2)) - 6, 2, Math.max(40, WG.textWidth(fmt(S.score), 2)) + 10, 30);
           WG.text(g, "ОЧКИ", 376, 5, { align: "right", color: "#A9B6CD", shadow: sh });
-          WG.text(g, WG.fmtNum(S.score), 376, 15, { align: "right", scale: 2, color: INK_T, shadow: sh });
+          WG.text(g, fmt(S.score), 376, 15, { align: "right", scale: 2, color: INK_T, shadow: sh });
           const best = api.best;
-          if (best) WG.text(g, S.score > best ? "РЕКОРД!" : "РЕКОРД " + WG.fmtNum(best), 376, 31, { align: "right", color: S.score > best ? "#FFD27A" : "#7F8FB8", shadow: sh });
+          if (best) WG.text(g, S.score > best ? "РЕКОРД!" : "РЕКОРД " + fmt(best), 376, 31, { align: "right", color: S.score > best ? "#FFD27A" : "#7F8FB8", shadow: sh });
         }
         // speed and revs
         const kmh = Math.round(sp * KMH);

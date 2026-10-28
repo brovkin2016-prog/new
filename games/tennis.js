@@ -52,15 +52,15 @@
   };
   // the seven of the cup, each stronger and each playing in their own way
   const OPPS = [
-    { name: "Тима", title: "Новичок", sk: 0.05, style: "novice", look: "tima", tip: "Только учится: бегает неспеша и часто бьёт мимо." },
-    { name: "Соня", title: "Дворовая", sk: 0.2, style: "steady", look: "sonya", tip: "Бьёт аккуратно в центр и ждёт твоей ошибки." },
-    { name: "Гриша", title: "Силач", sk: 0.34, style: "power", look: "grisha", tip: "Лупит изо всех сил — и нередко мимо корта." },
-    { name: "Алиса", title: "Сетка", sk: 0.5, style: "net", look: "alisa", tip: "Рвётся к сетке и играет укороченные." },
-    { name: "Макс", title: "Стена", sk: 0.62, style: "wall", look: "max", tip: "Достаёт всё подряд. Пробей свечой или в угол." },
-    { name: "Рита", title: "Королева корта", sk: 0.8, style: "allcourt", look: "rita", tip: "Играет умно: гоняет тебя по углам." },
-    { name: "Лев", title: "Мастер", sk: 0.97, style: "master", look: "lev", tip: "Быстрый, точный и хитрый. Удачи!" },
+    { name: "Тима", gen: "Тимы", title: "Новичок", sk: 0.05, style: "novice", look: "tima", tip: "Только учится: бегает неспеша и часто бьёт мимо." },
+    { name: "Соня", gen: "Сони", title: "Дворовая", sk: 0.2, style: "steady", look: "sonya", tip: "Бьёт аккуратно в центр и ждёт твоей ошибки." },
+    { name: "Гриша", gen: "Гриши", title: "Силач", sk: 0.34, style: "power", look: "grisha", tip: "Лупит изо всех сил — и нередко мимо корта." },
+    { name: "Алиса", gen: "Алисы", title: "Сетка", sk: 0.5, style: "net", look: "alisa", tip: "Рвётся к сетке и играет укороченные." },
+    { name: "Макс", gen: "Макса", title: "Стена", sk: 0.62, style: "wall", look: "max", tip: "Достаёт всё подряд. Пробей свечой или в угол." },
+    { name: "Рита", gen: "Риты", title: "Королева корта", sk: 0.8, style: "allcourt", look: "rita", tip: "Играет умно: гоняет тебя по углам." },
+    { name: "Лев", gen: "Льва", title: "Мастер", sk: 0.97, style: "master", look: "lev", tip: "Быстрый, точный и хитрый. Удачи!" },
   ];
-  const TRAIN = { name: "Тренер", title: "Тренировка", style: "allcourt", look: "max" };
+  const TRAIN = { name: "Тренер", gen: "Тренера", title: "Тренировка", style: "allcourt", look: "max" };
 
   // ---------- the court, drawn once with perspective, lines and dithered light ----------
   const OFFX = 16, PADX = 4;
@@ -170,7 +170,7 @@
       }
     });
     // pillars
-    for (const x of [0, 95, 191, 288, 381]) { g.fillStyle = "#0A0E1D"; g.fillRect(x, STAND_TOP + 1, 3, BOARD_Y - STAND_TOP); g.fillStyle = "#1D2944"; g.fillRect(x, STAND_TOP + 1, 1, BOARD_Y - STAND_TOP); }
+    for (const x of [0, 95, 191, 288, 381]) { g.fillStyle = "#0A0E1D"; g.fillRect(x, STAND_TOP + 1, 3, BOARD_Y - STAND_TOP - 2); g.fillStyle = "#1D2944"; g.fillRect(x, STAND_TOP + 1, 1, BOARD_Y - STAND_TOP - 2); }
     // ad boards along the far wall
     g.fillStyle = "#06091A"; g.fillRect(0, BOARD_Y - 1, WW, 9);
     const bw = 48;
@@ -179,7 +179,8 @@
       g.fillStyle = tone(bg, 0.85); g.fillRect(i * bw + 1, BOARD_Y, bw - 2, 7);
       g.fillStyle = tone(bg, 1.05); g.fillRect(i * bw + 1, BOARD_Y, bw - 2, 1);
       g.fillStyle = tone(bg, 0.5); g.fillRect(i * bw + 1, BOARD_Y + 6, bw - 2, 1);
-      WG.text(g, txt, i * bw + 1 + Math.floor((bw - 2 - WG.textWidth(txt)) / 2), BOARD_Y, { color: tone(fg, 0.78) });
+      if (i > 0 && (i + 1) * bw < WW - 8) WG.text(g, txt, i * bw + 1 + Math.floor((bw - 2 - WG.textWidth(txt)) / 2), BOARD_Y, { color: tone(fg, 0.78) });
+      else { g.fillStyle = tone(fg, 0.5); for (let k = 3; k < bw - 4; k += 4) g.fillRect(i * bw + k, BOARD_Y + 3, 2, 1); }
     }
     g.fillStyle = "#26324F"; g.fillRect(0, BOARD_Y + 7, WW, 1);
     return c;
@@ -191,11 +192,17 @@
       g.fillStyle = "#0A0E1D"; g.fillRect(mx, 8, 2, 38); g.fillRect(mx + 5, 8, 2, 38);
       for (let y = 10; y < 44; y += 6) { g.fillStyle = "#1D2944"; for (let i = 0; i < 5; i++) g.fillRect(mx + 1 + i, y + (((y / 6) | 0) % 2 ? i : 4 - i), 1, 1); }
       g.fillStyle = "#26324F"; g.fillRect(mx - 1, 44, 9, 2);
-      // the lamp bank
-      art.dither(g, mx - 12, -6, 31, 24, null, "rgba(255,240,194,.30)", 0.4);
-      art.dither(g, mx - 7, -2, 21, 15, null, "rgba(255,240,194,.35)", 0.5);
       g.fillStyle = "#0A0E1D"; g.fillRect(mx - 3, 2, 13, 8);
       g.fillStyle = "#26324F"; g.fillRect(mx - 3, 2, 13, 1);
+    }
+    return c;
+  }
+  // the lamps themselves and their glare, drawn over the dark corners
+  function paintLamps() {
+    const c = WG.canvas(W + PADX * 2, 46), g = c.getContext("2d");
+    for (const mx of [13 + PADX, 370 + PADX]) {
+      art.dither(g, mx - 12, -6, 31, 24, null, "rgba(255,240,194,.30)", 0.4);
+      art.dither(g, mx - 7, -2, 21, 15, null, "rgba(255,240,194,.35)", 0.5);
       for (let j = 0; j < 2; j++) for (let i = 0; i < 4; i++) { g.fillStyle = "#FFF9DD"; g.fillRect(mx - 2 + i * 3, 3 + j * 3, 2, 2); g.fillStyle = "#FFD27A"; g.fillRect(mx - 2 + i * 3, 4 + j * 3, 2, 1); }
     }
     return c;
@@ -259,14 +266,55 @@
     g.fillStyle = "#0A0F1E"; g.fillRect(0, 16, 18, 4);
     g.fillStyle = "#2476B4"; g.fillRect(1, 16, 16, 2); g.fillStyle = "#7FE6F4"; g.fillRect(1, 16, 16, 1);
     g.fillStyle = "#0A0F1E"; g.fillRect(2, 8, 14, 9);
-    g.drawImage(UMP, 5, 6);
     // the little desk with its screen
     g.fillStyle = "#0A0F1E"; g.fillRect(0, 12, 5, 4); g.fillStyle = "#34D399"; g.fillRect(1, 13, 3, 2);
     return c;
   }
 
-  let COURT = null, STANDS = null, STANDS_UP = null, MASTS = null, NET = null, CHAIR = null;
-  function ensureArt() { if (COURT) return; COURT = paintCourt(); STANDS = paintStands(false); STANDS_UP = paintStands(true); MASTS = paintMasts(); NET = paintNet(); CHAIR = paintChair(); }
+  // the corners of the picture go dark by dithered steps, and the floodlights lay faint beams over the court
+  function paintVignette() {
+    const c = WG.canvas(W, H), g = c.getContext("2d");
+    g.fillStyle = "rgba(2,5,14,.78)";
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const dx = (x - 192) / 192, dy = (y - 112) / 112;
+      const d = Math.sqrt(dx * dx * 0.55 + dy * dy * 0.9);
+      const a = clamp((d - 0.78) / 0.5, 0, 1) * 0.5;
+      if (a > BAY[(y & 3) * 4 + (x & 3)]) g.fillRect(x, y, 1, 1);
+    }
+    return c;
+  }
+  function paintBeams() {
+    const c = WG.canvas(W, H), g = c.getContext("2d");
+    g.fillStyle = "rgba(255,240,200,.07)";
+    for (const [lx, tx] of [[19, 150], [365, 236]]) {
+      for (let y = 12; y < 176; y++) {
+        const k = (y - 12) / 164, cx = lerp(lx, tx, Math.pow(k, 0.85)), hw = 3 + k * 46;
+        const lvl = 0.55 * (1 - k * 0.75);
+        for (let x = Math.floor(cx - hw); x <= cx + hw; x++) {
+          const e = 1 - Math.abs(x - cx) / hw;
+          if (e * lvl > BAY[(y & 3) * 4 + (x & 3)] * 0.55) g.fillRect(x, y, 1, 1);
+        }
+      }
+    }
+    return c;
+  }
+  // two ball kids waiting at the far corners
+  const KID = WG.sprite([
+    "..kkk...",
+    ".kcccck.",
+    ".kssssk.",
+    ".kskksk.",
+    "..kkkk..",
+    ".kbbbbk.",
+    "kbbbbbbk",
+    "ksbbbbsk",
+    ".kbbbbk.",
+    ".kddddk.",
+    ".kd..dk.",
+    ".kk..kk.",
+  ], { k: "#070B18", c: "#2F6FA0", s: "#F0C29B", b: "#22B8CF", d: "#1B2133" });
+  let COURT = null, STANDS = null, STANDS_UP = null, MASTS = null, LAMPS = null, NET = null, CHAIR = null, VIGN = null, BEAMS = null;
+  function ensureArt() { if (COURT) return; COURT = paintCourt(); STANDS = paintStands(false); STANDS_UP = paintStands(true); MASTS = paintMasts(); LAMPS = paintLamps(); NET = paintNet(); CHAIR = paintChair(); VIGN = paintVignette(); BEAMS = paintBeams(); }
 
   // ---------- the player: a figure built from pixel tubes, so it can run, stretch and swing smoothly ----------
   const OUT = "#070B18";
@@ -275,11 +323,11 @@
   const POSE = (o) => Object.assign({}, BASE, o);
   const POSES = {
     ready: POSE({ rhx: 7.6, rhy: 17.0, ra: 6, rl: 0.95, lhx: -6.2, lhy: 17.4 }),
-    wind: POSE({ hy: 15.2, sx: 1.6, sy: 0.3, rhx: 10.6, rhy: 24.2, ra: 58, rl: 0.55, lhx: -3.2, lhy: 24.0, lfx: -3.2, lfy: 1.4, rfx: 5.4, rfy: 0, hdx: 0.8 }),
-    hit: POSE({ hy: 14.6, sx: -0.6, sy: -0.2, rhx: 7.2, rhy: 18.2, ra: -64, rl: 1, lhx: -4.8, lhy: 23.2, lfx: -4.6, lfy: 2.4, rfx: 5.6, rfy: -0.4, hdx: -0.4 }),
-    follow: POSE({ hy: 15.6, sx: -2, sy: 0.6, rhx: -5.4, rhy: 29.6, ra: 26, rl: 0.8, lhx: -8.8, lhy: 25.6, lfx: -4.0, lfy: 0, rfx: 3.4, rfy: 1.4, hdx: -1.1 }),
+    wind: POSE({ hy: 15.2, sx: 1.6, sy: 0.3, rhx: 10.8, rhy: 25.0, ra: 68, rl: 0.6, lhx: -3.2, lhy: 24.0, lfx: -3.2, lfy: 1.4, rfx: 5.4, rfy: 0, hdx: 0.8 }),
+    hit: POSE({ hy: 14.6, sx: -0.6, sy: -0.2, rhx: 9.6, rhy: 20.4, ra: 82, rl: 1, lhx: -4.8, lhy: 23.2, lfx: -4.6, lfy: 2.4, rfx: 5.6, rfy: -0.4, hdx: -0.4 }),
+    follow: POSE({ hy: 15.6, sx: -2, sy: 0.6, rhx: -6.4, rhy: 28.6, ra: -30, rl: 0.85, lhx: -8.8, lhy: 25.6, lfx: -4.0, lfy: 0, rfx: 3.4, rfy: 1.4, hdx: -1.1 }),
     // a deep, low reach (for the drop shot and the low ball)
-    low: POSE({ hy: 11.5, sx: 1.2, sy: -0.6, rhx: 9.4, rhy: 9.0, ra: -78, rl: 1, lhx: -3.4, lhy: 17.4, lfx: -5.2, lfy: 0, rfx: 6.0, rfy: -0.8, hdy: -0.6 }),
+    low: POSE({ hy: 11.5, sx: 1.2, sy: -0.6, rhx: 10.0, rhy: 9.5, ra: 100, rl: 1, lhx: -3.4, lhy: 17.4, lfx: -5.2, lfy: 0, rfx: 6.0, rfy: -0.8, hdy: -0.6 }),
     toss: POSE({ hy: 15.6, sx: 0, rhx: 7.2, rhy: 24.6, ra: 95, rl: 0.42, lhx: -2.6, lhy: 38.6, lfx: -3.6, lfy: 0, rfx: 3.6, rfy: 0, hdy: 0.3 }),
     trophy: POSE({ hy: 13.8, sx: 0.8, sy: 0.4, rhx: 7.6, rhy: 33.8, ra: 158, rl: 0.5, lhx: -3.2, lhy: 38.4, lfx: -3.8, lfy: 0, rfx: 3.8, rfy: 0 }),
     smash: POSE({ hy: 16.9, sx: 0.4, sy: 0.7, rhx: 2.8, rhy: 45.0, ra: 6, rl: 1, lhx: -4.4, lhy: 31.6, lfx: -3.6, lfy: 2.6, rfx: 3.8, rfy: 3.0, hdy: 0.4 }),
@@ -359,7 +407,7 @@
   // view = +1: seen from behind (the near player); −1: from the front (the far one, whose right hand is on our left)
   function drawFigure(g, L, view, X, Y, sc, P, extra) {
     extra = extra || {};
-    const U = sc * FIG, S = view;
+    const U = Math.pow(sc, 0.82) * FIG, S = view;
     X = Math.round(X); Y = Math.round(Y);
     const pt = (lx, ly) => ({ x: X + S * lx * U, y: Y - ly * U });
     const pa = (a) => a.map((q) => pt(q[0], q[1]));
@@ -423,6 +471,7 @@
         const [a, b] = edge[i], y = y0 + i, w = b - a + 1;
         g.fillStyle = L.shirt; g.fillRect(a, y, w, 1);
         g.fillStyle = tone(L.shirt, 0.72); g.fillRect(Math.max(a, b - 1), y, Math.min(2, w), 1);
+        if (w > 5 && (y + a) % 2 === 0) { g.fillStyle = tone(L.shirt, 0.72); g.fillRect(b - 2, y, 1, 1); }
         g.fillStyle = tone(L.shirt, 1.22); g.fillRect(a, y, 1, 1);
         if (i === 0) { g.fillStyle = tone(L.shirt, 1.25); g.fillRect(a + 1, y, w - 2, 1); }
         if (i === edge.length - 1) { g.fillStyle = tone(L.shirt, 0.72); g.fillRect(a, y, w, 1); }
@@ -441,6 +490,7 @@
       taper(g, pa(arm), 1.35, 1.15, skin, U);
       const m = [arm[0][0] + (arm[1][0] - arm[0][0]) * 0.8, arm[0][1] + (arm[1][1] - arm[0][1]) * 0.8];
       taper(g, pa([arm[0], m]), 1.85, 1.65, L.shirt, U);
+      const mp = pt(m[0], m[1]); g.fillStyle = L.trim; g.fillRect(R(mp.x) - 1, R(mp.y), 3, 1);
       const hd = pt(arm[2][0], arm[2][1]);
       art.disc(g, hd.x, hd.y, Math.max(1, 1.15 * U), skin);
     };
@@ -448,59 +498,66 @@
     // head
     const drawHead = () => {
       const c = pt(shX * 0.7 + P.hdx, shY + 5.8 + P.hdy);
-      const Rd = Math.max(4.3 * U, 3.2);
-      art.disc(g, c.x, c.y + 4.0 * U, Math.max(1.5, 1.8 * U), OUT);
-      art.disc(g, c.x, c.y + 4.0 * U, Math.max(1, 1.4 * U), tone(skin, 0.82));
-      art.disc(g, c.x, c.y, Rd + 1, OUT);
+      const cx = R(c.x), cy = R(c.y);
+      const Rr = Math.max(3, R(4.4 * U));
+      const wAt = (j) => Math.round(Math.sqrt(Math.max(0, (Rr + 0.35) * (Rr + 0.35) - j * j)));
+      const rows = (fn) => { for (let j = -Rr; j <= Rr; j++) fn(j, wAt(j)); };
+      // the neck, then the outline of the head
+      g.fillStyle = OUT; g.fillRect(cx - 2, cy + Rr - 1, 5, 3);
+      g.fillStyle = tone(skin, 0.8); g.fillRect(cx - 1, cy + Rr - 1, 3, 2);
+      g.fillStyle = OUT;
+      rows((j, w) => g.fillRect(cx - w - 1, cy + j, 2 * w + 3, 1));
+      g.fillRect(cx - wAt(-Rr), cy - Rr - 1, 2 * wAt(-Rr) + 1, 1);
+      g.fillRect(cx - wAt(Rr), cy + Rr + 1, 2 * wAt(Rr) + 1, 1);
+      const long = L.hairStyle === "pony" || L.hairStyle === "long";
       if (view > 0) {
-        art.disc(g, c.x, c.y, Rd, tone(hair, 0.85));
-        art.disc(g, c.x - 0.5, c.y - 0.5, Rd - 1, hair);
-        g.fillStyle = tone(hair, 1.6); g.fillRect(R(c.x - Rd * 0.55), R(c.y - Rd * 0.65), Math.max(1, R(Rd * 0.7)), 1);
-        g.fillStyle = tone(hair, 1.3); g.fillRect(R(c.x - Rd * 0.7), R(c.y - Rd * 0.4), 1, 1);
-        g.fillStyle = skin; g.fillRect(R(c.x - Rd), R(c.y + 0.5), 1, Math.max(1, R(1.6 * U))); g.fillRect(R(c.x + Rd - 1), R(c.y + 0.5), 1, Math.max(1, R(1.6 * U)));
+        // seen from behind: all hair, the ears peeking out, a band or a cap
+        rows((j, w) => { g.fillStyle = hair; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); g.fillStyle = tone(hair, 0.68); g.fillRect(cx + w - 1, cy + j, 2, 1); });
+        g.fillStyle = tone(hair, 1.6); g.fillRect(cx - R(Rr * 0.55), cy - R(Rr * 0.7), Math.max(1, R(Rr * 0.6)), 1);
+        g.fillStyle = tone(hair, 1.25); g.fillRect(cx - R(Rr * 0.7), cy - R(Rr * 0.35), 1, 1);
+        g.fillStyle = skin; g.fillRect(cx - wAt(1), cy + 1, 1, Math.max(1, R(Rr * 0.4))); g.fillRect(cx + wAt(1), cy + 1, 1, Math.max(1, R(Rr * 0.4)));
         if (L.cap) {
-          art.disc(g, c.x, c.y - Rd * 0.14, Rd * 0.99, L.cap);
-          g.fillStyle = tone(L.cap, 0.7); g.fillRect(R(c.x - Rd + 1), R(c.y + Rd * 0.2), R(Rd * 2) - 1, 1);
-          g.fillStyle = tone(L.cap, 1.4); g.fillRect(R(c.x - Rd * 0.55), R(c.y - Rd * 0.72), Math.max(1, R(Rd * 0.6)), 1);
-          g.fillStyle = tone(L.cap, 1.2); g.fillRect(R(c.x), R(c.y - Rd * 0.95), 1, 1);
+          rows((j, w) => { if (j <= R(Rr * 0.2)) { g.fillStyle = L.cap; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); g.fillStyle = tone(L.cap, 0.68); g.fillRect(cx + w - 1, cy + j, 2, 1); } });
+          g.fillStyle = tone(L.cap, 1.45); g.fillRect(cx - R(Rr * 0.55), cy - R(Rr * 0.7), Math.max(1, R(Rr * 0.6)), 1);
+          g.fillStyle = tone(L.cap, 0.55); g.fillRect(cx - wAt(R(Rr * 0.2)), cy + R(Rr * 0.2) + 1 - 1, 2 * wAt(R(Rr * 0.2)) + 1, 1);
+          g.fillStyle = tone(L.cap, 1.25); g.fillRect(cx, cy - Rr, 1, 1);
         } else if (L.band) {
-          g.fillStyle = L.band; g.fillRect(R(c.x - Rd + 1), R(c.y - 0.5), R(Rd * 2) - 1, Math.max(1, R(1 * U)));
+          rows((j, w) => { if (j === -1 || (j === 0 && Rr >= 4)) { g.fillStyle = L.band; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); } });
         }
-        if (L.hairStyle === "pony" || L.hairStyle === "long") {
-          const sw = extra.swing || 0, tail = L.hairStyle === "long" ? 8.5 : 6.4;
-          taper(g, [{ x: c.x + sw * 0.4 * U, y: c.y + 1.6 }, { x: c.x + sw * 1.4 * U, y: c.y + 1.6 + tail * U * 0.6 }, { x: c.x + sw * 2.2 * U, y: c.y + 1.6 + tail * U }], L.hairStyle === "long" ? 2.4 : 1.7, 1.2, hair, U);
+        if (long) {
+          const sw = extra.swing || 0, tail = L.hairStyle === "long" ? 8.5 : 6;
+          taper(g, [{ x: cx + sw * 0.3 * U, y: cy + Rr * 0.4 }, { x: cx + sw * 1.2 * U, y: cy + Rr * 0.4 + tail * U * 0.55 }, { x: cx + sw * 2 * U, y: cy + Rr * 0.4 + tail * U }], L.hairStyle === "long" ? 2.4 : 1.5, 1.1, hair, U);
         }
       } else {
-        // hair all round, the face as a lower oval on top of it
-        art.disc(g, c.x, c.y, Rd, tone(hair, 0.85));
-        art.disc(g, c.x - 0.5, c.y - 0.5, Rd - 1, hair);
-        const fw = Math.max(2, R(Rd * 0.82)), fh = Math.max(2, R(Rd * 0.66));
-        art.ellipse(g, c.x, c.y + Rd * 0.3, fw, fh, tone(skin, 0.86));
-        art.ellipse(g, c.x - 0.5, c.y + Rd * 0.3 - 0.5, Math.max(1, fw - 1), Math.max(1, fh - 1), skin);
-        g.fillStyle = tone(hair, 1.5); g.fillRect(R(c.x - Rd * 0.5), R(c.y - Rd * 0.78), Math.max(1, R(Rd * 0.5)), 1);
+        // the face looks at us: skin, hair on top, a cap with its peak, eyes and a mouth
+        rows((j, w) => { g.fillStyle = skin; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); g.fillStyle = tone(skin, 0.8); g.fillRect(cx + w, cy + j, 1, 1); });
+        const hj = -R(Rr * 0.2);          // the hairline
+        rows((j, w) => {
+          if (j <= hj) { g.fillStyle = hair; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); }
+          else if (j <= hj + 1 && Rr >= 4) { g.fillStyle = hair; g.fillRect(cx - w, cy + j, 1, 1); g.fillRect(cx + w, cy + j, 1, 1); }
+        });
+        g.fillStyle = tone(hair, 1.55); g.fillRect(cx - R(Rr * 0.5), cy - R(Rr * 0.75), Math.max(1, R(Rr * 0.5)), 1);
         if (L.cap) {
-          for (let j = -R(Rd); j <= R(-Rd * 0.25); j++) { const w = Math.sqrt(Math.max(0, Rd * Rd - j * j)); g.fillStyle = L.cap; g.fillRect(R(c.x - w), R(c.y + j), R(w * 2), 1); }
-          const bw = R(Rd * 1.7);
-          g.fillStyle = OUT; g.fillRect(R(c.x - bw / 2) - 1, R(c.y - Rd * 0.25), bw + 2, 3);
-          g.fillStyle = tone(L.cap, 1.25); g.fillRect(R(c.x - bw / 2), R(c.y - Rd * 0.25) + 1, bw, 1);
-          g.fillStyle = tone(L.cap, 0.7); g.fillRect(R(c.x - bw / 2), R(c.y - Rd * 0.25) + 2, bw, 1);
+          rows((j, w) => { if (j <= hj) { g.fillStyle = L.cap; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); } });
+          g.fillStyle = tone(L.cap, 1.45); g.fillRect(cx - R(Rr * 0.5), cy - R(Rr * 0.75), Math.max(1, R(Rr * 0.5)), 1);
+          const bw = wAt(hj) + 1;
+          g.fillStyle = OUT; g.fillRect(cx - bw - 1, cy + hj, 2 * bw + 3, 3);
+          g.fillStyle = tone(L.cap, 1.2); g.fillRect(cx - bw, cy + hj + 1, 2 * bw + 1, 1);
+          g.fillStyle = tone(L.cap, 0.7); g.fillRect(cx - bw, cy + hj + 2 - (Rr >= 4 ? 0 : 1), 2 * bw + 1, 1);
         } else if (L.band) {
-          g.fillStyle = L.band; g.fillRect(R(c.x - Rd + 1), R(c.y - Rd * 0.3), R(Rd * 2) - 1, 1);
+          rows((j, w) => { if (j === hj + 1) { g.fillStyle = L.band; g.fillRect(cx - w, cy + j, 2 * w + 1, 1); } });
         }
-        const ey = R(c.y + Rd * 0.22), ex = Math.max(1, R(Rd * 0.38));
+        const ey = cy + R(Rr * 0.2), ex = Math.max(1, R(Rr * 0.42));
         g.fillStyle = "#0A0F1E";
-        if (Rd > 3) {
-          if (extra.blink) { g.fillRect(R(c.x - ex) - 1, ey + 1, 2, 1); g.fillRect(R(c.x + ex), ey + 1, 2, 1); }
-          else { g.fillRect(R(c.x - ex), ey, 1, 2); g.fillRect(R(c.x + ex), ey, 1, 2); }
-          const my = ey + Math.max(2, R(Rd * 0.62));
-          if (extra.mood === "happy") { g.fillStyle = "#7A1830"; g.fillRect(R(c.x) - 1, my, 3, 1); g.fillStyle = "#FFFFFF"; g.fillRect(R(c.x), my, 1, 1); }
-          else if (extra.mood === "sad") { g.fillStyle = tone(skin, 0.55); g.fillRect(R(c.x) - 1, my, 3, 1); g.fillRect(R(c.x) - 1, my + 1, 1, 1); g.fillRect(R(c.x) + 1, my + 1, 1, 1); }
-          else { g.fillStyle = tone(skin, 0.6); g.fillRect(R(c.x), my, 1, 1); }
-        } else { g.fillRect(R(c.x - 1), R(c.y), 1, 1); g.fillRect(R(c.x + 1), R(c.y), 1, 1); }
-        if (L.hairStyle === "pony" || L.hairStyle === "long") {
+        if (extra.blink) { g.fillRect(cx - ex - (Rr >= 4 ? 1 : 0), ey + 1, 2, 1); g.fillRect(cx + ex - (Rr >= 4 ? 0 : 0), ey + 1, 2, 1); }
+        else { g.fillRect(cx - ex, ey, 1, Rr >= 4 ? 2 : 1); g.fillRect(cx + ex, ey, 1, Rr >= 4 ? 2 : 1); }
+        const my = cy + Math.max(2, R(Rr * 0.62)) + (Rr >= 4 ? 1 : 0);
+        if (extra.mood === "happy") { g.fillStyle = "#7A1830"; g.fillRect(cx - 1, my, 3, 1); if (Rr >= 4) { g.fillStyle = "#FFFFFF"; g.fillRect(cx, my, 1, 1); } }
+        else if (extra.mood === "sad") { g.fillStyle = tone(skin, 0.5); g.fillRect(cx - 1, my + 1, 3, 1); g.fillRect(cx - 1, my + 2, 1, 1); g.fillRect(cx + 1, my + 2, 1, 1); }
+        else { g.fillStyle = tone(skin, 0.55); g.fillRect(cx, my, 1, 1); }
+        if (long) {
           const sw = extra.swing || 0;
-          taper(g, [{ x: c.x - Rd * 0.95, y: c.y - Rd * 0.2 }, { x: c.x - Rd * 1.15 + sw * 0.6, y: c.y + Rd * 0.9 }], 1.5, 1.3, hair, U);
-          taper(g, [{ x: c.x + Rd * 0.95, y: c.y - Rd * 0.2 }, { x: c.x + Rd * 1.15 + sw * 0.6, y: c.y + Rd * 0.9 }], 1.5, 1.3, hair, U);
+          for (const sd of [-1, 1]) taper(g, [{ x: cx + sd * (wAt(hj + 1) + 0.5), y: cy + hj + 1 }, { x: cx + sd * (wAt(hj + 1) + 1.2) + sw * 0.4 * sd, y: cy + Rr + (L.hairStyle === "long" ? 5 : 2) * U }], 1.2, 1.0, hair, U);
         }
       }
     };
@@ -563,14 +620,14 @@
   };
   const SHOTS = {
     // v: pace in m/s, depth: how far past the net it aims, spin, clear: the least height over the net, sx / sz: how wild
-    drive: { v: 25, depth: 8.2, spin: 0.35, clear: 0.42, sx: 1, sz: 1 },
-    flat: { v: 31, depth: 9.5, spin: 0.05, clear: 0.2, sx: 1.2, sz: 1.3 },
+    drive: { v: 29, depth: 8.2, spin: 0.35, clear: 0.42, sx: 1, sz: 1 },
+    flat: { v: 35, depth: 9.5, spin: 0.05, clear: 0.2, sx: 1.2, sz: 1.3 },
     drop: { v: 11, depth: 3.1, spin: -0.9, clear: 0.34, sx: 0.55, sz: 0.55 },
     lob: { v: 12, depth: 10.3, spin: 0.2, clear: 3.3, sx: 0.8, sz: 0.7 },
     smash: { v: 32, depth: 7.4, spin: 0, clear: 0.15, sx: 0.8, sz: 0.85 },
-    volley: { v: 19, depth: 7.4, spin: 0, clear: 0.35, sx: 1.05, sz: 0.9 },
-    serve1: { v: 32, depth: 5.0, spin: 0.1, clear: 0.2, sx: 1, sz: 1 },
-    serve2: { v: 23, depth: 4.6, spin: 0.7, clear: 0.55, sx: 0.5, sz: 0.5 },
+    volley: { v: 20, depth: 7.4, spin: 0, clear: 0.35, sx: 1.05, sz: 0.9 },
+    serve1: { v: 28, depth: 5.0, spin: 0.1, clear: 0.2, sx: 1, sz: 1 },
+    serve2: { v: 21, depth: 4.6, spin: 0.7, clear: 0.55, sx: 0.5, sz: 0.5 },
   };
   const CT = 0.06, WIN = 0.22; // a swing: the soonest it can hit, the latest
 
@@ -578,7 +635,7 @@
     id: "tennis",
     portrait: false,
     controls: { dpad: true, a: "Удар", b: "Свеча", swipe: false, landscapeDpad: true },
-    howto: "Матч до четырёх геймов: гейм — до четырёх очков, при 3:3 решает один мяч. Бегай по корту, подавай и бей так, чтобы соперник не дотянулся. Каждый из семи соперников сильнее предыдущего.",
+    howto: "Матч до четырёх геймов: гейм — до четырёх очков, при 3:3 решает один мяч. Бей так, чтобы соперник не дотянулся. Нажал «Удар» чуть раньше — мяч закрутится и нырнёт («Лифт»), чуть позже — подрежется («Слайс»). Каждый из семи соперников сильнее предыдущего.",
     keysHint: "Стрелки или WASD — бег. Пробел или Z — подача и удар: жми, когда мяч рядом. Вверх + удар — сильный, вниз + удар — укороченный, X — свеча.",
     touchHowto: (l) => (l.dpad ? "Крестовина — бег, «Удар» — подача и удар (жми, когда мяч рядом), «Свеча» — высокий мяч." : "Тяни палец по корту — бег, касание — удар."),
     titleColors: ["#FFF0C2", "#FFF0C2", "#E8FF5A", "#E8FF5A", "#9BC91E", "#9BC91E", "#5F8A12"],
@@ -628,7 +685,7 @@
       // ----- geometry -----
       const dnAt = (a, b) => {
         const sg = b.x >= a.x ? 1 : -1;
-        const ix = a.x + sg * 0.9, iz = a.z - a.side * 0.45;
+        const ix = a.x + sg * 0.8, iz = a.z - a.side * 0.45;
         const ex = (b.x - ix) / 1.25, ez = ((b.z - iz) * a.side) / 1.15;
         const eh = b.y - 0.95, ey = eh >= 0 ? eh / 1.75 : eh / 0.95;
         return { dn: Math.sqrt(ex * ex + ez * ez + ey * ey), ez, ex, ey };
@@ -656,9 +713,9 @@
         tx += gauss() * sx; tz += gauss() * sz;
         const b0 = { x: B.x, y: B.y, z: B.z };
         const dist = Math.hypot(tx - b0.x, tz - b0.z);
-        let T = kind === "lob" ? 1.4 + dist * 0.019 : dist / (sh.v * o.pace);
+        let T = kind === "lob" ? 1.3 + dist * 0.017 : dist / (sh.v * o.pace);
         T = clamp(T, 0.32, 3.6);
-        const sol = solveShot(b0, tx, tz, T, o.spin, sh.clear);
+        const sol = solveShot(b0, tx, tz, T, o.spin, sh.clear + 0.4 * (1 - o.q));
         B.vx = sol.vx; B.vz = sol.vz; B.vy = sol.vy + gauss() * o.sv;
         B.spin = o.spin; B.hitter = a.side; B.bounces = 0; B.live = true; B.held = false; B.net = false; B.kind = kind;
         B.isServe = kind === "serve1" || kind === "serve2"; B.lob = kind === "lob";
@@ -752,16 +809,16 @@
         else if (kind === "drive" && B.bounces === 0 && Math.abs(a.z) < 8) kind = "volley";
         const sh = SHOTS[kind];
         const shift = sgn(snap.x - a.x) * tm * 1.1;
-        let tx = aimX * 3.15 + (aimX === 0 ? -0.35 * a.x : 0) + shift;
-        tx = clamp(tx, -HW + 0.3, HW - 0.3);
+        let tx = aimX * 2.85 + (aimX === 0 ? -0.35 * a.x : 0) + shift;
+        tx = clamp(tx, -HW + 0.55, HW - 0.55);
         let depth = sh.depth + (kind === "drive" ? (up ? 1 : 0) * 1.9 : 0);
         if (kind === "smash") depth += (up ? 1.5 : down ? -2.5 : 0);
         const tz = -a.side * depth;
         let spin = sh.spin;
         if (kind === "drive" || kind === "volley") spin = clamp(0.08 + 0.85 * tm + (snap.y - 0.95) * 0.3, -0.85, 0.95);
         const pace = 0.84 + 0.3 * q;
-        const sv = 0.22 + 1.0 * (1 - q);
-        const sp = launch(a, kind, tx, tz, { sx: 0.22 + 1.5 * (1 - q), sz: 0.3 + 2.1 * (1 - q), pace, spin, sv });
+        const sv = 0.12 + 0.6 * (1 - q);
+        const sp = launch(a, kind, tx, tz, { sx: 0.22 + 1.5 * (1 - q), sz: 0.3 + 2.1 * (1 - q), pace, spin, sv, q });
         hitFx(a, kind, q, sp);
         S.lastLabel = { text: kind === "drive" || kind === "volley" ? (spin > 0.45 ? "ЛИФТ" : spin < -0.3 ? "СЛАЙС" : "") : kind === "flat" ? "ЖЁСТКО" : kind === "lob" ? "СВЕЧА" : kind === "drop" ? "УКОРОТ" : kind === "smash" ? "СМЭШ!" : "", t: 0, spin };
         if (S.lastLabel.text) { const p = project(a.x, 2.7, a.z); S.pops.push({ x: p.x, y: p.y, text: S.lastLabel.text, color: spin > 0.45 ? "#7FE6F4" : spin < -0.3 ? "#C4BBFF" : "#FFF0C2", t: 0 }); }
@@ -769,14 +826,16 @@
       // what the computer decides to play at the moment of the hit
       function shootAI(a, snap, q, tm) {
         const foe = actor(-a.side), st = a.st, sk = a.sk;
-        const nearNet = Math.abs(a.z) < 8, foeNet = Math.abs(foe.z) < 6.6, foeDeep = Math.abs(foe.z) > 11, foeWide = Math.abs(foe.x) > 2.2;
+        const nearNet = Math.abs(a.z) < 8.5, foeNet = Math.abs(foe.z) < 7.2, foeDeep = Math.abs(foe.z) > 10.6, foeWide = Math.abs(foe.x) > 2.4;
+        const pressure = snap.dn > 0.72 || q < 0.45;
         let kind = "drive";
-        const high = B.y > 2.15;
-        if (high) kind = "smash";
-        else if (foeNet && Math.random() < st.lob * (0.6 + 0.8 * sk) + 0.3 * sk) kind = "lob";
-        else if (!foeNet && Math.random() < st.lob * 0.25 && q < 0.5) kind = "lob";
-        else if ((foeDeep || foeWide) && nearNet && Math.random() < st.drop * (0.4 + 1.2 * sk)) kind = "drop";
-        else if (q > 0.5 && Math.random() < st.flat * (0.4 + sk)) kind = "flat";
+        const r = Math.random;
+        if (B.y > 2.15) kind = "smash";
+        else if (a.style === "wall" && pressure && r() < 0.55) kind = "lob";
+        else if (foeNet && r() < st.lob * (0.5 + sk) + 0.3 * sk) kind = "lob";
+        else if (!pressure && (foeDeep || foeWide) && (nearNet || a.netMode) && r() < st.drop * (0.5 + 1.1 * sk) * 1.5) kind = "drop";
+        else if (!pressure && foeDeep && r() < st.drop * 0.35 * sk) kind = "drop";
+        else if (q > 0.5 && !pressure && r() < st.flat * (0.4 + sk)) kind = "flat";
         else if (B.bounces === 0 && nearNet) kind = "volley";
         const sh = SHOTS[kind];
         const open = foe.x > 0.3 ? -1 : foe.x < -0.3 ? 1 : (Math.random() < 0.5 ? -1 : 1);
@@ -792,10 +851,10 @@
         if (kind === "drive" || kind === "volley") spin = clamp(0.1 + 0.35 * sk + tm * 0.5 + (a.style === "wall" && Math.random() < 0.35 ? -0.7 : 0), -0.85, 0.95);
         const qq = clamp(q * (0.9 + 0.1 * sk), 0.1, 1);
         const stretch = 1 + 1.1 * (1 - qq);
-        const sp = launch(a, kind, tx, tz, { sx: a.n.sx * stretch, sz: a.n.sz * stretch, pace: a.n.pace * (0.84 + 0.3 * qq), spin, sv: (0.2 + 0.9 * (1 - qq)) * (0.5 + 0.8 * st.scat) * (1.15 - 0.6 * sk) });
+        const sp = launch(a, kind, tx, tz, { sx: a.n.sx * stretch, sz: a.n.sz * stretch, pace: a.n.pace * (0.84 + 0.3 * qq), spin, sv: (0.12 + 0.55 * (1 - qq)) * (0.5 + 0.8 * st.scat) * (1.15 - 0.6 * sk), q: qq });
         hitFx(a, kind, qq, sp);
-        // coming to the net: after a short ball, or at once for those who love it
-        if (st.net > 0 && Math.abs(a.z) < 9.3 && Math.random() < st.net * (0.5 + 0.5 * sk)) a.netMode = true;
+        // coming to the net: after a short ball, or now and then after a deep one for those who love it
+        if (st.net > 0 && kind !== "lob" && !pressure && Math.random() < st.net * (Math.abs(a.z) < 10.4 ? 0.9 : 0.3) * (0.5 + 0.5 * sk)) a.netMode = true;
         if (kind === "lob") a.netMode = false;
         a.plan = null;
       }
@@ -817,7 +876,10 @@
           }
           if (!sw.commit && sw.t >= WIN) {
             if (sw.best && canHit(a)) commitSwing(a, sw.best);
-            else { sw.miss = true; sw.ct = 0; api.sfx("whoosh"); }
+            else {
+              sw.miss = true; sw.ct = 0; api.sfx("whoosh");
+              if (!a.ai && B.live && B.hitter === -a.side && B.z * a.side > -4) { const p = project(a.x, 2.6, a.z); S.pops.push({ x: p.x, y: p.y, text: "МИМО", color: "#A9B6CD", t: 0 }); }
+            }
           }
         } else {
           sw.ct += dt;
@@ -834,7 +896,7 @@
       function setupPoint() {
         const srv = actor(S.server), rcv = actor(-S.server);
         S.over = false; S.overT = 0; S.rally = 0; S.pendingGame = null;
-        S.sv = { stage: "wait", t: 0, delay: rand(0.25, 0.5), hitT: 0.6 + gauss() * 0.04 * (1 - srv.sk), aim: 0 };
+        S.sv = { stage: "wait", t: 0, delay: rand(0.2, 0.4), hitT: 0.6 + gauss() * 0.04 * (1 - srv.sk), aim: 0 };
         S.serveNo = 1; S.phase = "ready"; S.readyT = 0;
         S.from = { s: [srv.x, srv.z], r: [rcv.x, rcv.z] };
         srv.tgt = [serverX(), srv.side * 12.9];
@@ -890,8 +952,8 @@
         B.y = clamp(B.y, 2.0, 3.6);
         const qq = a.ai ? clamp(0.5 + 0.45 * a.sk + gauss() * 0.14 * (1.1 - a.sk), 0.12, 1) : q;
         const wild = S.serveNo === 1 ? 1 : 0.55;
-        const pace = (a.ai ? lerp(0.82, 1.1, a.sk) : 0.86 + 0.3 * qq) * (qq > 0.75 ? 1.04 : 1);
-        const sp = launch(a, kind, tx, tz, { sx: (0.2 + 1.5 * (1 - qq)) * wild, sz: (0.28 + 2.0 * (1 - qq)) * wild, pace, spin: sh.spin, sv: (0.15 + 0.9 * (1 - qq)) * wild });
+        const pace = (a.ai ? lerp(0.78, 1.0, a.sk) : 0.8 + 0.22 * qq) * (qq > 0.75 ? 1.02 : 1);
+        const sp = launch(a, kind, tx, tz, { sx: (0.2 + 1.5 * (1 - qq)) * wild, sz: (0.28 + 2.0 * (1 - qq)) * wild, pace, spin: sh.spin, sv: (0.1 + 0.55 * (1 - qq)) * wild, q: qq });
         B.isServe = true;
         sv.stage = "hit"; a.srv = { t: 0, hit: true };
         S.phase = "rally"; S.rally = 1;
@@ -965,7 +1027,7 @@
           if (B.y < 0 && B.vy < 0) bounce();
         }
         if (Math.abs(B.z) > 40 || Math.abs(B.x) > 30) { B.vx = B.vz = 0; }
-        if (B.live && B.bounces >= 1 && Math.abs(B.z) > 24 && !S.over) endPoint(B.hitter, "");
+        if (B.live && B.bounces >= 1 && Math.abs(B.z) > 24 && !S.over) endPoint(B.hitter, S.rally <= 1 ? "ЭЙС!" : "");
         // the trail
         const sp = Math.hypot(B.vx, B.vz);
         if (sp > 10 && B.live) { B.trail.push({ x: B.x, y: B.y, z: B.z }); if (B.trail.length > 7) B.trail.shift(); } else if (B.trail.length) B.trail.shift();
@@ -1034,7 +1096,7 @@
         const incoming = B.live && B.hitter === -a.side && !S.over;
         let tgt = homeOf(a);
         if (incoming) {
-          if (a.planShot !== B.shotId) { a.planShot = B.shotId; a.plan = null; a.planAt = B.hitT + a.n.react; }
+          if (a.planShot !== B.shotId) { a.planShot = B.shotId; a.plan = null; a.planAt = B.hitT + a.n.react * (B.isServe ? 0.45 : 1); }
           if (!a.plan && S.t >= a.planAt) a.plan = aiIntercept(a);
           if (a.plan) tgt = a.plan;
         }
@@ -1063,7 +1125,7 @@
           if (!pick) pick = tr[tr.length - 1];
         }
         const e = a.n.err;
-        return [clamp(pick.x - sd * 0.9 + gauss() * e, -5.2, 5.2), clamp(pick.z + sd * 0.45 + gauss() * e * 0.5, sd > 0 ? 1.2 : -13.8, sd > 0 ? 13.8 : -1.2)];
+        return [clamp(pick.x - sd * 0.8 + gauss() * e, -5.2, 5.2), clamp(pick.z + sd * 0.45 + gauss() * e * 0.5, sd > 0 ? 1.2 : -13.8, sd > 0 ? 13.8 : -1.2)];
       }
 
       // ----- the match -----
@@ -1076,6 +1138,7 @@
         S.server = -S.server;
         say(g > 0 ? "ГЕЙМ — ТЫ!" : "ГЕЙМ — " + opp.name.toUpperCase(), g > 0 ? GOLD_T : INK_T, 3, 1.3);
         api.sfx("t_game");
+        if (g > 0) api.flash("#FFF0C2", 0.1);
         S.pendingGame = null;
         if (S.games[0] >= 4 || S.games[1] >= 4) { finishMatch(S.games[0] >= 4); return true; }
         return false;
@@ -1085,6 +1148,7 @@
         ME.mood = won ? "happy" : "sad"; CPU.mood = won ? "sad" : "happy";
         say(won ? "ПОБЕДА!" : "ПОРАЖЕНИЕ", won ? GOLD_T : INK_T, 4, 2.6);
         api.sfx(won ? "win" : "lose"); S.crowd = won ? 3 : 1;
+        if (won) api.flash("#FFF0C2", 0.18);
         if (won) fx.emit({ x: 192, y: 90, n: 50, colors: ["#FFF0C2", "#FFD27A", "#FFFFFF", "#8EF0C6", "#7FE6F4"], speed: [30, 140], angle: [-Math.PI, 0], life: [0.6, 1.4], gravity: 80, drag: 1, shape: "star" });
       }
       const clock = () => WG.fmtTime(S.playMs);
@@ -1099,7 +1163,7 @@
           const hint = stars === 1 ? "★★ — проиграй не больше двух геймов" : stars === 2 ? "★★★ — выиграй всухую, не отдав ни гейма" : "";
           api.clear({ stars, score: S.total[0] * 10 + 40 * stars, ms: Math.round(S.playMs), line: "Счёт " + gl + " по геймам · " + pl + " по очкам · " + clock(), hint, meta });
         } else {
-          api.end({ score: S.total[0] * 10, ms: Math.round(S.playMs), won: false, line: "Счёт " + gl + " · против «" + opp.name + "»", hint: opp.tip, meta });
+          api.end({ score: S.total[0] * 10, ms: Math.round(S.playMs), won: false, line: "Счёт " + gl + " · против " + opp.gen, hint: opp.tip, meta });
         }
       }
       function resolveTraining() {
@@ -1143,12 +1207,12 @@
         if (a.sv_ready) { p.lhx = -2.0; p.lhy = 21.4; }
         const lat = clamp(a.vx / 7, -1, 1), fwd = clamp(-a.vz / 7, -1, 1);
         if (sn > 0.04) {
-          const cyc = [0, 1].map((i) => { const ph = a.rp + i * Math.PI; return { lift: Math.max(0, Math.sin(ph)) * 4.2 * sn, st: Math.cos(ph) }; });
+          const cyc = [0, 1].map((i) => { const ph = a.rp + i * Math.PI; return { lift: Math.max(0, Math.sin(ph)) * 5.6 * sn, st: Math.cos(ph) }; });
           const lf = cyc[0], rf = cyc[1];
-          p.lfx = -3.1 + lat * lf.st * 3.8; p.rfx = 3.1 + lat * rf.st * 3.8;
-          p.lfy = lf.lift + lf.st * fwd * 2.2; p.rfy = rf.lift + rf.st * fwd * 2.2;
-          p.hy = 16.4 - 0.9 * sn + Math.abs(Math.sin(a.rp * 2)) * 0.8 * sn;
-          p.sx = lat * 1.7;
+          p.lfx = -3.0 + lat * lf.st * 4.6 - lat * 0.8; p.rfx = 3.0 + lat * rf.st * 4.6 - lat * 0.8;
+          p.lfy = lf.lift + lf.st * fwd * 3.0; p.rfy = rf.lift + rf.st * fwd * 3.0;
+          p.hy = 16.4 - 1.3 * sn + Math.abs(Math.sin(a.rp * 2)) * 1.1 * sn;
+          p.sx = lat * 2.2;
           p.rhx += lat * 1.2; p.lhx += lat * 1.2;
           const sw2 = Math.sin(a.rp);
           p.lhy += sw2 * 1.6 * sn; p.rhy += -sw2 * 0.8 * sn;
@@ -1180,9 +1244,19 @@
           if (S.banner) { S.banner.t += dt; if (S.banner.t > S.banner.life) S.banner = null; }
           if (S.crowd > 0) S.crowd -= dt;
           if (NETSHAKE > 0) NETSHAKE -= dt;
+          for (const a of [ME, CPU]) {
+            const spd = Math.hypot(a.vx, a.vz);
+            a.dustT = (a.dustT || 0) - dt;
+            if (spd > 5.2 && a.dustT <= 0 && S.phase !== "intro") {
+              a.dustT = 0.11;
+              const p = project(a.x - a.vx * 0.02, 0, a.z);
+              fx.emit({ x: p.x, y: p.y, n: 2, colors: ["#DCEAF6", "#8FA9C2"], speed: [3, 12], angle: [-Math.PI * 0.9, -Math.PI * 0.1], life: [0.15, 0.35], gravity: 20, drag: 2 });
+            }
+          }
           for (const a of [ME, CPU]) { a.blink -= dt; if (a.blink < -0.12) a.blink = 2 + Math.random() * 3; a.swCd = Math.max(0, a.swCd - dt); a.bufT = Math.max(0, a.bufT - dt); if (a.srv) a.srv.t += dt; }
-          if (S.freeze > 0) { S.freeze--; return; }
-          const A_ = inp.pressed("a") || !!inp.tap, B_ = inp.pressed("b");
+          if (S.freeze > 0) { S.freeze--; if (inp.pressed("a") || inp.tap) S.pendA = true; if (inp.pressed("b")) S.pendB = true; return; }
+          const A_ = inp.pressed("a") || !!inp.tap || S.pendA, B_ = inp.pressed("b") || S.pendB;
+          S.pendA = S.pendB = false;
           const bot = S.bot;
           if (S.phase === "intro") {
             S.intro += dt;
@@ -1212,13 +1286,13 @@
             holdBall();
             if (S.readyT > 0.5) { for (const a of [ME, CPU]) a.mood = null; }
             const arrived = Math.hypot(srv.tgt[0] - srv.x, srv.tgt[1] - srv.z) < 0.4 && Math.hypot(rcv.tgt[0] - rcv.x, rcv.tgt[1] - rcv.z) < 0.5;
-            if ((S.readyT > 0.35 && arrived) || S.readyT > 1.2) { S.phase = "serve"; S.sv.t = 0; srv.vx = srv.vz = 0; }
+            if ((S.readyT > 0.3 && arrived) || S.readyT > 1.1) { S.phase = "serve"; S.sv.t = 0; srv.vx = srv.vz = 0; }
             return;
           }
           if (S.phase === "retry") {
             S.readyT += dt;
             stepBall(dt);
-            if (S.readyT > 0.9) { S.phase = "serve"; S.sv = { stage: "wait", t: 0, delay: rand(0.4, 0.8), hitT: 0.6 + gauss() * 0.04 * (1 - srv.sk), aim: 0 }; B.live = false; B.held = true; B.net = false; B.vx = B.vy = B.vz = 0; srv.srv = null; holdBall(); }
+            if (S.readyT > 0.65) { S.phase = "serve"; S.sv = { stage: "wait", t: 0, delay: rand(0.25, 0.45), hitT: 0.6 + gauss() * 0.04 * (1 - srv.sk), aim: 0 }; B.live = false; B.held = true; B.net = false; B.vx = B.vy = B.vz = 0; srv.srv = null; holdBall(); }
             for (const a of [ME, CPU]) { a.px = a.x; a.pz = a.z; a.vx *= 0.8; a.vz *= 0.8; }
             return;
           }
@@ -1261,7 +1335,7 @@
           stepBall(dt);
           if (S.over) {
             S.overT += dt;
-            if (S.overT > (train ? 1.1 : 1.15) || (S.overT > 0.5 && A_)) nextPoint();
+            if (S.overT > 0.85 || (S.overT > 0.4 && A_)) nextPoint();
           }
         },
         draw(g, alpha) { drawScene(g, alpha); },
@@ -1286,7 +1360,10 @@
         g.drawImage(MASTS, 0, 0);
         crowdFlash(g, t);
         g.restore();
+        g.save(); g.translate(cam, 0); g.drawImage(BEAMS, 0, 0); g.restore();
         drawWorld(g, alpha, cam);
+        g.drawImage(VIGN, 0, 0);
+        g.drawImage(LAMPS, Math.round(cam * 0.4) - PADX, 0);
         drawHud(g);
       }
       function crowdFlash(g, t) {
@@ -1354,12 +1431,21 @@
           g.fillStyle = "rgba(232,255,90," + (0.28 * k).toFixed(2) + ")"; g.fillRect(Math.round(p.x - 1), Math.round(p.y), Math.max(2, Math.round(p.m * 0.1)), 1);
         }
         drawBallShadow(g, alpha);
+        for (const sd of [-1, 1]) {
+          const p = project(sd * 6.9, 0, -13.6), bob = Math.floor(S.t * 1.4 + sd) % 2;
+          art.ellipse(g, p.x, p.y + 1, 5, 2, "rgba(2,8,20,.4)");
+          g.drawImage(KID, Math.round(p.x - 4), Math.round(p.y - 12 + bob));
+        }
         drawActor(g, CPU, alpha);
         // the far side of the net: the ball behind it is seen through the mesh
         const bz = lerp(B.pz, B.z, alpha);
         const showBall = S.phase !== "intro" && S.phase !== "ready";
         if (showBall && bz < 0 && !B.held) drawBall(g, alpha);
-        g.drawImage(CHAIR, 192 - Math.round(6.7 * mpp(0)) - 9 + 0, Math.round(gy(0)) - 36);
+        {
+          const cxp = 192 - Math.round(6.7 * mpp(0)) - 9, cyp = Math.round(gy(0)) - 36;
+          g.drawImage(CHAIR, cxp, cyp);
+          g.drawImage(UMP, cxp + 5 + clamp(Math.round(B.x / 3), -1, 1), cyp + 6);
+        }
         const shk = NETSHAKE > 0 ? Math.round(Math.sin(NETSHAKE * 60) * 1) : 0;
         g.drawImage(NET.c, CX - NET.ox, NET.y0 - NET.oy + shk);
         drawActor(g, ME, alpha);
@@ -1410,10 +1496,10 @@
           // the stage and the stars still in reach
           const lost = S.games[1];
           const n = lost === 0 ? 3 : lost <= 2 ? 2 : 1;
-          WG.text(g, "МАТЧ " + api.stage + " ИЗ 7", 192, 3, { align: "center", color: "#A9B6CD", shadow: "#04070F" });
-          for (let i = 0; i < 3; i++) WG.text(g, "★", 192 - 10 + i * 8, 12, { color: i < n ? "#FFD27A" : "#2C3550", shadow: "#04070F" });
+          WG.text(g, "МАТЧ " + api.stage + " ИЗ 7", 192, 3, { align: "center", color: "#C9D6F2", outline: "#04070F" });
+          for (let i = 0; i < 3; i++) WG.text(g, "★", 192 - 10 + i * 8, 12, { color: i < n ? "#FFD27A" : "#3B4766", outline: "#04070F" });
         }
-        if (S.rally >= 4 && S.phase === "rally" && !S.over) WG.text(g, "РОЗЫГРЫШ " + S.rally, 192, 23, { align: "center", color: "#A9B6CD", shadow: "#04070F" });
+        if (S.rally >= 4 && S.phase === "rally" && !S.over) WG.text(g, "РОЗЫГРЫШ " + S.rally, 192, 23, { align: "center", color: "#EAF0FA", outline: "#04070F" });
         // the serve prompts
         if (S.phase === "serve" && S.server > 0 && !ME.ai) drawServeUi(g);
         if (S.phase === "serve" && S.server < 0 && S.total[0] + S.total[1] < 2 && !ME.ai) WG.text(g, "ПРИНИМАЙ: БЕГИ К МЯЧУ И ЖМИ «УДАР»", 192, 200, { align: "center", color: "#A9B6CD", shadow: "#04070F" });
@@ -1444,24 +1530,47 @@
         const pop = b.t < 0.12 ? 1 + (1 - b.t / 0.12) * 0.5 : 1;
         const sc = Math.max(1, Math.round(b.scale * pop));
         if (k > 0.85 && Math.floor(b.t * 20) % 2) return;
-        WG.text(g, b.text, 192, 96 - Math.round(sc * 3.5) - Math.round(k * 4), { scale: sc, align: "center", color: b.color, outline: "#04070F" });
+        WG.text(g, b.text, 192, 78 - Math.round(sc * 3.5) - Math.round(k * 4), { scale: sc, align: "center", color: b.color, outline: "#04070F" });
+      }
+      function wrapText(text, maxPx) {
+        const words = text.split(" "), lines = [];
+        let cur = "";
+        for (const w of words) { const t = cur ? cur + " " + w : w; if (WG.textWidth(t) > maxPx && cur) { lines.push(cur); cur = w; } else cur = t; }
+        if (cur) lines.push(cur);
+        return lines;
+      }
+      function statBar(g, x, y, label, v, color, lw) {
+        WG.text(g, label, x, y, { color: "#A9B6CD", shadow: "#04070F" });
+        const n = clamp(Math.round(v * 5), 1, 5), bx = x + lw;
+        for (let i = 0; i < 5; i++) { g.fillStyle = i < n ? color : "#26324F"; g.fillRect(bx + i * 5, y, 4, 6); if (i < n) { g.fillStyle = tone(color, 1.35); g.fillRect(bx + i * 5, y, 4, 1); } }
       }
       function drawIntro(g) {
-        const k = Math.min(1, S.intro / 0.35), out = S.intro > (ST ? 2.2 : 1.2) ? Math.min(1, (S.intro - (ST ? 2.2 : 1.2)) / 0.4) : 0;
-        const a = k * (1 - out);
-        g.fillStyle = "rgba(4,7,15," + (0.6 * a).toFixed(2) + ")"; g.fillRect(0, 54, W, 84);
-        g.fillStyle = "rgba(52,211,153," + a.toFixed(2) + ")"; g.fillRect(0, 54, W, 1); g.fillRect(0, 137, W, 1);
+        const T0 = ST ? 2.2 : 1.2;
+        const k = Math.min(1, S.intro / 0.35), out = S.intro > T0 ? Math.min(1, (S.intro - T0) / 0.4) : 0;
+        const a = k * (1 - out), slide = Math.round((1 - Math.min(1, S.intro / 0.5)) * 40);
+        g.fillStyle = "rgba(4,7,15," + (0.78 * a).toFixed(2) + ")"; g.fillRect(0, 46, W, 104);
+        g.fillStyle = "rgba(52,211,153," + a.toFixed(2) + ")"; g.fillRect(0, 46, W, 1); g.fillRect(0, 149, W, 1);
         g.globalAlpha = a;
+        // the two of them, on their toes, over the line
+        drawFigure(g, ME.look, 1, 54 - slide, 146, 1.55, POSES.ready, { blink: false });
+        drawFigure(g, CPU.look, -1, 330 + slide, 146, 1.55, POSES.ready, { blink: Math.floor(S.intro * 3) % 7 === 0 });
         if (ST) {
-          WG.text(g, "МАТЧ " + api.stage + " ИЗ 7", 192, 62, { align: "center", color: "#8EF0C6", shadow: "#04070F" });
-          WG.text(g, "ВЫ   ПРОТИВ   " + opp.name.toUpperCase(), 192, 76, { align: "center", scale: 2, color: INK_T, shadow: "#04070F" });
-          WG.text(g, "«" + opp.title.toUpperCase() + "»", 192, 96, { align: "center", color: "#FFD27A", shadow: "#04070F" });
-          WG.text(g, opp.tip, 192, 112, { align: "center", color: "#C9D6F2", shadow: "#04070F" });
-          WG.text(g, "ДО ЧЕТЫРЁХ ГЕЙМОВ · ★★★ — БЕЗ ПОТЕРЯННЫХ ГЕЙМОВ", 192, 124, { align: "center", color: "#7F8FB8", shadow: "#04070F" });
+          WG.text(g, "МАТЧ " + api.stage + " ИЗ 7", 192, 52, { align: "center", color: "#8EF0C6", shadow: "#04070F" });
+          WG.text(g, "ВЫ  ПРОТИВ  " + opp.gen.toUpperCase(), 192, 63, { align: "center", scale: 2, color: INK_T, shadow: "#04070F" });
+          WG.text(g, "«" + opp.title.toUpperCase() + "»", 192, 83, { align: "center", color: "#FFD27A", shadow: "#04070F" });
+          const lines = wrapText(opp.tip, 190);
+          lines.slice(0, 2).forEach((ln, i) => WG.text(g, ln, 192, 98 + i * 9, { align: "center", color: "#C9D6F2", shadow: "#04070F" }));
+          const n = CPU.n, st = CPU.st;
+          statBar(g, 104, 120, "БЕГ", (n.speed - 4) / 5, "#34D399", 28);
+          statBar(g, 104, 129, "СИЛА", (n.pace - 0.72) / 0.5, "#FF6B7A", 28);
+          statBar(g, 196, 120, "ТОЧНОСТЬ", 1 - (n.sx - 0.2) / 1.6, "#7FE6F4", 52);
+          statBar(g, 196, 129, "ХИТРОСТЬ", (st.open + st.lob + st.drop + st.net) / 1.9 + 0.05, "#C4BBFF", 52);
+          WG.text(g, "★★★ — БЕЗ ПОТЕРЯННЫХ ГЕЙМОВ", 192, 139, { align: "center", color: "#7F8FB8", shadow: "#04070F" });
         } else {
-          WG.text(g, "ТРЕНИРОВКА", 192, 66, { align: "center", scale: 3, color: GOLD_T, outline: "#2A1E00" });
-          WG.text(g, "КАЖДОЕ ВЫИГРАННОЕ ОЧКО — В ЗАЧЁТ. ТРИ ОШИБКИ — КОНЕЦ.", 192, 100, { align: "center", color: "#C9D6F2", shadow: "#04070F" });
-          WG.text(g, "СОПЕРНИК С КАЖДЫМ ОЧКОМ СИЛЬНЕЕ", 192, 114, { align: "center", color: "#7F8FB8", shadow: "#04070F" });
+          WG.text(g, "ТРЕНИРОВКА", 192, 62, { align: "center", scale: 3, color: GOLD_T, outline: "#2A1E00" });
+          WG.text(g, "КАЖДОЕ ВЫИГРАННОЕ ОЧКО — В ЗАЧЁТ", 192, 94, { align: "center", color: "#C9D6F2", shadow: "#04070F" });
+          WG.text(g, "ТРИ ОШИБКИ — КОНЕЦ", 192, 105, { align: "center", color: "#C9D6F2", shadow: "#04070F" });
+          WG.text(g, "СОПЕРНИК С КАЖДЫМ ОЧКОМ СИЛЬНЕЕ", 192, 120, { align: "center", color: "#7F8FB8", shadow: "#04070F" });
         }
         g.globalAlpha = 1;
       }

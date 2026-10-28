@@ -253,7 +253,7 @@
     // the road, row by row like the game: a gentle right-hand bend and red-white kerbs
     for (let y = 40; y < h; y++) {
       const t = (y - 40) / (h - 40), z = 1 / (t + 0.04);
-      const cx = 64 + Math.pow(1 - t, 2) * 16, hw = 3 + t * 74, rw = hw / 6;
+      const cx = 58 + Math.pow(1 - t, 2) * 26, hw = 3 + t * 74, rw = hw / 6;
       const odd = Math.floor(z * 1.6) % 2;
       g.fillStyle = odd ? "#0E3326" : "#0B2B20"; g.fillRect(0, y, w, 1);
       g.fillStyle = odd ? "#C8304A" : "#D8DEEA"; g.fillRect(Math.round(cx - hw - rw), y, Math.round(2 * (hw + rw)), 1);
@@ -263,19 +263,19 @@
     }
     // pines along both sides, smaller toward the bend
     const P = [pine(34, { seed: 2 }), pine(46, { seed: 5 })];
-    for (const [x, y, s, i] of [[22, 46, 0.42, 0], [31, 43, 0.3, 1], [100, 44, 0.36, 1], [92, 42, 0.26, 0], [7, 58, 0.9, 1], [121, 56, 0.75, 0], [40, 41, 0.2, 0]]) {
+    for (const [x, y, s, i] of [[24, 46, 0.42, 0], [36, 43, 0.3, 1], [112, 46, 0.4, 1], [101, 43, 0.28, 0], [6, 60, 0.95, 1], [124, 62, 0.8, 0], [52, 41, 0.2, 0], [95, 41, 0.2, 1]]) {
       const im = P[i], dw = Math.round(im.width * s), dh = Math.round(im.height * s);
       g.drawImage(im, Math.round(x - dw / 2), y - dh, dw, dh);
     }
     // a rival ahead with its tail-lights, then the convertible
-    const riv = car("coupe", "cyan", { brake: true });
-    g.fillStyle = "rgba(255,46,76,.25)"; g.fillRect(70, 45, 13, 4);
-    g.drawImage(riv, 70, 41, Math.round(riv.width * 0.2), Math.round(riv.height * 0.2));
-    const me = car("roadster", "red", { lean: -1, hair: 1 });
-    g.drawImage(me, Math.round(w / 2 - me.width / 2) - 4, h - me.height + 3);
+    const riv = car("coupe", "cyan", { brake: true }), rw2 = Math.round(riv.width * 0.3), rh2 = Math.round(riv.height * 0.3);
+    g.fillStyle = "rgba(255,46,76,.3)"; g.fillRect(83 - (rw2 >> 1) - 1, 52 - rh2 + 4, rw2 + 2, 4);
+    g.drawImage(riv, 83 - (rw2 >> 1), 52 - rh2, rw2, rh2);
+    const me = car("roadster", "red", { lean: 1, hair: 1 });
+    g.drawImage(me, 46 - (me.width >> 1), h - me.height + 9);
     // speed lines
     g.fillStyle = "rgba(210,250,255,.5)";
-    for (const [x, y, l] of [[6, 47, 6], [3, 54, 9], [118, 49, 7], [121, 60, 6]]) for (let i = 0; i < l; i++) g.fillRect(x + (x < 64 ? -i : i), y + Math.round(i * 0.35), 1, 1);
+    for (const [x, y, l] of [[4, 47, 6], [2, 54, 8], [120, 51, 6]]) for (let i = 0; i < l; i++) g.fillRect(x + (x < 64 ? -i : i), y + Math.round(i * 0.35), 1, 1);
   }
 
   WG.registry.push({
