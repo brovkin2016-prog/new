@@ -315,7 +315,7 @@
   }
 
   WG.registry.push({
-    id: "durak", title: "Дурак", genre: "cards", levels: WG.VS_CPU, file: "durak.js", cover,
+    id: "durak", title: "Дурак", genre: "cards", levels: WG.VS_CPU, levelPick: "game", file: "durak.js", cover,
     stages: 10, stageWord: "Соперник", stagesWord: "соперники", endless: "Свободная игра",
     blurb: "Подкидной дурак на 36 карт против компьютера: лига из десяти соперников, серии до двух побед — и свободная игра на рекорд побед подряд.",
   });

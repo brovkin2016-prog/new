@@ -159,6 +159,8 @@ canvas.cover { display: block; width: 100%; height: 100%; image-rendering: pixel
 .seg::-webkit-scrollbar { display: none; }
 .seg button { flex: 1; min-height: 44px; padding: 8px 10px; border-radius: 12px; font-size: 14px; white-space: nowrap; color: var(--ink); font-weight: 500; }
 .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.stage-level { margin: 12px 0 2px; }
+.seg-label { display: block; margin: 0 4px 6px; color: var(--muted); font-size: 13px; }
 .board-me { margin: 10px 4px 0; color: var(--muted); font-size: 15px; }
 .board-me b { color: var(--ink); }
 
@@ -269,6 +271,9 @@ canvas.screen { display: block; image-rendering: pixelated; image-rendering: cri
 .play.deck-over .deck-hint { display: none; }
 .dpad { --d: min(62vw, 34vh, 240px); position: relative; width: var(--d); height: var(--d); display: none; touch-action: none; }
 .play.has-dpad .dpad { display: block; }
+/* the cross and both buttons on a narrow phone: the cross a little smaller, so «A» stays on the screen */
+.play.deck-on.has-dpad.has-a.has-b .dpad { --d: min(46vw, 34vh, 240px); }
+.play.deck-on.has-dpad.has-a.has-b .abtns { gap: 12px; }
 .dpad::before, .dpad::after { content: ""; position: absolute; background: var(--raise); border: 1px solid var(--field); border-radius: 18px; }
 .dpad::before { left: 33.3%; right: 33.3%; top: 0; bottom: 0; }
 .dpad::after { top: 33.3%; bottom: 33.3%; left: 0; right: 0; }
@@ -390,8 +395,14 @@ svg.lvl { stroke-width: 2.4; }
   .ov-btns .btn.primary { flex-basis: 140px; }
   .panel.stages { width: min(100%, 640px); }
   .panel.stages .ov-keys { display: none; }
-  .stile { min-height: 54px; gap: 5px; }
+  .stile { min-height: 50px; gap: 5px; }
   .stars.big .px-star { --px: 4; }
+  /* the stage map with the level row fits the short screen: the stages in one row where they can */
+  .panel.stages .stage-grid { grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); }
+  .stile .px-star { --px: 1; }
+  .stage-level { margin-top: 4px; }
+  .stage-level .seg-label { display: none; }
+  .stage-level .seg button { min-height: 40px; padding: 6px 8px; }
 }
 
 /* ---------- sizes ---------- */

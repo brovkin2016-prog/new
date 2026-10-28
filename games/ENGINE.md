@@ -57,6 +57,9 @@ A game played stage by stage (Змейка 10 fields, Танчики 35 maps, А
 `stages: 10, stageWord: "Поле", stagesWord: "поля", endless: "Бесконечный сад"` (`endless: false` when there is no
 score mode). The engine then shows the **stage map** instead of the start card: numbered tiles with up to three stars,
 locks on the stages not yet open (stage n opens once n−1 is passed), «Дальше: поле N», the endless mode, «К играм».
+With `levels: WG.VS_CPU` the map also has a row «Уровень соперников» (stored per game, as on the start card); a game
+that picks the level on its own card says `levelPick: "game"` and keeps `WG.runner.level` in step (Дурак, Морской бой).
+`WG.fmtNum`'s thin space between thousands is drawn as the pixel font's space.
 
 - `api.stage` — the stage being played (1…`api.stages`), or `null` in the endless mode; `api.mode` —
   `"stage" | "endless" | "single"`.

@@ -268,7 +268,7 @@
   }
 
   WG.registry.push({
-    id: "prince", title: "Песчаная крепость", genre: "adventure", levels: WG.VS_CPU, file: "prince.js", cover, rank: "score",
+    id: "prince", title: "Песчаная крепость", genre: "adventure", levels: WG.VS_CPU, levelPick: "game", file: "prince.js", cover, rank: "score",
     stages: 4, stageWord: "Уровень", stagesWord: "уровни", endless: "Весь путь",
     blurb: "Подземелья и стены крепости под северным сиянием: прыжки через пропасти, ловушки, зелья и бой на мечах со стражей. Четыре уровня — и весь путь на одних часах.",
   });

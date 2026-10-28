@@ -355,10 +355,11 @@
     return c;
   }
   // width in screen pixels of a line of pixel text
+  const SPACES = /[\u00A0\u2007\u202F]/g;  // WG.fmtNum's thin space between thousands: the pixel font's own space
   WG.textWidth = function (s, scale, spacing) {
     const sc = scale || 1, sp = spacing === undefined ? 1 : spacing;
     let w = 0, n = 0;
-    for (const ch of String(s)) {
+    for (const ch of String(s).replace(SPACES, " ")) {
       const gl = ch === " " ? null : glyph(ch) || glyph("?");
       w += (gl ? gl.w : 3) + sp; n++;
     }
@@ -377,7 +378,7 @@
   // y is the top of the capitals (7 pixels × scale tall); color may be a list for banded lettering. Returns the width.
   WG.text = function (g, s, x, y, o) {
     o = o || {};
-    s = String(s);
+    s = String(s).replace(SPACES, " ");
     if (o.upper) s = s.toUpperCase();
     const sc = o.scale || 1, sp = o.spacing === undefined ? 1 : o.spacing;
     const w = WG.textWidth(s, sc, sp);
@@ -1502,6 +1503,7 @@
       if (again) again.focus({ preventScroll: true });
     };
     panel.append(sum, grid);
+    if (R.levels.length > 1 && (entry.levelPick || def.levelPick) !== "game") panel.append(levelSeg());  // (a game with its own: "game")
     const th = typeof def.touchHowto === "function" ? def.touchHowto(R.layout || {}) : def.touchHowto;
     if (def.howto) panel.append(el("p", { class: "ov-keys", text: def.howto }));
     const hint = coarse() ? th || def.keysHint : def.keysHint;
@@ -1510,6 +1512,20 @@
     paint(WG.progress.local(def.id));
     showOverlay("start", panel, exitGame);
     WG.progress.get(def.id).then((p) => { if (R.ovKind === "start" && R.el.ov.contains(panel)) paint(p); }, () => {});
+  }
+  // the level against the computer on the stage map: one row, the stages and the endless board both play at it
+  function levelSeg() {
+    const seg = el("div", { class: "seg", role: "radiogroup", "aria-label": "Уровень" });
+    for (const l of R.levels) {
+      const b = el("button", { class: l === R.level ? "on" : "", role: "radio", "aria-checked": l === R.level ? "true" : "false", "data-nav": "",
+        title: (WG.LEVELS[l] || {}).hint || "",
+        onclick: () => {
+          R.level = l; WG.store.set("level." + R.def.id, l); Sound.sfx("select");
+          for (const x of seg.children) { const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-checked", on ? "true" : "false"); }
+        } }, WG.levelName(l));
+      seg.append(b);
+    }
+    return el("div", { class: "seg-wrap stage-level" }, el("small", { class: "seg-label", text: "Уровень соперников" }), seg);
   }
   function showStart() {
     if (R.stages) return showStages();

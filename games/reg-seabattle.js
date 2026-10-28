@@ -59,7 +59,7 @@
   }
 
   WG.registry.push(
-    { id: "seabattle", title: "Морской бой", genre: "strategy", levels: WG.VS_CPU, file: "seabattle.js", cover: seabattleCover,
+    { id: "seabattle", title: "Морской бой", genre: "strategy", levels: WG.VS_CPU, levelPick: "game", file: "seabattle.js", cover: seabattleCover,
       stages: 10, stageWord: "Адмирал", stagesWord: "адмиралы", endless: "Свободный бой", rank: "score",
       blurb: "Расставь флот: линкор, два крейсера, три эсминца и четыре катера. Десять адмиралов со своим характером и свободный бой на пять уровней — очки считаются как сто минус твои выстрелы." },
   );
