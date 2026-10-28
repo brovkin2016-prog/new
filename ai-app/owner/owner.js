@@ -1334,7 +1334,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
     }
     // the AI app's people: add, send the app and a sign-in code, no limits, switch off, sign out, delete
     function drawApp(d) {
-      // the main job first (people); then how the helper is doing: its models, a check of it all, the trends, the keys
+      // the main job first (people); then how the helper is doing: its models, a check of it all, the keys
       scroll.append(el("button", { class: "btn wide", style: "margin:0 0 8px", text: "➕ Добавить человека", onclick: addPerson }),
         el("button", { class: "btn line wide", style: "margin:0 0 4px", text: "🔗 Ссылка на приложение помощника",
           onclick: () => makeLink({ op: "dl_aiapp" }, "ИИ-помощник") }));
@@ -1347,8 +1347,8 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           null, () => person(u.id), u.off ? "off" : now ? "ok" : "off"));
       }
       scroll.append(section("Кто пользуется · " + d.users.length), list, section("Помощник"),
-        el("div", { class: "ow-list" }, line("🩺", "Проверить помощника", "модели, поиск, ссылки, видео, тренды и ключи — разом", null, () => helperCheck(d)),
-          trendsRow(), line("🔑", "Ключи и подключения", "модели, Яндекс Диск, видео из фото, поиск", null, allKeys)));
+        el("div", { class: "ow-list" }, line("🩺", "Проверить помощника", "модели, поиск, ссылки, видео и ключи — разом", null, () => helperCheck(d)),
+          line("🔑", "Ключи и подключения", "модели, Яндекс Диск, видео из фото, поиск", null, allKeys)));
       if (d.models && d.models.length) scroll.append(...modelsCard(d.models));
       panel({ op: "hf_get" }).then((v) => { if (v.t === "done") video = v; }).catch(() => {});  // (the people's «🎬 Видео» says what they get)
     }
@@ -1391,8 +1391,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         step("🧠", "Модели")(!ms.length || (!up.length && !down.length) ? null : up.length > 0, !ms.length ? "нет ключей моделей"
           : !up.length && !down.length ? "ещё не спрашивали — с последнего перезапуска не было вопросов"
           : `отвечают ${up.length} из ${ms.length}` + (down.length ? " · не отвечают: " + down.join(", ") : ""));
-        const keys = step("🔑", "Ключи"), disk = step("📦", "Ссылки на 24 часа"), video = step("🎬", "Видео из фото"), trends = step("🔥", "Тренды"),
-          search = step("🌐", "Поиск в интернете");
+        const keys = step("🔑", "Ключи"), disk = step("📦", "Ссылки на 24 часа"), video = step("🎬", "Видео из фото"), search = step("🌐", "Поиск в интернете");
         const ask = (op) => panel({ op }).catch((e) => ({ t: "error", text: problem(e) }));
         ask("agent_keys").then((r) => {
           if (r.t !== "done") return keys(false, r.text || "список ключей не открылся");
@@ -1405,13 +1404,8 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         ask("hf_get").then((v) => {
           if (v.t !== "done") return video(false, v.text || "не ответил");
           if (!v.on) return video(null, "не подключено", () => videoSetup(v, () => {}));
-          const sp = spaceState(v);
-          video(!/danger/.test(sp.color), sp.short.replace(/\.$/, ""), () => videoSetup(v, () => {}));
+          video(true, "подключено" + (v.name ? ": " + v.name : ""), () => videoSetup(v, () => {}));
         });
-        ask("trends_get").then((v) => (v.t !== "done" ? trends(false, v.text || "не ответил")
-          : trends(v.error ? false : (v.top || []).length ? true : null, v.error ? "последняя проверка: " + v.error
-            : ((v.top || []).length ? `в топе: ${v.top.length}` : "подтверждённых трендов пока нет") + (v.at ? " · проверено " + ago(v.at) + " назад" : ""),
-            () => trendsSheet(v, () => {}))));
         ask("search_get").then((v) => {
           if (v.t !== "done" || !v.on) return search(null, "поиск выключен");
           ask("search_test").then((r) => {  // (up to a minute: the search, a page, the weather, a table)
@@ -1449,23 +1443,8 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
     let video = null;
     const busyBtn = (b, text) => { b.disabled = true; b.dataset.was = b.textContent; b.textContent = text; };
     const freeBtn = (b) => { b.disabled = false; b.textContent = b.dataset.was || b.textContent; };
-    // «Я в ролике» в HD: the own face-swap service on Hugging Face's GPUs (the server makes it with a Write token).
-    // short: for the card (Russian, one line); long: for the sheet (the server's own words too)
-    function spaceState(v) {
-      const sp = v.space || {};
-      const kind = { read: "Read", fineGrained: "Fine-grained" }[v.role] || v.role || "Read";
-      if (!v.write) return { color: "var(--muted)", short: `⚡ «Я в ролике» в HD: нужен токен типа Write (сейчас — ${kind}).`,
-        long: `⚡ Для «Я в ролике» в HD нужен токен типа Write — сейчас у вас ${kind}. Сделайте новый токен по шагам ниже и вставьте его.` };
-      if (sp.ready) return { color: "var(--ok, #1a7f37)", short: "⚡ «Я в ролике» в HD: готов.", long: "⚡ «Я в ролике» в HD готов: ролики делаются на видеокарте за 1–3 минуты." };
-      if (sp.error) {
-        const plain = /^[А-Яа-яЁё«]/.test(sp.error) && sp.error.length < 140;
-        return { color: "var(--danger-ink)", short: "⚡ «Я в ролике» в HD: " + (plain ? sp.error : "не создался — подробности в «Настроить»") + ".",
-          long: "⚡ «Я в ролике» в HD не работает: " + sp.error + "." };
-      }
-      return { color: "var(--muted)", short: "⚡ «Я в ролике» в HD: готовится — пара минут.", long: "⚡ «Я в ролике» в HD готовится в вашем аккаунте — пара минут." };
-    }
     // (v37, the audit) a read-only token of the same account for other people's Spaces: their code may see the token they
-    // are given, and one with the right to write could change the owner's repositories (the own HD Space among them)
+    // are given, and one with the right to write could change the owner's repositories
     function readTokenBox(v, close, fill) {
       const rin = el("input", { class: "input hf-read", placeholder: "hf_… (тип Read)", autocomplete: "off", spellcheck: "false" });
       return el("div", { class: "card hf-read-card", style: "margin-top:14px;font-size:14px;line-height:1.45" },
@@ -1493,13 +1472,9 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
     function videoSetup(v, fill) {
       sheet("🎬 Видео из фото", (box, close) => {
         const inp = el("input", { class: "input", placeholder: "hf_…", autocomplete: "off", spellcheck: "false" });
-        const sp = v.on ? spaceState(v) : null;
         box.append(
-          sp ? el("div", { style: "font-size:15px;margin:-6px 0 10px;color:" + sp.color, text: sp.long }) : "",
-          el("div", { style: "font-size:14px;color:var(--muted);margin:" + (sp ? "0" : "-6px") + " 0 10px", text: "Видео делают нейросети на видеокартах "
-            + "Hugging Face. С токеном типа Write сервер сам создаст в вашем аккаунте закрытый сервис — и «Я в ролике» будет в HD за 1–3 минуты. "
-            + "Бесплатно 5 минут видеокарты в день — на всех, кому вы включите." }),
-          el("div", { style: "font-size:14px;margin:0 0 10px", text: "Новый аккаунт: «Я в ролике» в HD заработает через 30 дней после регистрации (и после подтверждения почты), остальное — сразу." }),
+          el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Видео делают нейросети на видеокартах "
+            + "Hugging Face. Бесплатно 5 минут видеокарты в день — на всех, кому вы включите." }),
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
             el("li", { text: "Нажмите «🔑 Получить токен» ниже — в браузере откроется сайт Hugging Face (huggingface.co), страница нового токена. Если сайт просит войти — войдите в свой аккаунт Hugging Face (нет аккаунта — «Sign Up», нужна только почта)." }),
             el("li", { text: "На этой странице вверху три вкладки: «Fine-grained», «Read», «Write» — нажмите «Write». В поле «Token name» впишите любое имя, например family. Внизу нажмите «Create token»." }),
@@ -1525,12 +1500,6 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
             } catch (x) { toast(problem(x)); freeBtn(b); }
           } }),
           v.on ? readTokenBox(v, close, fill) : "",
-          v.on && v.write ? el("button", { class: "btn line wide", style: "margin-top:14px", text: "🔄 Проверить HD-сервис", onclick: async (e) => {
-            const b = e.currentTarget;
-            busyBtn(b, "Проверяю… до минуты");
-            try { const end = await panel({ op: "hf_space" }); close(); fill(end); toast(spaceState(end).short, 6000); }
-            catch (x) { toast(problem(x)); freeBtn(b); }
-          } }) : "",
           v.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "Отключить видео из фото", onclick: async () => {
             if (!(await confirmBox("Отключить видео из фото? У всех пропадёт «🎬 Оживить», токен удалится с сервера.", "Отключить"))) return;
             try { const end = await panel({ op: "hf_off" }); close(); fill(end); toast("Видео из фото отключено"); } catch (e) { toast(problem(e)); }
@@ -1584,13 +1553,13 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       zhipu: "https://open.bigmodel.cn", openrouter: "https://openrouter.ai/keys",
       groq: "https://console.groq.com/keys", exa: "https://dashboard.exa.ai/api-keys", giga: "https://developers.sber.ru/studio",
       cf: "https://dash.cloudflare.com",
-      hf: "https://huggingface.co/settings/tokens/new?tokenType=write", coverr: "https://coverr.co/developers",
+      hf: "https://huggingface.co/settings/tokens/new?tokenType=write",
       viggle: "https://portal.viggle.ai/keys",
       anthropic: "https://console.anthropic.com/settings/keys",
     };
-    // the keys the helper's own cards check and keep (search, video, trends): [set, off, the field the key goes in]
+    // the keys the helper's own cards check and keep (search, video): [set, off, the field the key goes in]
     const APP_KEY_OP = { groq: ["groq_set", "groq_off", "key"], exa: ["exa_set", "exa_off", "key"], hf: ["hf_set", "hf_off", "token"],
-      coverr: ["coverr_set", "coverr_off", "key"], viggle: ["viggle_set", "viggle_off", "key"] };
+      viggle: ["viggle_set", "viggle_off", "key"] };
     let keysNow = null, testedNow = null;  // the list and its last check, as the server last said them
     const KEY_PLACE = { claude: "🛠 Claude", app: "🤖 Помощник", draw: "🎨 рисование", video: "🎬 видео", search: "🔎 поиск" };
     function allKeys() {
@@ -1600,7 +1569,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
         box.append(el("p", { class: "ow-note", style: "margin:-6px 2px 8px", text: "Нажмите строку — там написано, для чего это и где взять ключ; "
           + "там же его подключают, меняют и убирают. Ключи хранятся только на сервере — в чаты их не присылайте." }),
           section("Подключения"), conn, list);
-        let hf = null;  // «🎬 Видео из фото»: its own sheet (the HD service's state, who has it)
+        let hf = null;  // «🎬 Видео из фото»: its own sheet (the token, who has it)
         const openHf = async (k, fill) => {
           if (!hf) hf = await panel({ op: "hf_get" }).catch(() => null);
           if (hf && hf.t === "done") videoSetup(hf, (end) => { hf = end; video = end; panel({ op: "agent_keys" }).then((r) => r.t === "done" && fill(r.keys)).catch(() => {}); });
@@ -1625,7 +1594,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
           const t = testedNow;
           list.append(section(`Ключи · подключено ${on.length} из ${keys.length}`),
             el("p", { class: "ow-note keys-legend", style: "margin:-4px 2px 6px", text: "Где работает: 🛠 Claude — чат «🛠 Claude» и Дозор · "
-              + "🤖 Помощник — ответы и фото · 🎨 рисование · 🎬 видео и «Я в ролике» · 🔎 поиск в интернете" }),
+              + "🤖 Помощник — ответы и фото · 🎨 рисование · 🎬 видео · 🔎 поиск в интернете" }),
             on.length ? el("div", { class: "ow-list keys-list keys-on" }, ...on.map(row)) : null,
             off.length ? section(`Не подключены · ${off.length}`) : null,
             off.length ? el("div", { class: "ow-list keys-list keys-off" }, ...off.map(row)) : null,
@@ -1659,11 +1628,10 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
               } catch (x) { toast(problem(x)); freeBtn(b); }
             } }));
         };
-        const failed = (why) => {  // the list's service away: video and trends still have their own sheets
+        const failed = (why) => {  // the list's service away: video still has its own sheet
           list.innerHTML = "";
           list.append(el("p", { class: "status", style: "padding:8px 2px", text: "⚠️ " + why + " Список ключей ведёт служба «🛠 Claude»." }),
-            el("div", { class: "ow-list" }, line("🎬", "Видео из фото (Hugging Face)", "токен и HD-сервис", null, () => openHf({ id: "hf", name: "Hugging Face" }, () => {})),
-              line("🔥", "Тренды и Coverr", "ключ Coverr — в «Тренды»", null, () => panel({ op: "trends_get" }).then((v) => v.t === "done" && trendsSheet(v, () => {})).catch(() => {}))));
+            el("div", { class: "ow-list" }, line("🎬", "Видео из фото (Hugging Face)", "токен для оживления фото", null, () => openHf({ id: "hf", name: "Hugging Face" }, () => {}))));
         };
         panel({ op: "agent_keys" }).then((r) => (r.t === "done" ? fill(r.keys, r.tested || null) : failed(r.text || "Список ключей не открылся.")))
           .catch((e) => failed(problem(e)));
@@ -1749,98 +1717,6 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       });
     }
 
-    // «🔥 Тренды»: the Instagram trends the family's «Я в ролике» and «Я на фото» put first; the server finds them once a day
-    // (v36) its definition was lost in an earlier rework: the row failed with no error to see and vanished
-    const coverrBad = (c) => !!(c && c.on && c.last && /ключ/.test(c.last.error || ""));  // the key refused: a new one is needed
-    function trendsRow() {
-      let cur = line("🔥", "Тренды для «Я в ролике»", "проверяю…", null, null, "off");
-      const fill = (v) => {
-        const top = v.top || [], c = v.coverr || {};
-        const sub = v.error ? ["последняя проверка: " + v.error, "bad clamp"]
-          : (top.length ? top.map((t) => t.title).join(", ") : "подтверждённых трендов пока нет") + (v.at ? " · " + ago(v.at) + " назад" : "")
-            + (coverrBad(c) ? " · ⚠️ Coverr: нужен новый ключ" : "");
-        const r = line("🔥", "Тренды для «Я в ролике»", Array.isArray(sub) ? sub : [sub, "clamp"], top.length ? value(String(top.length)) : null,
-          () => trendsSheet(v, fill), v.error || coverrBad(c) ? "bad" : top.length ? "ok" : "off");
-        r.classList.add("trends-row");
-        if (cur.isConnected) cur.replaceWith(r);
-        cur = r;
-      };
-      panel({ op: "trends_get" }).then((v) => (v.t === "done" ? fill(v) : cur.remove())).catch(() => cur.remove());
-      return cur;
-    }
-    function trendsSheet(v, fill) {
-      sheet("🔥 Тренды Instagram", (box, close) => {
-        const top = v.top || [];
-        box.append(el("div", { style: "font-size:14px;color:var(--muted);margin:-6px 0 10px", text: "Сервер раз в день ищет, какие ролики сейчас "
-          + "в топе Instagram. Тренд попадает сюда, только если на странице прямо написано, что он в тренде; 3 дня без подтверждения — уходит. "
-          + (v.video || v.photo ? `Ролики под эти тренды стоят первыми в галерее «Я в ролике» (сейчас ${v.video})` + (v.photo ? ` и «Я на фото» (${v.photo}).` : ".") : "") }));
-        if (v.error) box.append(el("div", { class: "card", style: "margin:0 0 8px;color:var(--danger-ink)", text: "⚠️ Последняя проверка не удалась: "
-          + v.error + (top.length ? ". Ниже — тренды прошлой проверки." : ".") }));
-        for (const t of top) {
-          const src = el("div", { style: "font-size:13px;color:var(--muted);margin-top:4px" });
-          const s = (t.sources || [])[0];
-          if (s) {
-            src.append(el("div", { style: "margin-top:4px" }, el("a", { href: s.url, target: "_blank", rel: "noopener", text: s.site,
-              style: "display:inline-block;padding:6px 0" }), " — «" + s.quote + "»"));
-            if (t.sources.length > 1) src.append(el("div", { text: "и ещё " + (t.sources.length - 1) + (t.sources.length - 1 === 1 ? " сайт" : " сайта") }));
-          }
-          box.append(el("div", { class: "card", style: "margin:0 0 8px" },
-            el("b", { text: t.title + (t.people === 2 ? " · вдвоём" : t.people > 2 ? " · втроём" : "") }),
-            t.why ? el("div", { style: "font-size:14px;margin-top:2px", text: t.why }) : "",
-            el("div", { style: "font-size:12px;color:var(--muted);margin-top:2px", text: `В топе с ${dayRu(t.first)} · подтверждён ${daysRu(t.days)}` }), src));
-        }
-        if (!top.length && !v.error) box.append(el("p", { class: "muted", text: "Пока нет подтверждённых трендов." }));
-        box.append(el("button", { class: "btn line wide", style: "margin-top:6px", text: "🔄 Пересмотреть сейчас", onclick: async (e) => {
-          const b = e.currentTarget;
-          busyBtn(b, "Ищу… до 3 минут");
-          try {
-            const end = await panel({ op: "trends_now" });
-            if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
-            close(); fill(end);
-            toast(end.error ? "⚠️ Не удалось пересмотреть: " + end.error + ". Показаны тренды прошлой проверки." : "🔥 Тренды пересмотрены", 6000);
-          } catch (x) { toast(problem(x)); freeBtn(b); }
-        } }));
-        // Coverr: new vertical clips for each trend through its free API (the owner's key)
-        const c = v.coverr || {};
-        box.append(el("h3", { style: "margin:18px 0 4px", text: "🎬 Новые ролики под тренды — Coverr" + (c.on && !coverrBad(c) ? " ✓" : "") }),
-          coverrBad(c) ? el("div", { style: "font-size:14px;margin:0 0 8px;color:var(--danger-ink)", text: "⚠️ " + c.last.error + ". Вставьте новый ключ и нажмите «✅ Заменить ключ»." }) : "",
-          el("div", { style: "font-size:14px;color:var(--muted);margin:0 0 8px", text: c.on
-            ? "Каждый день сервер берёт с Coverr до 3 новых вертикальных роликов на каждый тренд; лица проверяются, как у всех шаблонов."
-              + (!coverrBad(c) && c.last && c.last.error ? ` Последний раз ${c.last.error} — завтра снова.` : "")
-              + (!coverrBad(c) && c.last && c.last.kept != null ? ` Сейчас роликов: ${c.last.kept}.` : "")
-            : "С бесплатным ключом Coverr сервер сам будет брать новые вертикальные ролики под каждый тренд." }));
-        if (!c.env) {
-          const inp = el("input", { class: "input", placeholder: "ключ API Coverr", autocomplete: "off", spellcheck: "false" });
-          box.append(
-            c.on && !coverrBad(c) ? "" : el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
-              el("li", { text: "Нажмите «🔑 Кабинет Coverr» ниже — в браузере откроется сайт Coverr (coverr.co), раздел для разработчиков. Войдите (почта или Google)." }),
-              el("li", { text: "На сайте Coverr создайте приложение (App) — ключ API выдаётся бесплатно (статус Demo). Скопируйте ключ и вернитесь в это приложение." }),
-              el("li", { text: "Скопируйте ключ, вставьте сюда и нажмите «✅ " + (c.on ? "Заменить ключ" : "Подключить") + "». В чаты ключ не присылайте." })),
-            c.on && !coverrBad(c) ? "" : el("a", { class: "btn line wide", href: "https://coverr.co/developers", target: "_blank", rel: "noopener",
-              style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Кабинет Coverr" }),
-            inp,
-            el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
-              let t = "";
-              try { t = Native && Native.clipboard ? Native.clipboard() : await navigator.clipboard.readText(); } catch (e) { /* no access */ }
-              if (t) inp.value = t.trim(); else toast("В буфере ничего нет — вставьте вручную");
-            } }),
-            el("button", { class: "btn wide", style: "margin-top:8px", text: "✅ " + (c.on ? "Заменить ключ" : "Подключить"), onclick: async (e) => {
-              const b = e.currentTarget;
-              if (!inp.value.trim()) { toast("Сначала вставьте ключ"); return; }
-              busyBtn(b, "⏳ Проверяю ключ…");
-              try {
-                const end = await panel({ op: "coverr_set", key: inp.value.trim() });
-                if (end.t !== "done") { toast("⚠️ " + end.text, 6000); freeBtn(b); return; }
-                close(); fill(end); toast("✅ Coverr подключён — новые ролики появятся в галерее к утру", 5000);
-              } catch (x) { toast(problem(x)); freeBtn(b); }
-            } }),
-            c.on ? el("button", { class: "btn line wide", style: "margin-top:14px;color:var(--danger-ink)", text: "Отключить Coverr", onclick: async () => {
-              if (!(await confirmBox("Отключить Coverr? Его ролики уйдут из галереи, ключ удалится с сервера.", "Отключить"))) return;
-              try { const end = await panel({ op: "coverr_off" }); close(); fill(end); toast("Coverr отключён"); } catch (e) { toast(problem(e)); }
-            } }) : "");
-        }
-      });
-    }
     function person(id) {
       const d = cache.app;
       const u = d && d.users.find((x) => x.id === id);
@@ -1857,9 +1733,9 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
             () => makeLink({ op: "dl_aiapp", id: u.id }, "ИИ-помощник — " + u.name), ""));
         if (!mine) {  // video from a photo: the owner's Hugging Face minutes, only for whom the owner allows
           box.append(el("div", { class: "row", style: "margin-top:10px" },
-            // «🎭 Я в ролике» is made on this server (no Hugging Face); «🖼 Оживить фото» needs its minutes too
-            el("div", { class: "grow" }, "🎬 Видео", el("small", { text: u.video ? "Включено: во вкладке «🎬 Видео» есть «🎭 Я в ролике»"
-              + (video && video.on ? " и «🖼 Оживить фото»." : ".") : "Выключено: ролик сервер делает несколько минут — включайте тем, кому нужно." })),
+            // it gates the trends and the photo session too; «🖼 Оживить фото» needs the Hugging Face minutes
+            el("div", { class: "grow" }, "🎬 Видео", el("small", { text: u.video ? "Включено: тренды, фотосессия"
+              + (video && video.on ? " и «🖼 Оживить фото»." : ".") : "Выключено: ролики и фотосессии сервер делает несколько минут — включайте тем, кому нужно." })),
             el("button", { class: "toggle" + (u.video ? " on" : ""), onclick: () => {
               close(); appOp({ op: "app_set", id: u.id, video: !u.video }, u.video ? "🎬 Видео выключено" : "🎬 Видео включено");
             } })));

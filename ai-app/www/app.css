@@ -286,7 +286,7 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
   padding-top: 5px; box-shadow: 0 -2px 0 var(--sheet); }  /* 1px past the sheet's top edge, and the shadow: no sliver of a scrolled list above */
 .sheet-head h2 { flex: 1; margin: 0; min-width: 0; font-size: 18px; line-height: 1.3; }
 .sheet-x { width: 44px; height: 44px; flex: none; border-radius: 50%; background: var(--raise); color: var(--muted); font-size: 18px; }
-.sheet .chip:not(.on), .sheet .act, .sheet .btn.line, .sheet .round.ghost, .sheet .input, .sheet select, .sheet .tpl.own, .sheet .tool { background: var(--raise); }
+.sheet .chip:not(.on), .sheet .act, .sheet .btn.line, .sheet .round.ghost, .sheet .input, .sheet select, .sheet .tool { background: var(--raise); }
 .sheet-stick { position: sticky; top: 37px; z-index: 1; background: var(--sheet); margin: 0 -14px 8px; padding: 7px 14px 6px; }  /* 1px under the head: no hairline */
 .sheet-stick .chips, .chips.fade { -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
 /* room after the last chip: scrolled to the end, it stands left of the fade, not half-hidden under it */
@@ -341,43 +341,11 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .hero small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
 .hero.bad, .card.bad { box-shadow: inset 0 0 0 2px var(--danger), var(--shadow); }
 
-/* «🎭 Я в ролике» and «🎭 Я на фото»: the galleries, who is who */
-/* 3 across at the usual font on a phone, 2 at a large one: the titles do not break inside words */
-.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4em, 1fr)); gap: 8px; max-height: none; overflow: visible; }
-.tpl { position: relative; aspect-ratio: 9 / 16; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
-  background: var(--card); padding: 0; cursor: pointer; color: inherit; font: inherit; }
-.tpl-grid.photo .tpl { aspect-ratio: 3 / 4; }
-.tpl img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.tpl .name { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 6px 0; border-bottom: 6px solid transparent; font-size: 13px; line-height: 1.2; color: #fff;
-  text-align: left; background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, .72)) no-repeat border-box; text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-  overflow-wrap: break-word; word-break: break-word; -webkit-hyphens: auto; hyphens: auto; }  /* «фотоаппаратом» breaks, not cut */
-.tpl.own { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--field); }
-.who-row .slot .plus, .tpl.own .plus { display: block; font-size: 28px; line-height: .9; font-weight: 500; color: var(--accent); }
-.tpl.own .name { position: static; background: none; color: var(--ink); text-align: center; padding: 0 6px; border: 0; text-shadow: none; }
-.tpl .ppl { position: absolute; top: 6px; right: 6px; padding: 2px 6px; border-radius: 10px; font-size: 12px; color: #fff; background: rgba(0, 0, 0, .55); }
-.tpl-grid > .more, .tpl-grid > .gal-msg { grid-column: 1 / -1; }
-.tpl-grid > p.gal-msg { margin: 8px 0; }
-.tpl-grid > .status.gal-msg { padding: 16px 0; justify-content: center; }
-.tpl-grid > p.credit { font-size: 13px; text-align: center; }
-.tpl-grid > p.credit a { color: var(--muted); text-decoration: none; }
-.tpl .hot { position: absolute; top: 6px; left: 6px; padding: 2px 6px; border-radius: 10px; font-size: 12px; background: rgba(0, 0, 0, .55); }
-.tpl-grid > .trend-head { grid-column: 1 / -1; margin: 10px 2px 0; font-size: 15px; line-height: 1.35; }
-.tpl-grid > .trend-head:first-of-type { margin-top: 2px; }
-.tpl-grid > .trend-head span { color: var(--muted); }
-.trend-note { margin: 2px 0 6px; font-size: 14px; }
-@media (max-width: 380px) { .tpl .name { font-size: 12px; } }
-/* a long Russian word on a narrow tile is split with a hyphen («Танцеваль-ный»), not cut bare */
-.tpl .name { -webkit-hyphens: auto; hyphens: auto; overflow-wrap: break-word; }
+.who-row .slot .plus { display: block; font-size: 28px; line-height: .9; font-weight: 500; color: var(--accent); }
 /* «Управление»'s parts on a narrow phone: smaller, so «🛠 Claude» is not cut at the edge (the row still scrolls) */
 @media (max-width: 380px) { .seg button { padding: 8px 6px; font-size: 13px; } }
-.tpl-big { display: block; height: 140px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 12px; margin: 0 auto 6px; }
-.tpl-big.photo { aspect-ratio: 3 / 4; }
-.tpl-big.small { height: 84px; margin-bottom: 4px; }  /* once the faces are found: the rows are the task */
 .who-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
 .who-row:first-child { border-top: 0; }
-.who-row .face { width: 56px; height: 56px; flex: none; border-radius: 50%; object-fit: cover; }
-.who-row .arrow { color: var(--muted); flex: none; }
 /* in «em»: the circle grows with the letters (64px at the usual size), «+ фото» stays inside it at a large system font */
 .who-row .slot { width: 4.9em; height: 4.9em; flex: none; border-radius: 50%; border: 2px dashed var(--field); background: var(--raise); color: var(--accent);
   font-size: 13px; font-weight: 600; line-height: 1.1; display: grid; place-items: center; overflow: hidden; padding: 0; text-align: center; }

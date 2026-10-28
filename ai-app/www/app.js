@@ -892,9 +892,9 @@
       b.append(el("img", { class: "result", src: urlOf(m.result), alt: "", onclick: () => viewer(m.result, m.name || "picture.jpg", again(m.result, "✏️ Изменить ещё")) }));
     }
     // «#t=0.1»: the first frame is painted before it is played, not a black box with «0:00»; where the phone does not
-    // paint it, the poster stands in: the template's picture, or the photo that was brought to life
+    // paint it, the poster stands in: the photo that was brought to life
     if (m.video) {
-      const poster = m.tpl && m.tpl.thumb ? "data:image/jpeg;base64," + m.tpl.thumb : m.poster ? urlOf(m.poster) : null;
+      const poster = m.poster ? urlOf(m.poster) : null;
       b.append(el("video", { class: "result", controls: true, playsinline: true, preload: "metadata", poster, src: urlOf(m.video) + "#t=0.1" }));
     }
     if (m.pdf) b.append(el("div", { class: "file-chip", style: "background:var(--accent-soft);margin-bottom:6px", text: "📄 " + (m.name || "document.pdf") }));
@@ -910,12 +910,10 @@
     const act = (text, onclick) => el("button", { class: "act", text, onclick });
     const file = m.result || m.video || m.pdf;
     if (file) {  // a picture, video or PDF that came out: keep it, share it, or (in Photo) work on it further
-      const view = S.views[thread];
       wrap.append(el("div", { class: "acts" },
         act("⬇️ Сохранить", () => { saveBlob(file, m.name || "result"); toast("Сохранено"); }),
         act("📤 Поделиться", () => shareBlob(file, m.name || "result")),
-        thread === "photo" && m.result ? act("✏️ Изменить ещё", () => S.views.photo.set(m.result)) : null,
-        m.tpl && view && view.th ? act("🔁 С другими фото", () => whoIsWho(m.tpl.kind, m.tpl, view.th)) : null));
+        thread === "photo" && m.result ? act("✏️ Изменить ещё", () => S.views.photo.set(m.result)) : null));
     } else if (m.role === "ai" && m.text && !m.err) {
       // «Короче» and «Подробнее» are about the last answer: only under it, and not while the next one is being written.
       // Under the older answers the buttons stay (and stay 44px tall) but go quiet: no outline over a long talk.
@@ -927,13 +925,7 @@
         S.me.can.speak ? act("🔊 Прочитать вслух", () => speakMsg(m, b)) : null,
         !m.note && m === lastAi && !S.busy[thread] && list && list.ask ? [act("✂️ Короче", () => list.follow("short")), act("➕ Подробнее", () => list.follow("more"))] : null));
     } else if (m.err && list) {
-      // a clip or a picture with faces that did not come out: «🔁 С другими фото» first — the same photos again would
-      // only fail once more after the same minutes
-      const v = S.views[thread];
-      const redo = m.tpl && v && v.th ? act("🔁 С другими фото", () => whoIsWho(m.tpl.kind, m.tpl, v.th)) : null;
-      // the same photos again only fail again when the server asked for another photo (a face not seen well)
-      const again = list.canRetry(m) && !(redo && /друго[ей] фото|другие фото|лиц[оа]\s/i.test(m.text || "")) ? act("🔄 Повторить", () => list.retry(m)) : null;
-      if (redo || again) wrap.append(el("div", { class: "acts" }, redo, again));
+      if (list.canRetry(m)) wrap.append(el("div", { class: "acts" }, act("🔄 Повторить", () => list.retry(m))));
     }
     return wrap;
   }
@@ -963,7 +955,7 @@
       const content = el("div");
       const status = el("div", { class: "status" }, el("span", { class: "spin" }), el("span", { text: first }));
       b.append(content, status);
-      if (path === "/api/tvideo" || path === "/api/animate") {
+      if (path === "/api/animate") {
         b.append(el("div", { class: "live-note", text: "Можно перейти в другую вкладку или свернуть приложение — ролик придёт сюда." }));
       }
       node.append(b);
@@ -1151,7 +1143,7 @@
         const small = JSON.stringify(body || {}).length < 100000;
         store.set(PEND, { rid, path, at: Date.now(), body: small ? body : null });
         // a picture, a clip or a PDF is first sent off; «Думаю…» is for words, until the server says what it is doing
-        const lv = live(/\/api\/(photo|photo_do|draw|tphoto|tvideo|animate|pdf|shoot)$/.test(path) ? "Отправляю…" : "Думаю…", path);
+        const lv = live(/\/api\/(photo|photo_do|draw|animate|pdf|shoot)$/.test(path) ? "Отправляю…" : "Думаю…", path);
         const again = () => stream(path, Object.assign({}, body, { rid }), lv.event).catch((e) => {
           if (e instanceof HttpError) throw e;
           return null;  // broke again (on the way there or back): asked by its number again
@@ -1188,19 +1180,12 @@
         const l = S.msgs[name];
         return !!last && !!m.err && l[l.length - 1] === m && !S.busy[name];
       },
-      // A clip or picture from a template keeps its «🔁 С другими фото» when the second try comes out.
       async retry(m) {
         if (!api2.canRetry(m)) return;
-        const keep = m.tpl;
         await DB.del(m.id);
         S.msgs[name].pop();
         api2.redraw();
-        const out = await api2.run(last.path, last.body, null);
-        if (out && keep) {
-          out.tpl = keep;
-          await DB.put(out);
-          api2.redraw();
-        }
+        await api2.run(last.path, last.body, null);
       },
       follow(kind) {
         const shown = { short: "✂️ Короче", more: "➕ Подробнее" }[kind];
@@ -1616,7 +1601,6 @@
       el("div", { class: "chosen-q", text: "Что сделать с этим фото?" }),
       tools(QUICK.filter(has).map((op) => tool(label(op), () => runOp(op))),
         tool("✍️ Своё изменение", own),
-        // «pick my photo, then put me in a picture»: the photo chosen here is offered in who-is-who
         has("animate") ? tool("🎬 Оживить", () => runOp("animate")) : null,
         trendsOk() ? tool("🔥 Фото-тренды", () => trendsSheet(th, "photo")) : null,
         shootOk() ? tool("📸 Фотосессия", () => shootSheet(th)) : null,
@@ -1772,8 +1756,8 @@
     th.redraw();
     return {
       root, th, set, redraw: th.redraw, shot: (f) => set(f),
-      current: () => photo,  // the photo chosen now (null when none): «🎭 Я на фото» offers it for a face
-      // a job started elsewhere (🎭 Я на фото) takes the choice away too: no «Что сделать с этим фото?» under its result
+      current: () => photo,  // the photo chosen now (null when none): the trend and photo-session sheets offer it for a face
+      // a job started elsewhere (🔥 Фото-тренды, 📸 Фотосессия) takes the choice away too: no «Что сделать с этим фото?» under its result
       drop() { photo = null; ownHint.classList.add("hidden"); sync(); },
       sub: () => (photo ? "фото выбрано" : S.me.can.draw ? "улучшить, изменить, нарисовать" : "улучшить и изменить фото"),
       buttons: () => (S.msgs.photo.length ? [["🧹 Очистить", "Очистить", async () => {
@@ -1786,174 +1770,10 @@
         th.redraw();
         refreshTop();
       }]] : []),
-      onShow: () => { gal.photo = null; th.down(); },
+      onShow: () => th.down(),
     };
   }
 
-  // ---------- «🎭 Я в ролике» (Видео) and «🎭 Я на фото» (Фото): a gallery of templates, then who is who ----------
-  // Templates are short clips on the server, by theme; the server finds up to 3 faces, a photo is chosen for any of them
-  // (the rest stay as they are) with consent, and the server swaps faces on its own CPU in 5–8 min. An own clip up to
-  // 20 s works too. Photo templates («Я на фото») share the gallery and who-is-who code.
-  const TPL = {
-    video: { title: "🎭 Я в ролике", path: "/api/tvideo", go: "🎬 Сделать ролик", find: "🔎 Ищу лица в ролике…",
-      off: "«Я в ролике» пока не включено — его включает владелец помощника.",
-      hint: "Выберите ролик — потом покажете, кого в нём заменить на себя или родных. Подойдёт и свой ролик с телефона, до 20 секунд.",
-      none: "Готовых роликов пока нет — загляните позже.", busy: "Подождите, ролик ещё делается",
-      // one line at 360: where it comes and «можно свернуть, но не закрывайте» are said in the clip's own bubble while it
-      // is made (.live-note)
-      foot: "Ролик будет готов через 5–8 минут." },
-    photo: { title: "🎭 Я на фото", path: "/api/tphoto", go: "✨ Создать картинку", find: "🔎 Ищу лица на картинке…",
-      off: "«Я на фото» пока не включено — его включает владелец помощника.",
-      hint: "Выберите картинку — потом покажете, кого на ней заменить на себя или родных.",
-      none: "Готовых картинок пока нет — загляните позже.", busy: "Подождите, предыдущее фото ещё делается",
-      foot: "Обычно готово за полминуты." } };
-  // what the gallery loaded this visit of the tab: {theme, page, items, more, total, themes, can, note}; the tab's onShow forgets it
-  const gal = { video: null, photo: null };
-  // The owner reads the server's own words. The family reads them too while the feature is on («Шаблоны ещё
-  // загружаются…»), but when it is off they read this app's «not on yet» for that kind: the server's reasons then name
-  // programs (ffmpeg) or say «Видео» in the photo gallery — on purpose, unlike «when can is false, show note».
-  const noteFor = (kind, st) => (S.me.panel ? st.note || TPL[kind].none : !st.can ? TPL[kind].off : st.note || TPL[kind].none);
-  // «🎭 Я на фото» and «🎭 Я в ролике» each by its own flag; a server before v23 sends one («tvideo») for both
-  function canTpl(kind) {
-    const c = S.me.can || {};
-    return kind === "photo" ? !!("tphoto" in c ? c.tphoto : c.tvideo) : !!("tclips" in c ? c.tclips : c.tvideo);
-  }
-  function templatesSheet(kind, th) {
-    const T = TPL[kind];
-    if (S.busy[th.name]) { toast(T.busy); return; }
-    if (!canTpl(kind) && !S.me.panel) { toast(T.off, 5000); return; }
-    sheet(T.title, (box, close) => {
-      if (!gal[kind]) gal[kind] = { theme: "", home: "", page: 0, items: [], more: false, total: 0, themes: {}, can: true, note: "", loaded: false, ticket: 0, credit: null };
-      const st = gal[kind];
-      // each time it opens where the server says (home): «🔥 Тренды» when it has enough of them, else «Все» — one request,
-      // the answer names the theme. A theme kept from last time showed a few pictures with the way back out of sight (to
-      // the left of the chips), and that read as «there is only one video»
-      let opening = !st.loaded || st.theme !== st.home;
-      if (opening) { st.theme = ""; st.items = []; st.more = false; st.loaded = false; }
-      const chips = el("div", { class: "chips" });
-      const stick = el("div", { class: "sheet-stick" }, chips);
-      const note = el("div", { class: "note-card hidden" });
-      const grid = el("div", { class: "tpl-grid" + (kind === "photo" ? " photo" : "") });
-      const hint = el("p", { class: "muted", style: "margin:0 0 4px;font-size:15px", text: T.hint });
-      const trendNote = el("p", { class: "muted trend-note hidden", text: "Что сейчас чаще всего снимают в Instagram. Подборка обновляется каждый день." });
-      box.append(hint, stick, trendNote, note, grid);
-      let loading = 0, err = null, errPage = 1;
-      const group = (x) => (x.people || 1) > 1;  // «👥 Компанией»: for two or three
-      const fits = (x) => st.theme !== "group" || group(x);
-      const tile = (x) => {
-        const n = Math.min(3, Math.max(1, x.people || 1));
-        return el("button", { class: "tpl", "aria-label": x.title + (x.trend || x.hot ? " — в трендах" : ""), onclick: () => { close(); whoIsWho(kind, { id: x.id, title: x.title, thumb: x.thumb }, th); } },
-          x.thumb ? el("img", { src: "data:image/jpeg;base64," + x.thumb, alt: "" }) : null,
-          x.hot ? el("span", { class: "hot", text: "🔥" }) : null,
-          n > 1 ? el("span", { class: "ppl", text: "👥 " + n }) : null, el("span", { class: "name", text: x.title }));
-      };
-      function paint() {
-        const x = chips.scrollLeft;  // the row stays where it was scrolled to
-        chips.innerHTML = "";
-        const ent = Object.entries(st.themes || {});
-        for (const [k, v] of ent.filter(([k]) => k === "trend").concat([["", "Все"], ["group", "👥 Вместе"]], ent.filter(([k]) => k !== "trend"))) {
-          chips.append(el("button", { class: "chip" + (k === st.theme ? " on" : ""), "aria-pressed": k === st.theme ? "true" : "false",
-            text: k && k !== "group" ? emo(v) : v, onclick: () => pick(k) }));
-        }
-        chips.scrollLeft = x;
-        // the theme kept from last time (far to the right, «💼 Профессии») is in sight, not off the screen or behind the
-        // fade: the few pictures under it then have their reason. A frame later: the first paint is before the sheet is
-        // on the screen (the translator's language row has the same rule)
-        requestAnimationFrame(() => {
-          const on = chips.querySelector(".chip.on");
-          if (!on || !on.offsetWidth) return;
-          const a = chips.getBoundingClientRect(), o = on.getBoundingClientRect();
-          if (o.left < a.left || o.right > a.left + a.width * 0.85) chips.scrollLeft = Math.max(0, chips.scrollLeft + o.left - a.left - 12);
-        });
-        const off = st.loaded && !st.can;
-        hint.classList.toggle("hidden", off);  // «Выберите картинку…» over «not on yet» would ask for what cannot be done
-        trendNote.classList.toggle("hidden", off || st.theme !== "trend");
-        stick.classList.toggle("hidden", off || !st.loaded);
-        grid.classList.toggle("hidden", off);
-        note.classList.toggle("hidden", !off);
-        note.textContent = off ? noteFor(kind, st) : "";
-        grid.innerHTML = "";
-        if (off) return;
-        // «Свой ролик» first; under «🔥 Тренды» after them (their groups' names head full rows: it would stand alone)
-        const own = () => grid.append(el("button", { class: "tpl own", onclick: () => { close(); ownClip(th); } },
-          el("span", { class: "plus", text: "+" }), el("span", { class: "name", text: "Свой ролик" })));
-        if (kind === "video" && st.theme !== "trend") own();
-        if (loading === 1 || (!st.loaded && !err)) {
-          grid.append(el("div", { class: "status gal-msg" }, el("span", { class: "spin" }), el("span", { text: "Загружаю…" })));
-          return;
-        }
-        const list = st.items.filter(fits);
-        let head = null;
-        for (const x of list) {
-          if (st.theme === "trend" && x.trend && x.trend !== head) {  // each trend: its name and what people do in it
-            head = x.trend;
-            grid.append(el("div", { class: "trend-head" }, el("b", { text: "🔥 " + x.trend }), x.why ? el("span", { text: " — " + x.why }) : null));
-          }
-          grid.append(tile(x));
-        }
-        if (kind === "video" && st.theme === "trend" && !loading) own();
-        if (err) {
-          grid.append(el("p", { class: "gal-msg", text: problem(err) }),
-            el("button", { class: "btn line gal-msg", text: "🔄 Повторить", onclick: () => load(errPage) }));
-          return;
-        }
-        if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: st.theme === "trend" ? "Сегодня в трендах пусто — загляните во «Все»."
-          : st.theme ? "В этой теме пока пусто." : noteFor(kind, st) }));
-        if (st.more) {
-          grid.append(el("button", { class: "btn line wide more", disabled: !!loading,
-            text: loading ? "Загружаю…" : st.theme === "group" ? "Показать ещё" : "Показать ещё · осталось " + Math.max(0, st.total - st.items.length),
-            onclick: () => load(st.page + 1) }));
-        }
-        // the stock site that asks to be named (Coverr)
-        if (st.credit && st.credit.url) grid.append(el("p", { class: "gal-msg muted credit" }, el("a", { href: st.credit.url, target: "_blank", rel: "noopener", text: st.credit.text })));
-      }
-      async function load(page) {
-        const my = ++st.ticket;
-        loading = page;
-        err = null;
-        paint();
-        let added = 0, pages = 0;
-        try {
-          for (;;) {
-            const r = await api("/api/templates", { kind, theme: st.theme && st.theme !== "group" ? st.theme : undefined, page,
-              home: opening && page === 1 ? true : undefined });
-            if (my !== st.ticket) return;  // another chip was tapped meanwhile
-            const items = r.items || [];
-            st.items = page === 1 ? items : st.items.concat(items);
-            Object.assign(st, { page: r.page || page, more: !!r.more, total: r.total || 0, themes: r.themes || {}, can: r.can !== false,
-              note: r.note || "", loaded: true, credit: r.credit || null });
-            if (opening) st.theme = st.home = r.theme || "";  // where the server opened it
-            opening = false;
-            if (page === 1 && st.theme && st.theme !== "group" && (st.theme === "trend" || Object.keys(st.themes).length) && !(st.theme in st.themes)) {
-              st.theme = "";  // the theme kept from last time is gone: all of them
-              continue;
-            }
-            added += items.filter(fits).length;
-            // «Компанией» is picked out here from the pages: a few pages more, so that there is something to see
-            if (st.theme === "group" && st.more && added < 6 && ++pages < 4) { page = st.page + 1; continue; }
-            break;
-          }
-        } catch (e) {
-          if (my !== st.ticket) return;
-          err = e;
-          errPage = page;
-        }
-        loading = 0;
-        paint();
-      }
-      function pick(k) {
-        opening = false;
-        st.theme = k;
-        // while the theme's pictures come, the sheet keeps its height (it is held at the bottom and sized to what is in
-        // it): the chips do not jump, and a next tap does not land on a picture that has just slid under the finger
-        box.style.minHeight = box.offsetHeight + "px";
-        st.items = [];
-        st.more = false;
-        load(1);
-      }
-      if (st.loaded) paint(); else load(1);
-    });
-  }
   // ---------- «🔥 Тренды» (v34): as on the trend sites — sections, a search, tall cards with «ХИТ»; a card: what it is,
   // the photos it asks for, «Повторить». The result comes into the Фото thread (a video trend: a clip) ----------
   const trendsOk = () => !!((S.me.can || {}).trends || S.me.panel);
@@ -2039,7 +1859,7 @@
       const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent.startsWith("Поставьте")) why.textContent = ""; } });
       const video = t.kind === "video";
       let secs = 10;  // (v36) the clip's length: 10 s unless 5 is chosen
-      let swap = false;  // (v37) «🎭 Я в ролике-примере»: the example clip with you in it (MiniMax-H3, with sound, 5 s)
+      let swap = false;  // (v37) «🎭 Я в примере»: the example clip with you in it (MiniMax-H3, with sound, 5 s)
       const schips = el("div", { class: "chips", style: "margin:0 0 6px" });
       const mchips = el("div", { class: "chips how-chips", style: "margin:0 0 6px;flex-wrap:wrap;overflow:visible" });
       const secsHead = el("div", { class: "menu-sec", text: "Длина ролика" });
@@ -2222,134 +2042,13 @@
           el("label", { class: "agree" }, check, el("span", { text: "Это мои фото, или люди на них согласны" })), why, goBtn));
     });
   }
-  async function ownClip(th) {
-    const f = await pickFile("video/*", false);
-    if (!f) return;
-    if (f.size > 40 * 1024 * 1024) { toast("Ролик слишком большой — возьмите короче, до 20 секунд", 5000); return; }
-    whoIsWho("video", { own: true, title: "Свой ролик", clip: f }, th);
-  }
-  // who is who: the server finds the people (each one's face), a photo is chosen for one or more of them (the rest stay
-  // as they are), with the word that the photos may be used; then the clip or the picture comes into the thread
-  function whoIsWho(kind, tpl, th) {
-    const T = TPL[kind];
-    if (S.busy[th.name]) { toast(T.busy); return; }
-    const photos = [];
-    let found = null;
-    sheet("🎭 " + tpl.title, async (box, close) => {
-      const said = el("span", { text: tpl.own ? "Загружаю ролик и ищу в нём лица… до минуты" : T.find });
-      const wait = el("div", { class: "status", style: "margin:8px 0 14px" }, el("span", { class: "spin" }), said);
-      // big while the faces are looked for; smaller once they are there, so the face rows fit over the foot on a 640px phone
-      const big = tpl.thumb ? el("img", { class: "tpl-big" + (kind === "photo" ? " photo" : ""), src: "data:image/jpeg;base64," + tpl.thumb, alt: "" }) : null;
-      box.append(big, wait);
-      // a stream: the server says it is still looking (a minute for a clip it has not seen), then who is in it
-      try {
-        found = await stream("/api/tfaces", tpl.own ? { clip: await b64(tpl.clip) } : { template: tpl.id }, (ev) => {
-          if (ev.t === "status" && ev.text) said.textContent = ev.text;
-        });
-        if (found.t !== "done") throw new HttpError(200, found.text || (kind === "photo" ? "Не получилось найти лица на картинке." : "Не получилось найти лица в ролике."));
-        if (!found.faces || !found.faces.length) throw new HttpError(200, kind === "photo" ? "На картинке не нашлось лиц." : "В ролике не нашлось лиц.");
-      } catch (e) {
-        const msg = problem(e);
-        wait.replaceWith(el("p", { style: "margin:4px 0 12px", text: msg }),
-          /владельц/i.test(msg) ? el("button", { class: "btn wide", text: "Понятно", onclick: close })  // another clip would not help
-            : el("button", { class: "btn line wide", text: kind === "photo" ? "↩️ Выбрать другую картинку" : "↩️ Выбрать другой ролик", onclick: () => {
-              close();
-              if (tpl.own) ownClip(th); else templatesSheet(kind, th);
-            } }));
-        return;
-      }
-      const n = Math.min(3, found.faces.length);
-      const NO_TICK = n === 1 ? "Поставьте галочку: фото ваше или человек согласен." : "Поставьте галочку: фото ваши или люди согласны.";
-      const names = kind === "video" ? (n === 1 ? ["Человек в ролике"] : ["Человек 1", "Человек 2", "Человек 3"])
-        : n === 1 ? ["Человек на картинке"] : n === 2 ? ["Слева", "Справа"] : ["Слева", "В центре", "Справа"];
-      const why = el("div", { class: "why" });
-      const check = el("input", { type: "checkbox", onchange: () => { if (check.checked && why.textContent === NO_TICK) why.textContent = ""; } });
-      const rows = el("div");
-      // the photo already chosen in Фото («pick my photo, then put me in a picture»): one person — it is theirs right
-      // away; two or three — it is the first thing in each one's menu
-      const mine = kind === "photo" && S.views.photo && S.views.photo.current ? S.views.photo.current() : null;
-      if (mine && n === 1) photos[0] = mine;
-      const take = async (i, camera) => {
-        const f = await pickFile("image/*", camera);
-        if (!f) return;
-        photos[i] = f;
-        if (why.textContent.startsWith("Нажмите")) why.textContent = "";
-        paintRows();
-      };
-      const paintRows = () => {
-        rows.innerHTML = "";
-        found.faces.slice(0, n).forEach((p, i) => {
-          const who = names[i];
-          const slot = el("button", { class: "slot" + (photos[i] ? " set" : ""), "aria-label": "Фото для: " + who, onclick: () => menu(who, [
-            mine && photos[i] !== mine ? ["✅", "Фото, которое вы выбрали", () => { photos[i] = mine; if (why.textContent.startsWith("Нажмите")) why.textContent = ""; paintRows(); }] : null,
-            ["📷", "Снять фото", () => take(i, true)], ["🖼️", "Из галереи", () => take(i, false)],
-            photos[i] ? ["↩️", "Оставить как есть", () => { photos[i] = null; paintRows(); }] : null]) },
-            photos[i] ? el("img", { src: urlOf(photos[i]), alt: "" }) : el("span", {}, el("b", { class: "plus", text: "+" }), "фото"));
-          rows.append(el("div", { class: "who-row" },
-            el("img", { class: "face", src: "data:image/jpeg;base64," + p.thumb, alt: "" }), el("span", { class: "arrow", text: "→" }), slot,
-            el("div", { class: "who" }, el("b", { text: who }),
-              el("small", { text: photos[i] ? "✓ ваше фото" : n === 1 ? "нажмите «+\u00a0фото»" : "останется как есть" }))));
-        });
-      };
-      paintRows();
-      // how many people there are, the rows below show: the words are only what to do (on a 360×640 phone the rows and
-      // the tick then stay in sight over the foot)
-      const hint = n === 1 ? "Нажмите «+\u00a0фото» и выберите своё фото: одно лицо, крупно, при хорошем свете."
-        : "Нажмите «+\u00a0фото» у тех, кого заменить. Фото\u00a0— одно лицо, крупно, при хорошем свете.";
-      const goBtn = el("button", { class: "btn wide", text: T.go, onclick: async () => {
-        if (!photos.some(Boolean)) { why.textContent = "Нажмите «+\u00a0фото» и выберите хотя бы одно фото."; return; }
-        if (!check.checked) { why.textContent = NO_TICK; return; }
-        // the photos are made smaller first (a second or two on an old phone): the sheet stays, the button says so
-        goBtn.disabled = true;
-        goBtn.textContent = "Готовлю фото…";
-        why.textContent = "";
-        const images = [];
-        try {
-          for (let i = 0; i < n; i++) images.push(photos[i] ? await b64(await shrink(photos[i], 1600, 0.9)) : null);
-        } catch (e) {
-          goBtn.disabled = false;
-          goBtn.textContent = T.go;
-          why.textContent = "Не получилось прочитать фото — выберите другое.";
-          return;
-        }
-        if (!goBtn.isConnected) return;  // closed with ✕ meanwhile: nothing is sent
-        close();
-        const first = photos.find(Boolean);
-        const many = photos.filter(Boolean).length;
-        if (kind === "photo" && S.views.photo && S.views.photo.drop) { S.views.photo.drop(); refreshTop(); }
-        const out = await th.run(T.path, { analysis: found.analysis, images, consent: true },
-          { role: "me", image: first, text: "🎭 " + tpl.title + (many > 1 ? " · 👥 " + many : "") });
-        if (out && !tpl.own) {  // «🔁 С другими фото» under it (a failed one too): the same template once more
-          out.tpl = { kind, id: tpl.id, title: tpl.title, thumb: tpl.thumb };  // the picture too: the second run looks like the first
-          await DB.put(out);
-          th.redraw();
-        }
-      } });
-      // how long it takes is read before the faces; the last thing over the sticky foot is a face row, so its fade hides
-      // nothing that is only said there
-      // the server may say both its own way (a whole person in the clip wants a photo of the whole person)
-      wait.replaceWith(el("p", { style: "margin:4px 0 6px", text: (found.note ? found.note + " " : "") + (found.hint || hint) }),
-        el("p", { class: "muted", style: "font-size:14px;margin:0 0 8px", text: found.foot || T.foot }), rows,
-        el("div", { class: "sheet-foot" },
-          el("label", { class: "agree" }, check, el("span", { text: n === 1 ? "Это моё фото, или человек на фото согласен" : "Это мои фото, или люди на них согласны" })),
-          why, goBtn));
-      // three people: the rows are the whole task, the picture goes (the face in each row says who is who)
-      if (big) { if (n > 2) big.remove(); else big.classList.add("small"); }
-      // a short screen or a large font: when a row would still be under the foot, the picture gives the rows its place
-      requestAnimationFrame(() => {
-        const foot = box.querySelector(".sheet-foot"), lastRow = rows.lastElementChild;
-        if (big && big.isConnected && foot && lastRow && lastRow.getBoundingClientRect().bottom > foot.getBoundingClientRect().top + 1) big.remove();
-      });
-    });
-  }
 
-  // ---------- Video: «🎭 Я в ролике» and «🖼️ Оживить фото» ----------
+  // ---------- Video: «🔥 Видео-тренды» ----------
   function videoView() {
     const root = el("div", { class: "view" });
     const scroll = el("div", { class: "scroll" });
     const NOT_ON = "Видео-тренды вам пока не включены — их включает владелец помощника.";
-    // (v35) the tab is the trend sites' «Тренды»: the video trends on its screen (the old clips «🎭 Я в ролике» are gone
-    // from here, the owner: «там одни косяки»; «Оживить фото» is in Фото, with the photo)
+    // (v35) the tab is the trend sites' «Тренды»: the video trends on its screen («Оживить фото» is in Фото, with the photo)
     const empty = () => (!trendsOk() ? el("div", { class: "empty" }, el("h2", { text: "Видео-тренды" }), el("div", { class: "note-card", text: NOT_ON }))
       : el("div", { class: "empty trends-home" }, trendsPanel(th, "video")));
     const th = thread("video", scroll, empty);
@@ -2379,7 +2078,6 @@
         refreshTop();
       }]] : []),
       onShow: () => {
-        gal.video = null;
         paintBar();
         if (!S.msgs.video.length && !S.busy.video) th.redraw(); else th.down();
       },
