@@ -348,7 +348,7 @@
     { id: "petya", name: "Петька", title: "Соседский мальчишка", about: "Только учится: ходит чем попало.", ai: { tier: 0, err: 0, greed: 0.5, thrift: 0.3, think: 1.2 },
       look: { skin: "#F6CBA8", skinS: "#D69A7A", hair: "#C9702E", hairS: "#7A3D16", style: "spiky", cloth: "#22B8CF", clothS: "#0B6E8A", clothL: "#7FE6F4", collar: "stripes", freckles: true, blush: true },
       say: { hello: ["Чур, я первый!", "Давай играть!"], lead: ["Вот тебе!", "Ага!"], trump: ["Козырем — бац!"], take: ["Ой, беру…", "Ну во-от…"], ptake: ["Ха-ха, бери!"], win: ["Ура! Я выиграл!"], lose: ["Нечестно! Ещё раз!"] } },
-    { id: "nyura", name: "Бабушка Нюра", title: "Печёт пироги", about: "Играет по-доброму и жалеет козыри.", ai: { tier: 1, err: 0.3, greed: 0.3, thrift: 2, think: 1.25 },
+    { id: "nyura", name: "Бабушка Нюра", short: "Баба Нюра", title: "Печёт пироги", about: "Играет по-доброму и жалеет козыри.", ai: { tier: 1, err: 0.3, greed: 0.3, thrift: 2, think: 1.25 },
       look: { skin: "#F2C29E", skinS: "#C98F70", hair: "#C9D6F2", hairS: "#8F9BB8", style: "bun", hat: "kerchief", hatC: "#D93644", hatS: "#8E1F35", cloth: "#7E1A2E", clothS: "#4A0E1C", clothL: "#C04A5E", collar: "shawl", glasses: true, blush: true },
       say: { hello: ["Садись, внучок", "Пирожок будешь?"], lead: ["Вот так, милок"], trump: ["Уж не обессудь"], take: ["Ох, возьму…", "Ай-яй-яй"], ptake: ["Бери, бери, не жалко"], win: ["Вот и славно"], lose: ["Ох, молодец какой!"] } },
     { id: "bayun", name: "Кот Баюн", title: "Мурлычет и путает", about: "Подкидывает всё, что блестит.", ai: { tier: 1, err: 0.18, greed: 1.4, thrift: 0.6, think: 0.85 },
@@ -357,23 +357,23 @@
     { id: "gosha", name: "Дядя Гоша", title: "Шофёр", about: "Не жалеет козырей и любит подкинуть.", ai: { tier: 1, err: 0.08, greed: 1.5, thrift: 0.4, think: 0.75 },
       look: { skin: "#E8B48C", skinS: "#B97E5E", hair: "#3B2A1C", hairS: "#24170F", style: "short", hat: "cap", hatC: "#6B7694", hatS: "#3B4766", cloth: "#7A5236", clothS: "#4E3424", clothL: "#A8774D", collar: "jacket", beard: "moustache", beardC: "#3B2A1C", stubble: true },
       say: { hello: ["Ну, поехали!"], lead: ["Газуем!", "Держи подарочек"], trump: ["Козырной поворот!"], take: ["Эх, занесло…", "Ладно, беру"], ptake: ["Гружу, принимай!"], win: ["Приехали!"], lose: ["Эх, заглох…"] } },
-    { id: "galya", name: "Почтальонша Галя", title: "Всё помнит", about: "Помнит, какие карты уже вышли.", ai: { tier: 2, err: 0.12, greed: 0.7, thrift: 0.9, think: 0.85 },
+    { id: "galya", name: "Почтальонша Галя", short: "Галя", title: "Всё помнит", about: "Помнит, какие карты уже вышли.", ai: { tier: 2, err: 0.12, greed: 0.7, thrift: 0.9, think: 0.85 },
       look: { skin: "#F6CBA8", skinS: "#D69A7A", hair: "#E0B04A", hairS: "#9A6A1C", style: "pony", hat: "postcap", hatC: "#24406B", hatS: "#142449", cloth: "#2F5A9E", clothS: "#1B3566", clothL: "#6F95D6", collar: "uniform", blush: true, lips: true },
       say: { hello: ["Вам письмо!"], lead: ["Распишитесь"], trump: ["Срочная доставка!"], take: ["Ой, не туда…"], ptake: ["Посылочка вам!"], win: ["Доставлено!"], lose: ["Адресат выбыл…"] } },
-    { id: "kuzmich", name: "Боцман Кузьмич", title: "Морской волк", about: "Бьёт крепко, козыри бережёт до шторма.", ai: { tier: 2, err: 0.05, greed: 0.9, thrift: 1.3, think: 0.75 },
+    { id: "kuzmich", name: "Боцман Кузьмич", short: "Кузьмич", title: "Морской волк", about: "Бьёт крепко, козыри бережёт до шторма.", ai: { tier: 2, err: 0.05, greed: 0.9, thrift: 1.3, think: 0.75 },
       look: { skin: "#E0A982", skinS: "#B07656", hair: "#C9D6F2", hairS: "#8F9BB8", style: "short", hat: "captain", cloth: "#1E2A52", clothS: "#0E1730", clothL: "#3B4C86", collar: "telnyashka", beard: "full", beardC: "#D7DFEB" },
       say: { hello: ["Свистать всех наверх!"], lead: ["Полундра!"], trump: ["Бортовой залп!"], take: ["Тысяча якорей…"], ptake: ["Принимай груз!"], win: ["Полный вперёд!"], lose: ["Пробоина…"] } },
     { id: "zina", name: "Тётя Зина", title: "С рынка", about: "Считает каждую карту до копейки.", ai: { tier: 3, err: 0.1, greed: 0.9, thrift: 1, think: 0.7, nosearch: true },
       look: { skin: "#F2C29E", skinS: "#C98F70", hair: "#D9622B", hairS: "#8A3412", style: "curly", cloth: "#1FA874", clothS: "#0B4A33", clothL: "#8EF0C6", collar: "dress", lips: true, blush: true, earrings: true },
       say: { hello: ["Подходи, не стесняйся!"], lead: ["Свежачок!"], trump: ["Почём козыри?"], take: ["Обвесили!"], ptake: ["Сдачи не надо!"], win: ["Торг окончен!"], lose: ["Ну и торгуешься!"] } },
-    { id: "prof", name: "Профессор Звездочётов", title: "Учёный", about: "Считает карты и просчитывает конец.", ai: { tier: 3, err: 0.05, greed: 0.8, thrift: 1, think: 0.75 },
+    { id: "prof", name: "Профессор Звездочётов", short: "Звездочётов", title: "Учёный", about: "Считает карты и просчитывает конец.", ai: { tier: 3, err: 0.05, greed: 0.8, thrift: 1, think: 0.75 },
       look: { skin: "#F6CBA8", skinS: "#D69A7A", hair: "#EAF0FA", hairS: "#A9B6CD", style: "bald", cloth: "#7A5236", clothS: "#4E3424", clothL: "#A8774D", collar: "tweed", glasses: true, beard: "goatee", beardC: "#EAF0FA" },
       say: { hello: ["Любопытно…"], lead: ["Элементарно"], trump: ["Предсказуемо"], take: ["Погрешность…"], ptake: ["Как и ожидалось"], win: ["Что и требовалось доказать"], lose: ["Пересчитаю…"] } },
-    { id: "marfa", name: "Ведунья Марфа", title: "Видит насквозь", about: "К концу игры знает всю твою руку.", ai: { tier: 3, err: 0.02, greed: 0.9, thrift: 1.1, think: 0.6 },
+    { id: "marfa", name: "Ведунья Марфа", short: "Марфа", title: "Видит насквозь", about: "К концу игры знает всю твою руку.", ai: { tier: 3, err: 0.02, greed: 0.9, thrift: 1.1, think: 0.6 },
       look: { skin: "#E9D3C4", skinS: "#B79A8A", hair: "#1B1530", hairS: "#0A0F1E", style: "long", hat: "hood", hatC: "#4B3BA8", hatS: "#21194A", cloth: "#4B3BA8", clothS: "#21194A", clothL: "#8B7CF6", collar: "robe", glow: "#7FE6F4", lips: true },
       say: { hello: ["Вижу, вижу…"], lead: ["Карты не лгут"], trump: ["Так звёзды легли"], take: ["Тьфу-тьфу…"], ptake: ["Я это видела"], win: ["Всё сбылось"], lose: ["Не к добру…"] } },
-    { id: "knyaz", name: "Князь Сияния", title: "Хозяин северного неба", about: "Не ошибается. Совсем.", ai: { tier: 3, err: 0, greed: 0.9, thrift: 1, think: 0.5 },
-      look: { skin: "#E6E9F5", skinS: "#AEB6D3", hair: "#FFFFFF", hairS: "#A9B6CD", style: "long", hat: "crown", cloth: "#127A52", clothS: "#05291C", clothL: "#34D399", collar: "ermine", beard: "full", beardC: "#F4F7FF", glow: "#8EF0C6" },
+    { id: "knyaz", name: "Князь Сияния", short: "Князь", title: "Хозяин северного неба", about: "Не ошибается. Совсем.", ai: { tier: 3, err: 0, greed: 0.9, thrift: 1, think: 0.5 },
+      look: { skin: "#EFC8AA", skinS: "#C08C6E", hair: "#C9D6F2", hairS: "#6B7694", style: "long", hat: "crown", cloth: "#127A52", clothS: "#05291C", clothL: "#34D399", collar: "ermine", beard: "full", beardC: "#B9C6E4", beardS: "#7F8FB8", glow: "#34D399" },
       say: { hello: ["Сыграем под сиянием"], lead: ["Склонись"], trump: ["Небо со мной"], take: ["Любопытно…"], ptake: ["Так и должно быть"], win: ["Достойно. Для смертного"], lose: ["Достойно…"] } },
   ];
   const FREE = { easy: "petya", normal: "gosha", hard: "kuzmich", master: "prof", adaptive: "bayun" };
@@ -430,7 +430,7 @@
     const inHead = (x, y) => { const rx = y > 15 ? 7 - (y - 15) * 0.28 : 7; const dx = (x + 0.5 - 16) / rx, dy = (y + 0.5 - 14) / 8.5; return dx * dx + dy * dy <= 1; };
     // long hair and the hood fall behind the shoulders
     if (lk.hat === "hood") { for (let y = 2; y < 30; y++) for (let x = 4; x < 28; x++) { const dx = (x + 0.5 - 16) / 11, dy = (y + 0.5 - 15) / 13; if (dx * dx + dy * dy <= 1) px(x, y, x > 18 ? lk.hatS : lk.hatC); } }
-    if (lk.style === "long") { rect(7, 8, 4, 19, lk.hairS); rect(21, 8, 4, 19, lk.hairS); rect(8, 8, 2, 18, lk.hair); rect(22, 8, 2, 17, lk.hair); }
+    if (lk.style === "long") { for (let y = 8; y < 28; y++) { const o = y > 22 ? Math.round((y - 22) * 0.6) : 0; rect(7 + o, y, 4 - Math.min(2, o), 1, lk.hairS); rect(21 + Math.min(2, o) - o + o, y, 4 - Math.min(2, o), 1, lk.hairS); if (y < 25) { px(8 + o, y, lk.hair); px(9 + o, y, (y % 4) ? lk.hair : lk.hairS); px(22, y, lk.hair); } } }
     shoulders(g, lk, rect, px);
     rect(13, 20, 6, 5, lk.skinS);
     rect(13, 20, 2, 4, lk.skin);
@@ -694,14 +694,14 @@
   WG.game({
     id: "durak",
     portrait: true,
-    controls: { dpad: true, a: "Ход", b: "Пас", swipe: false, landscapeDpad: false },
+    controls: { dpad: true, a: "Ход", b: false, swipe: false, landscapeDpad: false },
     howto: "Подкидной дурак на 36 карт. Отбивайся старшей картой той же масти или козырем — или бери. Подкидывай карты тех же достоинств, что на столе. Кто первым избавится от карт — победил.",
     keysHint: "Стрелки ← → — выбрать карту, ↑ или пробел — сыграть, X — «Беру» / «Бито», Esc — пауза.",
-    touchHowto: "Нажми карту, чтобы выбрать, и ещё раз — чтобы сыграть. Кнопка справа — «Беру» / «Бито».",
+    touchHowto: (l) => (l.dpad ? "Крестовина ← → — выбрать карту, «Ход» — сыграть, ↓ — «Беру» / «Бито». Или нажми карту дважды." : "Нажми карту, чтобы выбрать, и ещё раз — чтобы сыграть. Зелёная кнопка на столе — «Беру» / «Бито».") ,
     titleColors: ["#FFF0C2", "#FFF0C2", "#FFD27A", "#FFD27A", "#FF8F8F", "#FF6B7A", "#D93644"],
     stageNames: LEAGUE.map((o) => o.name),
     music: SONG,
-    _core: { newGame, legal, apply, aiMove, mover, beats, val, LEVEL_AI, adaptiveAI, LEAGUE, searchMove },
+    _core: { newGame, legal, apply, aiMove, mover, beats, val, LEVEL_AI, adaptiveAI, LEAGUE, searchMove, bust },
     create(api) {
       const ART = WG.durakArt;
       if (!ROOM) { SAMOVAR = paintSamovar(); ROOM = paintRoom(); FRAME = paintFrame(); TABLE = paintTable(); LAYERS = paintLayers(); }
@@ -896,20 +896,19 @@
         return -1;
       }
       const inBtn = (x, y) => x >= BTN.x - 3 && x < BTN.x + BTN.w + 3 && y >= BTN.y - 4 && y < BTN.y + BTN.h + 4;
+      const coarse = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
       function humanInput() {
         const I = api.input, G = S.G;
         const hand = sortedHand();
         if (S.cursor >= hand.length) S.cursor = hand.length - 1;
         if (S.cursor < 0) S.cursor = 0;
         const P = I.pointer;
-        if (P && P.down && !S.wasDown) S.downCur = S.cursor;
-        if (P && (P.x !== S.px || P.y !== S.py)) {
+        // a mouse chooses by hovering and plays with a click; a finger taps once to choose and again to play
+        if (!coarse && P && (P.x !== S.px || P.y !== S.py)) {
           S.px = P.x; S.py = P.y;
           const i = hitHand(P.x, P.y);
           if (i >= 0 && i !== S.cursor) { S.cursor = i; api.sfx("tick"); }
-          if (!P.down) S.downCur = S.cursor;
         }
-        S.wasDown = !!(P && P.down);
         if (I.pressed("left")) { S.cursor = (S.cursor - 1 + hand.length) % hand.length; api.sfx("tick"); }
         if (I.pressed("right")) { S.cursor = (S.cursor + 1) % hand.length; api.sfx("tick"); }
         if (I.pressed("up") || I.pressed("a")) { if (hand.length) playHuman(hand[S.cursor]); return; }
@@ -918,7 +917,7 @@
           const { x, y } = I.tap;
           if (inBtn(x, y) && actionLabel()) { humanAction(); return; }
           const i = hitHand(x, y);
-          if (i >= 0) { if (i === S.downCur || i === S.cursor && S.downCur < 0) playHuman(hand[i]); else { S.cursor = i; api.sfx("tick"); } S.downCur = i; return; }
+          if (i >= 0) { if (i === S.cursor) playHuman(hand[i]); else { S.cursor = i; api.sfx("tick"); } return; }
           if (y > TABLE_Y - 6 && y < HAND_Y - 8 && x > 64 && x < 320 && hand.length) playHuman(hand[S.cursor]);
         }
         void G;
@@ -956,7 +955,7 @@
               if (who === 1) say("trump");
             }
           } else if (e.t === "takes") {
-            if (e.who === 0) { toast("БЕРУ", RED_T); } else { toast(S.opp.name.toUpperCase() + " БЕРЁТ", GOLD_T, G.phase === "add" ? "Можно подкинуть ещё" : ""); setMood("sad", 2); say("take"); }
+            if (e.who === 0) { toast("БЕРУ", RED_T); } else { toast((S.opp.short || S.opp.name).toUpperCase() + " БЕРЁТ", GOLD_T, G.phase === "add" ? "Можно подкинуть ещё" : ""); setMood("sad", 2); say("take"); }
           } else if (e.t === "took") {
             e.cards.forEach((c, i) => { S.vis[c].pendDel = 0.25 + i * 0.05; });
             later(0.25, () => api.sfx("durakTake"));
@@ -1186,7 +1185,7 @@
         // dust in the light
         for (const m of motes) { if (Math.sin(t * 1.3 + m.p * 4) < 0.2) continue; g.fillStyle = "rgba(255,240,194,.45)"; g.fillRect(Math.round(m.x + sw), Math.round(m.y), 1, 1); }
         // the opponent's name on a brass plate on the wall
-        const nm = S.opp.name.toUpperCase();
+        const nm = (S.opp.short || S.opp.name).toUpperCase();
         const w = WG.textWidth(nm) + 8;
         g.fillStyle = "#2A1E00"; g.fillRect(213, 23, w + 2, 10);
         g.fillStyle = "#C98A1B"; g.fillRect(214, 24, w, 8); g.fillStyle = "#FFD27A"; g.fillRect(214, 24, w, 1); g.fillStyle = "#6B4A0A"; g.fillRect(214, 31, w, 1);
@@ -1214,8 +1213,8 @@
         return lines;
       }
       function drawBubble(g, b) {
-        const lines = wrap(b.text, 86);
-        const w = Math.max(...lines.map((l) => WG.textWidth(l))) + 10, h = lines.length * 9 + 6;
+        const lines = wrap(b.text, 74);
+        const w = Math.max(...lines.map((l) => WG.textWidth(l))) + 10, h = lines.length * 8 + 5;
         const x = 214, y = Math.max(1, 21 - h);
         const k = Math.min(1, b.t / 0.12);
         if (k < 1 && Math.floor(b.t * 30) % 2) return;
@@ -1225,7 +1224,7 @@
         // the tail toward the speaker
         g.fillStyle = "#0A0F1E"; g.fillRect(x - 4, y + h - 3, 4, 3); g.fillRect(x - 6, y + h - 1, 3, 2);
         g.fillStyle = PAPER; g.fillRect(x - 3, y + h - 2, 4, 1); g.fillRect(x - 5, y + h, 1, 0);
-        lines.forEach((l, i) => WG.text(g, l, x + 5, y + 4 + i * 9, { color: "#14182A" }));
+        lines.forEach((l, i) => WG.text(g, l, x + 5, y + 3 + i * 8, { color: "#14182A" }));
       }
       function drawCardAt(g, c, p, extra) {
         const v = S.vis[c];
@@ -1261,9 +1260,6 @@
         const L = my ? legalSet() : null;
         const hand = sortedHand();
         const cur = my ? hand[S.cursor] : -1;
-        // the shuffle: the deck splits and riffles back before the deal
-        const shuffling = S.phase === "deal" && S.t - (S.dealStart || 0) < 0;
-        void shuffling;
         const list = [];
         for (let c = 0; c < 36; c++) {
           const v = S.vis[c];
@@ -1317,7 +1313,7 @@
         let msg = "", col = "#EAF0FA";
         if (S.phase === "play" && G.phase !== "over") {
           if (S.auto) msg = "";
-          else if (mover(G) === 1) msg = S.opp.name + (G.phase === "defend" ? " отбивается" : " думает") + "…".slice(0, 1);
+          else if (mover(G) === 1) msg = S.opp.name + (G.phase === "defend" ? " отбивается…" : " думает…");
           else if (G.phase === "defend") { msg = legalSet().size ? "Отбей карту или «Беру»" : "Нечем крыть — придётся брать"; col = legalSet().size ? "#EAF0FA" : "#FF8F8F"; }
           else if (G.phase === "add") msg = "Соперник берёт — подкинь ещё или «Хватит»";
           else if (G.table.length) msg = "Подкинь или «Бито»";
@@ -1388,21 +1384,22 @@
         WG.text(g, "★★ — 2:0", x + 120, y + 96, { color: "#FFD27A" });
         WG.text(g, "★★★ — 2:0, во второй", x + 120, y + 106, { color: "#FFD27A" });
         WG.text(g, "партии не брать карты", x + 120, y + 115, { color: "#FFD27A" });
-        if (Math.floor(S.t * 2) % 2 || S.panelT < 0.5) drawButton(g, x + w / 2 - 40, y + h - 26, 80, 17, "СДАВАТЬ", false, false);
-        else drawButton(g, x + w / 2 - 40, y + h - 26, 80, 17, "СДАВАТЬ", false, false);
+        drawButton(g, x + w / 2 - 40, y + h - 26, 80, 17, "СДАВАТЬ", false, false);
       }
       function drawPick(g) {
         const x = 62, y = 8, w = 260, h = 200;
         panelBox(g, x, y, w, h);
         WG.text(g, "СВОБОДНАЯ ИГРА", x + w / 2, y + 10, { scale: 2, align: "center", color: GOLD_T, shadow: "#2A1E00" });
-        WG.text(g, "Побед подряд — пока не проиграешь. С кем играем?", x + w / 2, y + 30, { align: "center", color: "#A9B6CD" });
+        WG.text(g, "Побед подряд, пока не проиграешь", x + w / 2, y + 30, { align: "center", color: "#A9B6CD" });
+        WG.text(g, "Выбери соперника и нажми ещё раз", x + w / 2, y + h - 14, { align: "center", color: "#7F8FB8" });
         LEVEL_LINES.forEach(([lv, name, about], i) => {
           const ry = 62 + i * 25 - 8, on = i === S.pickI;
           const op = LEAGUE.find((o) => o.id === FREE[lv]);
           if (on) { g.fillStyle = "#123A31"; g.fillRect(x + 6, ry, w - 12, 23); g.fillStyle = "#34D399"; g.fillRect(x + 6, ry, 2, 23); }
           g.drawImage(bust(op, on ? "happy" : "idle", false, false), x + 12, ry - 5 + 3, 24, 24);
           WG.text(g, name, x + 42, ry + 4, { color: on ? "#FFFFFF" : "#EAF0FA" });
-          WG.text(g, op.name + " · " + about, x + 42, ry + 13, { color: on ? "#8EF0C6" : "#7F8FB8" });
+          WG.text(g, op.short || op.name, x + 44 + WG.textWidth(name) + 6, ry + 4, { color: on ? "#FFD27A" : "#7F8FB8" });
+          WG.text(g, about, x + 42, ry + 13, { color: on ? "#8EF0C6" : "#7F8FB8" });
           const best = WG.bestOf ? WG.bestOf("durak", lv) : null;
           if (best !== null && best !== undefined) WG.text(g, "★" + best, x + w - 12, ry + 8, { align: "right", color: "#FFD27A" });
         });
@@ -1415,7 +1412,7 @@
         WG.text(g, head, x + w / 2, y + 12, { scale: 2, align: "center", color: r === 0 ? GOLD_T : r === 1 ? RED_T : INK_T, shadow: "#04070F" });
         if (stage) {
           WG.text(g, "Серия", x + w / 2, y + 36, { align: "center", color: "#A9B6CD" });
-          WG.text(g, "ТЫ  " + S.series[0] + " : " + S.series[1] + "  " + S.opp.name.split(" ").pop().toUpperCase(), x + w / 2, y + 48, { align: "center", scale: 1, color: "#EAF0FA" });
+          WG.text(g, "ТЫ  " + S.series[0] + " : " + S.series[1] + "  " + (S.opp.short || S.opp.name).toUpperCase(), x + w / 2, y + 48, { align: "center", scale: 1, color: "#EAF0FA" });
           WG.text(g, r === -1 ? "Ничья не считается — сдаём заново" : "Играем до двух побед", x + w / 2, y + 62, { align: "center", color: "#7F8FB8" });
           drawButton(g, x + w / 2 - 50, y + h - 28, 100, 17, "ДАЛЬШЕ", false, false);
         } else {

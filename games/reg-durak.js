@@ -297,7 +297,7 @@
     g.fillStyle = "#04070F"; g.fillRect(63, 0, 2, 3);
     g.fillStyle = "#0B4A33"; g.fillRect(52, 3, 24, 4); g.fillStyle = "#1FA874"; g.fillRect(54, 3, 20, 1);
     g.fillStyle = "#FFF0C2"; g.fillRect(53, 7, 22, 1); g.fillStyle = "#FFD27A"; g.fillRect(56, 8, 16, 1);
-    art.dither(g, 50, 9, 28, 12, null, "rgba(255,210,122,.18)", 0.4);
+    g.fillStyle = "rgba(255,210,122,.07)"; g.beginPath(); g.moveTo(53, 8); g.lineTo(75, 8); g.lineTo(96, 20); g.lineTo(32, 20); g.closePath(); g.fill();
     // the deck with the trump across under it; two attacks on the felt, each beaten — the second by a trump
     const shadow = (x, y, w, hh) => { g.fillStyle = "rgba(4,10,9,.42)"; g.fillRect(x + 2, y + 3, w, hh - 1); };
     shadow(2, 40, CH, CW); g.drawImage(trump(3 * 9 + 8), 1, 40);
