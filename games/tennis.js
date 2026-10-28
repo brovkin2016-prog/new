@@ -709,14 +709,16 @@
       }
       function launch(a, kind, tx, tz, o) {
         const sh = SHOTS[kind];
-        const sx = o.sx * sh.sx, sz = o.sz * sh.sz;
+        // the longer the rally, the more tired the arms: nobody keeps it up for ever
+        const fat = kind === "serve1" || kind === "serve2" ? 1 : 1 + clamp((S.rally - 5) * 0.08, 0, 1.3);
+        const sx = o.sx * sh.sx * fat, sz = o.sz * sh.sz * fat;
         tx += gauss() * sx; tz += gauss() * sz;
         const b0 = { x: B.x, y: B.y, z: B.z };
         const dist = Math.hypot(tx - b0.x, tz - b0.z);
         let T = kind === "lob" ? 1.3 + dist * 0.017 : dist / (sh.v * o.pace);
         T = clamp(T, 0.32, 3.6);
         const sol = solveShot(b0, tx, tz, T, o.spin, sh.clear + 0.4 * (1 - o.q));
-        B.vx = sol.vx; B.vz = sol.vz; B.vy = sol.vy + gauss() * o.sv;
+        B.vx = sol.vx; B.vz = sol.vz; B.vy = sol.vy + gauss() * o.sv * fat;
         B.spin = o.spin; B.hitter = a.side; B.bounces = 0; B.live = true; B.held = false; B.net = false; B.kind = kind;
         B.isServe = kind === "serve1" || kind === "serve2"; B.lob = kind === "lob";
         B.shotId = ++S.shotId; B.hitT = S.t; B.trail.length = 0;
@@ -957,6 +959,7 @@
         B.isServe = true;
         sv.stage = "hit"; a.srv = { t: 0, hit: true };
         S.phase = "rally"; S.rally = 1;
+        S.speedTag = { text: "ПОДАЧА " + Math.round(Math.hypot(B.vx, B.vy, B.vz) * 3.6 * 1.3) + " КМ/Ч", t: 0 };
         api.sfx("t_serve"); api.sfx(sp > 28 ? "t_hard" : "t_hit");
         spark(B.x, B.y, B.z, 10, ["#FFFFFF", "#FFF0C2", "#E8FF5A"], [30, 100]);
         if (sp > 28) api.shake(1.4, 0.1);
@@ -1244,6 +1247,7 @@
           if (S.banner) { S.banner.t += dt; if (S.banner.t > S.banner.life) S.banner = null; }
           if (S.crowd > 0) S.crowd -= dt;
           if (NETSHAKE > 0) NETSHAKE -= dt;
+          if (S.speedTag) { S.speedTag.t += dt; if (S.speedTag.t > 1.8) S.speedTag = null; }
           for (const a of [ME, CPU]) {
             const spd = Math.hypot(a.vx, a.vz);
             a.dustT = (a.dustT || 0) - dt;
@@ -1499,6 +1503,7 @@
           WG.text(g, "МАТЧ " + api.stage + " ИЗ 7", 192, 3, { align: "center", color: "#C9D6F2", outline: "#04070F" });
           for (let i = 0; i < 3; i++) WG.text(g, "★", 192 - 10 + i * 8, 12, { color: i < n ? "#FFD27A" : "#3B4766", outline: "#04070F" });
         }
+        if (S.speedTag && !(S.speedTag.t > 1.4 && Math.floor(S.speedTag.t * 16) % 2)) WG.text(g, S.speedTag.text, 192, 34, { align: "center", color: "#FFD27A", outline: "#04070F" });
         if (S.rally >= 4 && S.phase === "rally" && !S.over) WG.text(g, "РОЗЫГРЫШ " + S.rally, 192, 23, { align: "center", color: "#EAF0FA", outline: "#04070F" });
         // the serve prompts
         if (S.phase === "serve" && S.server > 0 && !ME.ai) drawServeUi(g);
@@ -1507,7 +1512,7 @@
       }
       function drawServeUi(g) {
         const sv = S.sv;
-        if (S.serveNo === 2) WG.text(g, "ВТОРАЯ ПОДАЧА", 192, 36, { align: "center", color: "#FFD27A", shadow: "#04070F" });
+        if (S.serveNo === 2) WG.text(g, "ВТОРАЯ ПОДАЧА", 192, 34, { align: "center", color: "#FFD27A", outline: "#04070F" });
         if (sv.stage === "wait") {
           const early = S.total[0] + S.total[1] < 3;
           WG.text(g, early ? "УДАР — ПОДБРОСИТЬ МЯЧ" : "ПОДАЧА", 192, 203, { align: "center", color: "#FFD27A", shadow: "#04070F" });
