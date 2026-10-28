@@ -1813,10 +1813,10 @@
       for (const t of list) {
         grid.append(el("button", { class: "tcard", "aria-label": t.title + (t.hit ? " — хит" : ""), onclick: () => { if (before) before(); trendCard(th, t); } },
           t.thumb ? el("img", { src: "data:image/jpeg;base64," + t.thumb, alt: "" }) : el("span", { class: "tcard-wait", text: "✦" }),
-          t.hit ? el("span", { class: "tcard-hit", text: "ХИТ" }) : null,
           t.fresh ? el("span", { class: "tcard-new", text: "НОВОЕ" }) : null,  // (a trend found on the web this week)
           t.clip ? el("span", { class: "tcard-play", "aria-hidden": "true", text: "▶" }) : null,  // (v36) an example clip inside
-          el("span", { class: "tcard-name", text: t.title })));
+          // (v40) «ХИТ» beside the name: the picture's own «ИИ» mark (top left) stays in sight
+          el("span", { class: "tcard-name" }, t.title, t.hit ? el("span", { class: "tcard-hit inline", text: "ХИТ" }) : null)));
       }
       if (!list.length) grid.append(el("p", { class: "gal-msg muted", text: q ? "Ничего не нашлось — попробуйте другое слово." : "В этом разделе пока пусто." }));
     }

@@ -331,6 +331,26 @@ select, .input { border: 1px solid var(--field); background: var(--card); border
 .mic-big.on { background: var(--danger); color: #fff; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { transform: scale(1.06); } }
 @media (min-width: 720px) { .scroll, .composer > * { max-width: 760px; margin-left: auto; margin-right: auto; } .scroll { width: 100%; } }
+/* (v40) a 1280×800 tablet: tiles in four even columns, the icon above the label (no «Поздравлени-е», no last tile across the
+   row), trend cards four across, the study modes three across, the header and the tabs centred over the column */
+@media (min-width: 720px) {
+  .tools { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .tools > :last-child:nth-child(odd) { grid-column: auto; }
+  .tool { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 14px 8px; gap: 8px; font-size: 16px; }
+  .tool .ic { font-size: 32px; }
+  .empty > .btn.line.wide { width: auto; margin-left: auto; margin-right: auto; padding: 12px 28px; }
+  .trend-grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+  .seg.grid2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .empty .empty-sec + .hints { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .empty .empty-sec + .hints .hint { width: auto; }
+}
+@media (min-width: 900px) {
+  .top { padding-left: max(16px, calc(50vw - 360px)); padding-right: max(8px, calc(50vw - 360px)); }
+  .tabs { justify-content: center; }
+  .tab { flex: 0 1 128px; }
+  .tab .ic { font-size: 26px; }
+  .tab span:last-child { font-size: 14px; }
+}
 
 /* the owner's Управление tab */
 .badge { position: absolute; top: 4px; margin-left: 22px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
