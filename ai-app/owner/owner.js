@@ -1477,10 +1477,10 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
             + "Hugging Face. Бесплатно 5 минут видеокарты в день — на всех, кому вы включите." }),
           el("ol", { style: "margin:0 0 12px;padding-left:20px;font-size:15px;line-height:1.5" },
             el("li", { text: "Нажмите «🔑 Получить токен» ниже — в браузере откроется сайт Hugging Face (huggingface.co), страница нового токена. Если сайт просит войти — войдите в свой аккаунт Hugging Face (нет аккаунта — «Sign Up», нужна только почта)." }),
-            el("li", { text: "На этой странице вверху три вкладки: «Fine-grained», «Read», «Write» — нажмите «Write». В поле «Token name» впишите любое имя, например family. Внизу нажмите «Create token»." }),
+            el("li", { text: "На этой странице вверху три вкладки: «Fine-grained», «Read», «Write» — нажмите «Read» (хватает чтения). В поле «Token name» впишите любое имя, например family. Внизу нажмите «Create token»." }),
             el("li", { text: "Появится окно с токеном (начинается с hf_) — нажмите «Copy» и вернитесь в это приложение." }),
             el("li", { text: "Вставьте сюда и нажмите «✅ " + (v.on ? "Заменить токен" : "Подключить") + "». В чаты токен не присылайте." })),
-          el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens/new?tokenType=write",
+          el("a", { class: "btn line wide", href: "https://huggingface.co/settings/tokens/new?tokenType=read",
             style: "display:block;text-align:center;text-decoration:none;margin-bottom:10px", text: "🔑 Получить токен" }),
           inp,
           el("button", { class: "btn soft wide", style: "margin-top:8px", text: "📋 Вставить из буфера", onclick: async () => {
@@ -1553,7 +1553,7 @@ details.ow-more[open] > summary .ow-go { transform: rotate(90deg); }
       zhipu: "https://open.bigmodel.cn", openrouter: "https://openrouter.ai/keys",
       groq: "https://console.groq.com/keys", exa: "https://dashboard.exa.ai/api-keys", giga: "https://developers.sber.ru/studio",
       cf: "https://dash.cloudflare.com",
-      hf: "https://huggingface.co/settings/tokens/new?tokenType=write",
+      hf: "https://huggingface.co/settings/tokens/new?tokenType=read",
       viggle: "https://portal.viggle.ai/keys",
       anthropic: "https://console.anthropic.com/settings/keys",
     };
