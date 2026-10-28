@@ -2299,8 +2299,8 @@
           well("well", "", "key"),
           el("div", { class: "grow" }, "Ключи", el("small", { text: "Все ключи помощника и Claude: какие подключены, каких нет" })),
           el("span", { class: "chev", icon: "chev" }))));
-      // (v41) «🎮 Игры»: the family's games with their tables of records — pages of the server (/app/games/)
-      scroll.append(el("div", { class: "card" },
+      // (v41) «🎮 Игры»: the family's games with their tables of records — pages of the server (/app/games/), once it has them
+      if (me.games) scroll.append(el("div", { class: "card" },
         el("button", { class: "row", style: "width:100%;text-align:left", onclick: openGames },
           well("well", "", "gamepad"),
           el("div", { class: "grow" }, "Игры", el("small", { text: "Змейка, теннис, гонки, карты — с рекордами семьи" })),
