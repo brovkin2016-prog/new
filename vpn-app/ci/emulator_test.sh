@@ -329,6 +329,9 @@ dump /sdcard/ui.xml
 adb shell cat /sdcard/ui.xml > "$OUT/conns.xml"
 grep -q 'text="Тест"' "$OUT/conns.xml" || fail "no button for the server"
 grep -q 'text="Мост' "$OUT/conns.xml" || fail "no button for the bridge"
+# (B) each row's «⋯» in plain sight: «Скорость» and «Удалить» (no ⚡ on the row any more)
+grep -q 'content-desc="Скорость или удалить «Тест»"' "$OUT/conns.xml" || fail "no «⋯» (speed, remove) on the server's row"
+grep -q 'text="⚡"' "$OUT/conns.xml" && fail "a ⚡ button is still on a row"
 B=$(tr '>' '\n' < "$OUT/conns.xml" | grep 'text="Тест"' | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | head -1 | tr -c '0-9' ' ')
 read -r X1 Y1 X2 Y2 <<< "$B"
 adb shell input tap $(((X1 + X2) / 2)) $(((Y1 + Y2) / 2))

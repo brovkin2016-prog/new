@@ -3,56 +3,68 @@ package app.aihelper.vpn;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.RectF;
-import android.graphics.Shader;
+import android.os.Build;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 
-/** The big round on/off button: calm when off, amber with a running arc while it connects, green with waves when on. */
+/**
+ * The big round on/off button (B «Северное сияние», the same object as the helper's listening orb, DESIGN.md): a round
+ * in the one «включено» colour with two quiet rings around it when protected, amber with a running arc while it connects
+ * (the only thing that moves), and when off a calm but clearly pressable round (its own surface, a firm edge, a bright
+ * sign).
+ */
 final class PowerButton extends View {
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint icon = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint spin = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint wave = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF box = new RectF();
     private final boolean dark;
+    private final int on, onInk, onRing, amber, amberInk, offFill, offEdge, offIcon;
     private State.Phase phase = State.Phase.OFF;
-    private boolean enabledLook = true;
-    private float angle, glow;
+    private boolean usable = true;
+    private float angle;
     private ValueAnimator anim;
 
     PowerButton(Context c, boolean dark) {
         super(c);
         this.dark = dark;
+        on = c.getColor(R.color.on);
+        onInk = c.getColor(R.color.on_ink);
+        onRing = c.getColor(R.color.on_text);  // the rings: the green, darker by day (as the helper's orb)
+        amber = c.getColor(R.color.amber);
+        amberInk = c.getColor(R.color.amber_ink);
+        offFill = c.getColor(R.color.surf2);
+        offEdge = c.getColor(R.color.line_strong);
+        offIcon = c.getColor(R.color.text);
         icon.setStyle(Paint.Style.STROKE);
         icon.setStrokeCap(Paint.Cap.ROUND);
         spin.setStyle(Paint.Style.STROKE);
         spin.setStrokeCap(Paint.Cap.ROUND);
-        ring.setStyle(Paint.Style.FILL);
-        wave.setStyle(Paint.Style.STROKE);
+        ring.setStyle(Paint.Style.STROKE);
+        edge.setStyle(Paint.Style.STROKE);
         setLayerType(LAYER_TYPE_SOFTWARE, null);  // the shadow under the button needs it
         setClickable(true);
         setFocusable(true);
         setContentDescription("Включить или выключить VPN");
     }
 
-    void show(State.Phase p, boolean usable) {
-        if (p == phase && usable == enabledLook) return;
+    void show(State.Phase p, boolean has) {
+        if (p == phase && has == usable) return;
         phase = p;
-        enabledLook = usable;
-        boolean moving = p == State.Phase.CONNECTING || p == State.Phase.RETRYING || p == State.Phase.ON;
+        usable = has;
+        boolean moving = (p == State.Phase.CONNECTING || p == State.Phase.RETRYING) && animations();
         if (moving && anim == null) {
             anim = ValueAnimator.ofFloat(0f, 1f);
-            anim.setDuration(2200);
+            anim.setDuration(2400);
             anim.setRepeatCount(ValueAnimator.INFINITE);
             anim.setInterpolator(new LinearInterpolator());
             anim.addUpdateListener(a -> {
                 float f = (float) a.getAnimatedValue();
-                angle = f * 360f;
-                glow = (float) (0.5 + 0.5 * Math.sin(f * 2 * Math.PI));
+                angle = f * 720f;  // the arc while connecting: two turns a loop
                 invalidate();
             });
             anim.start();
@@ -62,6 +74,11 @@ final class PowerButton extends View {
             anim = null;
         }
         invalidate();
+    }
+
+    /** Android's «remove animations» (and the emulator test's off switch): the button stands still. */
+    private static boolean animations() {
+        return Build.VERSION.SDK_INT < 26 || ValueAnimator.areAnimatorsEnabled();
     }
 
     @Override
@@ -90,58 +107,59 @@ final class PowerButton extends View {
     @Override
     protected void onDraw(Canvas c) {
         float cx = getWidth() / 2f, cy = getHeight() / 2f, r = Math.min(cx, cy);
-        float inner = r * 0.74f;
-        int top, bottom, glowColor, iconColor;
-        switch (phase) {
-            case ON:
-                top = 0xFF34D399; bottom = 0xFF059669; glowColor = 0x3334D399; iconColor = 0xFFFFFFFF;
-                break;
-            case CONNECTING:
-            case RETRYING:
-                top = 0xFFFBBF24; bottom = 0xFFD97706; glowColor = 0x33FBBF24; iconColor = 0xFFFFFFFF;
-                break;
-            default:
-                top = dark ? 0xFF2A3341 : 0xFFFFFFFF;
-                bottom = dark ? 0xFF1C232E : 0xFFE9ECF3;
-                glowColor = dark ? 0x14FFFFFF : 0x0F1F2937;
-                iconColor = enabledLook ? (dark ? 0xFFCBD5E1 : 0xFF64748B) : (dark ? 0xFF475569 : 0xFFCBD5E1);
-        }
-        // protected: two waves leave the button, one after the other
+        float orb = r / 1.68f;  // the round; its two rings at 1.32 and 1.68 of it (as on the mock-up and in the helper)
+        boolean waiting = phase == State.Phase.CONNECTING || phase == State.Phase.RETRYING;
+        int body, ink, rim;
         if (phase == State.Phase.ON) {
-            for (int i = 0; i < 2; i++) {
-                float f = (angle / 360f + i * 0.5f) % 1f;
-                wave.setColor(0x34D399 | ((int) (0x90 * (1 - f)) << 24));
-                wave.setStrokeWidth(r * 0.025f * (1.4f - f));
-                c.drawCircle(cx, cy, inner + (r - inner) * 0.2f + (r * 0.98f - inner) * f, wave);
-            }
+            body = on;
+            ink = onInk;
+            rim = onRing;
+        } else if (waiting) {
+            body = amber;
+            ink = amberInk;
+            rim = amber;
+        } else {
+            body = offFill;
+            ink = offIcon;  // (with nothing to switch yet it opens adding one: the same pressable look)
+            rim = offEdge;
         }
-        // a soft halo; it breathes while connected or connecting
-        float halo = phase == State.Phase.OFF ? r * 0.9f : r * (0.86f + 0.1f * glow);
-        ring.setColor(glowColor);
-        c.drawCircle(cx, cy, halo, ring);
-        ring.setColor(phase == State.Phase.OFF ? glowColor : (glowColor & 0x00FFFFFF) | 0x55000000);
-        c.drawCircle(cx, cy, inner + r * 0.06f, ring);
-        fill.setShader(new LinearGradient(cx, cy - inner, cx, cy + inner, top, bottom, Shader.TileMode.CLAMP));
-        fill.setShadowLayer(dp(10), 0, dp(4), phase == State.Phase.OFF ? 0x22000000 : 0x33000000);
-        c.drawCircle(cx, cy, inner, fill);
-        // the power sign
-        float ir = inner * 0.36f;
-        icon.setColor(iconColor);
-        icon.setStrokeWidth(inner * 0.085f);
-        box.set(cx - ir, cy - ir + inner * 0.04f, cx + ir, cy + ir + inner * 0.04f);
-        c.drawArc(box, -60, 300, false, icon);
-        c.drawLine(cx, cy - ir * 1.25f, cx, cy - ir * 0.15f, icon);
-        // a running arc while it connects
-        if (phase == State.Phase.CONNECTING || phase == State.Phase.RETRYING) {
-            spin.setColor(0xFFFBBF24);
-            spin.setStrokeWidth(r * 0.05f);
-            float sr = inner + r * 0.13f;
+        // the two rings: the inner one firmer
+        ring.setStrokeWidth(dp(1.5f));
+        ring.setColor(alpha(rim, phase == State.Phase.OFF ? 0.55f : 0.42f));
+        c.drawCircle(cx, cy, orb * 1.32f, ring);
+        ring.setColor(alpha(rim, phase == State.Phase.OFF ? 0.22f : 0.16f));
+        c.drawCircle(cx, cy, orb * 1.68f - dp(1), ring);
+        // the round, with a soft shadow below it
+        fill.setColor(body);
+        fill.setShadowLayer(dp(12), 0, dp(10), dark ? 0x99000000 : 0x4D0D1630);  // the orb's shadow (DESIGN.md), on the sky
+        c.drawCircle(cx, cy, orb, fill);
+        if (phase == State.Phase.OFF) {  // off: a firm edge, so it reads as a button, not as something greyed out
+            edge.setStrokeWidth(dp(1.5f));
+            edge.setColor(offEdge);
+            c.drawCircle(cx, cy, orb - dp(0.75f), edge);
+        }
+        // the power sign (the icon set's «power»: 24 grid, its size .38 of the round)
+        float s = orb * 2 * 0.38f / 24f, ox = cx - 12 * s, oy = cy - 12 * s;
+        icon.setColor(ink);
+        icon.setStrokeWidth(Math.max(dp(2), 1.9f * s));
+        c.drawLine(ox + 12 * s, oy + 3 * s, ox + 12 * s, oy + 11 * s, icon);
+        box.set(ox + 4 * s, oy + 4.32f * s, ox + 20 * s, oy + 20.32f * s);
+        c.drawArc(box, -45.6f, 271.2f, false, icon);
+        // a running arc on the inner ring while it connects
+        if (waiting) {
+            spin.setColor(amber);
+            spin.setStrokeWidth(dp(3));
+            float sr = orb * 1.32f;
             box.set(cx - sr, cy - sr, cx + sr, cy + sr);
-            c.drawArc(box, angle, 80, false, spin);
+            c.drawArc(box, angle, 70, false, spin);
         }
     }
 
-    private int dp(int v) {
+    private static int alpha(int color, float a) {
+        return (color & 0x00FFFFFF) | (Math.round(255 * Math.max(0f, Math.min(1f, a))) << 24);
+    }
+
+    private int dp(float v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }

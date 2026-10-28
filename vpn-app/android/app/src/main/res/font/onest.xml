@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Onest (SIL Open Font License 1.1, © The Onest Project Authors, github.com/googlefonts/onest): the family's one face,
+     as in the AI helper. Read in code with ResourcesCompat (every Android); the theme (Android 10+) uses it for dialogs. -->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+    <font android:font="@font/onest_400" android:fontStyle="normal" android:fontWeight="400" />
+    <font android:font="@font/onest_500" android:fontStyle="normal" android:fontWeight="500" />
+    <font android:font="@font/onest_600" android:fontStyle="normal" android:fontWeight="600" />
+    <font android:font="@font/onest_700" android:fontStyle="normal" android:fontWeight="700" />
+</font-family>

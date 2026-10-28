@@ -1,5 +1,6 @@
 // Winger for Windows' window (the phone's screen): opened by its key, a link added, on through a real server, the
-// connection's button that switches it off, its ⚡, the programs list, the journal, the update check
+// connection's button that switches it off, its «⋯» (speed, remove), the programs list, the journal (the owner's only),
+// the update check
 const { chromium } = require("playwright");
 const fs = require("fs");
 (async () => {
@@ -32,15 +33,30 @@ const fs = require("fs");
     want((await page.innerText("#conns .conn.on")).includes("Включено") && (await page.innerText("#hint")).includes("чтобы выключить"),
       "the connection's row says it is on, and what a click on it does");
     want(await page.$("#add[hidden]") && !(await page.$("#addRow[hidden]")), "with a connection: «Добавить подключение» in the settings, no big button");
-    want(await page.$("#conns .conn .fast") && !(await page.innerText("#conns")).includes("⋯"), "a ⚡ speed button on the row, no ⋯ menu");
+    // «⋯» on the row: «Скорость» and «Удалить» in plain sight (no ⚡ any more); «Удалить» asks first
+    want(await page.$("#conns .conn .more") && !(await page.innerText("#conns")).includes("⚡"), "a «⋯» button on the row, no ⚡");
+    await page.click("#conns .conn:has-text('Тест') .more");
+    await page.waitForSelector("#menu:not([hidden])");
+    want((await page.innerText("#menu")).includes("Скорость") && (await page.innerText("#menu")).includes("Удалить"),
+      "the row's menu: «Скорость» and «Удалить»");
+    await page.click("#menu button[data-act='remove']");
+    await page.waitForSelector(".sheet:has-text('Удалить подключение «Тест»')");
+    want(await page.$("#menu[hidden]"), "the menu closes once a choice is made");
+    await page.click(".sheet button:has-text('Отмена')");
+    await page.waitForSelector("#sheet[hidden]", { state: "attached" });
+    want(await page.$("#conns .conn:has-text('Тест')"), "«Отмена»: the connection stays");
+    await page.click("#conns .conn:has-text('Тест') .more");
+    await page.waitForSelector("#menu:not([hidden])");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("#menu[hidden]", { state: "attached" });
     await page.click("#appsRow");
     await page.click("#mode button[data-only='1']");
     await page.waitForSelector("#apps label");
     want((await page.$$("#apps label")).length > 0, "the running programs are listed");
     await page.click(".sheet button:has-text('Отмена')");
-    await page.click("#journal");
-    await page.waitForSelector(".toast:has-text('Скопировано')", { timeout: 20000 });
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    // «Скопировать журнал» is the owner's only (here: not the owner's login); the journal itself still answers
+    want(await page.$("#journal[hidden]"), "the journal row: hidden for a login that is not the owner's");
+    const clip = await page.evaluate(() => fetch("/api/journal").then((r) => r.json()).then((j) => j.text || ""));
     want(clip.startsWith("Winger для Windows") && clip.includes("connected via") && !clip.includes("test-pass-123") && !/\d+\.\d+\.\d+\.\d+/.test(clip),
       "the journal: what happened, nothing private");
     // «Проверить обновление» says what came of it (here no family server answers: why not, in plain words)

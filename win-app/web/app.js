@@ -1,7 +1,17 @@
 "use strict";
-// Winger for Windows: the same screen as Winger on the phone — the big button and how it is; the connections in one list
-// (a click: on through it, or off when it is the one in use; ⚡: its speed; a right click: remove it); the settings below
+// Winger for Windows: the same screen as Winger on the phone (B «Северное сияние») — the big button and how it is; the
+// connections in one list (a click: on through it, or off when it is the one in use; «⋯»: its speed, or removing it; a
+// right click: remove it too); the settings below
 const $ = (s) => document.querySelector(s);
+// one of Winger's icons (the sprite in index.html: the same set as the phone's)
+const icon = (name, cls) => {
+  const ns = "http://www.w3.org/2000/svg", s = document.createElementNS(ns, "svg"), u = document.createElementNS(ns, "use");
+  s.setAttribute("class", "i" + (cls ? " " + cls : ""));
+  s.setAttribute("aria-hidden", "true");
+  u.setAttribute("href", "#i-" + name);
+  s.append(u);
+  return s;
+};
 const el = (tag, props, ...kids) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -48,6 +58,7 @@ function draw(s) {
   S = s;
   const st = s.status, has = s.conns.length > 0, on = st.phase !== "off";
   $("#power").className = "power" + (st.phase === "on" ? " on" : on ? " wait" : "") + (has ? "" : " none");
+  document.body.dataset.phase = st.phase === "on" ? "on" : on ? "wait" : "off";  // the sky follows it
   let t, d;
   switch (st.phase) {
     case "on": t = "Защищено"; d = "Включено " + since(st.since) + " · ↓ " + rate(s.down) + " · ↑ " + rate(s.up); break;
@@ -65,16 +76,16 @@ function draw(s) {
   ping.hidden = !on;
   if (on && !ping.dataset.asking) {
     const ms = st.ping;
-    ping.textContent = "● " + (ms < 0 ? "Отклик: проверяю…" : ms === 0 ? "Отклик: нет ответа" : "Отклик " + ms + " мс");
+    ping.textContent = ms < 0 ? "Отклик: проверяю…" : ms === 0 ? "Отклик: нет ответа" : "Отклик " + ms + " мс";
     ping.className = "ping " + (ms < 0 ? "" : ms === 0 ? "bad" : ms < 150 ? "good" : ms < 400 ? "slow" : "bad");
   }
   // VK wants a person before it lets the bridge in: its check, a page of the bridge program on this computer
   const cap = /^http:\/\/127\.0\.0\.1:\d{2,5}\/$/.test(s.captcha || "") ? s.captcha : "";
   let capBox = $("#captcha");
   if (cap && !capBox) {
-    capBox = el("div", { id: "captcha", class: "card" }, el("b", { text: "VK просит подтвердить, что вы не робот" }),
+    capBox = el("div", { id: "captcha", class: "card" }, el("b", {}, icon("shield"), "VK просит подтвердить, что вы не робот"),
       el("small", { text: "Пройдите проверку — после неё мост VK подключится сам." }),
-      el("button", { class: "btn wide", text: "✅ Я не робот — открыть проверку", onclick: () => window.open(capBox.dataset.url, "_blank") }));
+      el("button", { class: "btn wide", text: "Я не робот — открыть проверку", onclick: () => window.open(capBox.dataset.url, "_blank") }));
     $(".hero").after(capBox);
   } else if (!cap && capBox) capBox.remove();
   if (cap) capBox.dataset.url = cap;  // a new check (the bridge started again) has its own page
@@ -84,8 +95,9 @@ function draw(s) {
   $("#connsHead").hidden = !has;
   $("#prep").hidden = !s.preparing;  // the laptop's own bridges being made on the server
   $("#rescue").hidden = !s.owner;  // the server owner's only
+  $("#journal").hidden = !s.owner;  // the owner's only too (every Winger still sends its journal to the server by itself)
   // a list of its own for the server and for a bridge (the bridge's row once there is a bridge)
-  const many = (only, list) => only && (list || []).length ? "отмечено: " + list.length : "все программы";
+  const many = (only, list) => only && (list || []).length ? "Отмечено: " + list.length : "Все приложения";
   $("#appsRow").hidden = !has;
   $("#appsVal").textContent = many(s.onlyApps, s.apps);
   $("#bridgeAppsRow").hidden = !(s.conns || []).some((c) => c.bridge);
@@ -112,10 +124,11 @@ function draw(s) {
 }
 let seenVersion = "", updating = 0;
 // the connections in one list, as on the phone: made again only when the list changes (a click is never lost to a
-// redraw); each row: a mark (filled: in use), its name, one short line (its response time and speed, or what a bridge
-// goes through), what it is doing now on the right, and ⚡ for its speed
+// redraw); each row: its sign in a well (green: in use, amber: connecting, a ring: the chosen one), its name, and under it
+// what it is doing now, its response time and speed (or what a bridge goes through); «⋯» at the end — speed, remove
 let connsKey = "";
-const short = (line) => (line || "").replace(/^⏱\s*отклик\s*/, "").replace(/^⚡\s*/, "⚡ ");
+const short = (line) => (line || "").replace(/^⏱\s*(отклик\s*)?/, "").replace(/^⚡\s*/, "");
+const first = (line) => short(line).split(" · ")[0];  // on the row: the number only (as on the phone); its time in the tooltip
 function drawConns(s) {
   const st = s.status, on = st.phase !== "off", list = $("#conns");
   const key = s.conns.map((c) => (c.bridge ? "b|" : "s|") + c.name).join("\n");
@@ -125,14 +138,15 @@ function drawConns(s) {
     s.conns.forEach((c, i) => {
       list.append(el("div", { class: "conn", role: "button", tabindex: "0", onclick: () => use(i),
         onkeydown: (e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); use(i); } },
-        oncontextmenu: (e) => { e.preventDefault(); remove(i, S.conns[i]); } },
-        el("span", { class: "dot" }),
-        el("span", { class: "ic", text: c.bridge ? "🌉" : "🌐" }),
-        el("div", { class: "grow" }, el("b", { class: "name", text: c.name }), el("small", { class: "cnote" })),
-        el("span", { class: "chip" }),
-        el("button", { class: "fast", title: "Проверить скорость (удалить — правый щелчок по строке)", "aria-label": "Проверить скорость", text: "⚡",
-          onclick: (e) => { e.stopPropagation(); speed(i, S.conns[i]); } })));
+        oncontextmenu: (e) => { e.preventDefault(); closeMenu(); remove(i, S.conns[i]); } },
+        el("span", { class: "well" }, icon(c.bridge ? "phone" : "server")),  // a bridge: through a call
+        el("span", { class: "t" }, el("b", { class: "name", text: c.name }),
+          el("small", { class: "cnote" }, el("span", { class: "st" }), el("span", { class: "rest" }))),
+        el("button", { class: "more", title: "Скорость, удалить", "aria-label": "Скорость или удалить «" + c.name + "»",
+          "aria-haspopup": "menu", "aria-expanded": "false",
+          onclick: (e) => { e.stopPropagation(); openMenu(e.currentTarget, i); } }, icon("dots"))));
     });
+    closeMenu();
   }
   const cur = Math.max(0, s.conns.findIndex((c) => c.chosen));
   let act = s.conns.findIndex((c) => c.active);
@@ -144,21 +158,23 @@ function drawConns(s) {
     else if (on && i === cur) { chip = "Не отвечает"; mark = "chosen"; }
     else if (i === cur) mark = "chosen";
     // its line: the response time (live for the one in use) and the last speed; a bridge: what it goes through
-    const pg = on && i === act && st.phase === "on" && st.ping > 0 ? st.ping + " мс" : short(c.ping);
+    const pg = on && i === act && st.phase === "on" && st.ping > 0 ? st.ping + " мс" : first(c.ping);
     const parts = c.foreign ? ["мост телефона — когда телефон не на нём"] : c.bridge ? ["мост через " + c.service] : [];
     if (pg) parts.push(pg);
-    if (c.speed) parts.push(short(c.speed));
-    const note = parts.join(" · ") || "сервер";
+    if (c.speed) parts.push(first(c.speed));
+    const note = parts.join(" · ") || (chip ? "" : "сервер");
     const row = list.children[i];
     if (!row) return;
     const cls = ("conn " + mark).trim();
     if (row.className !== cls) row.className = cls;
-    const n = row.querySelector(".cnote");
-    if (n.textContent !== note) { n.textContent = note; n.title = note; }
-    const ch = row.querySelector(".chip");
-    if (ch.textContent !== chip) ch.textContent = chip;
-    const chc = "chip " + (mark === "on" ? "on" : chip ? "wait" : "");
-    if (ch.className !== chc) ch.className = chc;
+    // its second line: what it is doing now (in its colour), then the numbers or what it is
+    const n = row.querySelector(".cnote"), stn = n.querySelector(".st"), rest = n.querySelector(".rest");
+    const tail = (chip && note ? " · " : "") + note;
+    if (stn.textContent !== chip) stn.textContent = chip;
+    const stc = "st " + (mark === "on" ? "on" : chip ? "wait" : "");
+    if (stn.className !== stc) stn.className = stc;
+    if (rest.textContent !== tail) rest.textContent = tail;
+    n.title = [chip, c.ping ? short(c.ping) : "", c.speed ? short(c.speed) : ""].filter(Boolean).join(" · ") || tail;
   });
   // what a click does, said once under the list (and why another one is on by itself)
   const hint = !s.conns.length ? "" : st.auto && st.phase === "on" ? "Выбранное подключение не отвечает — Winger включил другое сам."
@@ -180,10 +196,10 @@ async function speed(i, c) {
     toast("Скорость моста проверяется, когда он включён: включите его кнопкой и проверьте снова", 6000);
     return;
   }
-  toast("⚡ Проверяю скорость «" + c.name + "»… около 10 секунд", 15000);
+  toast("Проверяю скорость «" + c.name + "»… около 10 секунд", 15000);
   try {
     const r = await call("speed", { i });
-    toast("«" + c.name + "»: " + r.line, 6000);
+    toast("«" + c.name + "»: " + short(r.line), 6000);
   } catch (e) { toast("«" + c.name + "»: не получилось проверить", 6000); }
   refresh();
 }
@@ -198,6 +214,52 @@ function remove(i, c) {
         } })));
   });
 }
+// a connection's «⋯»: a small menu by it — «Скорость», «Удалить» (Esc, a click elsewhere or scrolling closes it)
+let menuFor = -1;
+function openMenu(btn, i) {
+  const m = $("#menu");
+  if (!m.hidden && menuFor === i) { closeMenu(); return; }
+  closeMenu();
+  menuFor = i;
+  m.hidden = false;
+  const r = btn.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  const below = r.bottom + h + 8 <= window.innerHeight;
+  m.style.top = (window.scrollY + (below ? r.bottom + 4 : r.top - h - 4)) + "px";
+  m.style.left = Math.max(8, window.scrollX + r.right - w) + "px";
+  btn.setAttribute("aria-expanded", "true");
+  m.querySelector("button").focus({ preventScroll: true });
+}
+function closeMenu() {
+  const m = $("#menu");
+  if (m.hidden) return;
+  m.hidden = true;
+  menuFor = -1;
+  document.querySelectorAll(".more[aria-expanded='true']").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+$("#menu").onclick = (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const i = menuFor, c = S && S.conns[i];
+  closeMenu();
+  if (!c) return;
+  if (b.dataset.act === "speed") speed(i, c); else remove(i, c);
+};
+document.addEventListener("click", (e) => { if (!e.target.closest("#menu, .more")) closeMenu(); });
+document.addEventListener("keydown", (e) => {
+  const m = $("#menu");
+  if (m.hidden) return;
+  if (e.key === "Escape") {
+    const back = document.querySelector(".more[aria-expanded='true']");
+    closeMenu();
+    if (back) back.focus();
+  } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const items = [...m.querySelectorAll("button")], at = items.indexOf(document.activeElement);
+    items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+  }
+});
+window.addEventListener("scroll", closeMenu, { passive: true });
+window.addEventListener("resize", closeMenu);
 function paste() {
   sheet("Ссылка VPN", (box, close) => {
     const t = el("textarea", { placeholder: "hysteria2://…" });
@@ -235,19 +297,19 @@ $("#ping").onclick = async () => {
 };
 $("#add").onclick = paste;
 $("#addRow").onclick = paste;
-// «Через сервер» / «Через мост»: all programs, or only the ticked ones — the standard ones ticked from the start, then
+// «Какие приложения» / «Приложения через мост»: all programs, or only the ticked ones — the standard ones ticked from the start, then
 // the programs running now and those ticked before
 function appsSheet(bridge) {
-  sheet(bridge ? "Какие программы через мост" : "Какие программы через сервер", (box, close) => {
+  sheet(bridge ? "Какие приложения через мост" : "Какие приложения через сервер", (box, close) => {
     let only = !!(bridge ? S.bridgeOnly : S.onlyApps);
     const mine = (bridge ? S.bridgeApps : S.apps) || [], std = ((S.standard || {})[bridge ? "bridge" : "server"]) || [];
     const seg = el("div", { class: "seg", id: "mode" },
-      el("button", { "data-only": "0", text: "Все программы" }), el("button", { "data-only": "1", text: "Только выбранные" }));
+      el("button", { "data-only": "0", text: "Все приложения" }), el("button", { "data-only": "1", text: "Только выбранные" }));
     const list = el("div", { class: "apps", id: "apps" });
     const mark = () => seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.only === "1") === only));
     const fill = async () => {
       list.innerHTML = "";
-      if (!only) { list.append(el("small", { class: "note", text: (bridge ? "Через мост" : "Через сервер") + " идут все программы этого компьютера." })); return; }
+      if (!only) { list.append(el("small", { class: "note", text: (bridge ? "Через мост" : "Через сервер") + " идут все приложения этого компьютера." })); return; }
       let procs = [];
       try { procs = (await call("processes")).processes || []; } catch (e) { /* nothing */ }
       if (!only) return;  // switched back while the list was coming
@@ -256,8 +318,8 @@ function appsSheet(bridge) {
       const names = [...std, ...rest];  // the standard ones first, then the chosen and running ones
       list.innerHTML = "";
       list.append(el("small", { class: "note", text: bridge
-        ? "Мост медленный: мессенджеры, ИИ и браузеры — да, музыку и видео лучше не пускать. Отметьте любые другие программы."
-        : "Через сервер — отмеченные программы; русские сайты в браузерах (банки, Госуслуги) идут напрямую. Отметьте любые другие программы." }));
+        ? "Мост медленный: мессенджеры, ИИ и браузеры — да, музыку и видео лучше не пускать. Отметьте любые другие приложения."
+        : "Через сервер — отмеченные приложения; русские сайты в браузерах (банки, Госуслуги) идут напрямую. Отметьте любые другие приложения." }));
       for (const n of names) {
         const cb = el("input", { type: "checkbox" }); cb.checked = chosen.has(n); cb.dataset.name = n;
         list.append(el("label", {}, cb, el("span", { text: n })));
@@ -271,7 +333,7 @@ function appsSheet(bridge) {
           await call("apps", { bridge: !!bridge, only: only && apps.length > 0, apps });
           close();
           const where = bridge ? "Через мост" : "Через сервер";
-          toast(only && apps.length ? where + ": " + apps.length + " прогр." : where + " — все программы");
+          toast(only && apps.length ? where + ": отмечено " + apps.length : where + " — все приложения");
           refresh();
         } catch (e) { toast(e.message); }
       } })));

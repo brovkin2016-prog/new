@@ -9,5 +9,7 @@
         <item name="android:windowLightStatusBar">@bool/light_bars</item>
         <item name="android:windowLightNavigationBar">@bool/light_bars</item>
         <item name="android:colorAccent">@color/accent</item>
+        <!-- dialogs and lists in the family's face too (the screen's own text sets it in code, on every Android) -->
+        <item name="android:fontFamily">@font/onest</item>
     </style>
 </resources>

@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
@@ -30,6 +31,7 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -50,19 +52,29 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** One screen: the big button and how the connection is; the connections in one list (a tap: on through it); the settings
- *  below (which apps, adding a connection, the update, the journal). The first time: adding a connection from a QR code or
- *  a link is the one thing to do. */
+/** One screen (B «Северное сияние», one style with the AI helper): the big button and how the connection is; the
+ *  connections in one list (a tap: on through it; «⋯»: its speed, or removing it); the settings below (which apps, adding
+ *  a connection, the update; the owner's: the journal, the bridges' check, the rescue). The first time: adding a
+ *  connection from a QR code or a link is the one thing to do. A tablet on its side: the button on the left, the lists on
+ *  the right. */
 public class MainActivity extends Activity implements State.Listener {
     private static final int REQ_VPN = 1, REQ_IMAGE = 2, REQ_NOTIFY = 3;
-    private boolean dark;
-    private int text, muted, card, accent;
+    private boolean dark, wide, shown;
+    private int builtWidth;  // the width (dp) the screen was laid out for: turned or resized, laid out again
+    private float builtScale;  // and the phone's text size it was laid out with
+    // the colour roles (res/values, values-night): the same names as the helper's and Winger for Windows' tokens
+    private int text, text2, surf, surf2, well, line, lineStrong, on, onInk, onTint, onText, accent, accentInk, cyan, amber, amberInk,
+            amberText, bad;
+    private Typeface regular, medium, semibold, bold;  // Onest, the family's face
     private PowerButton power;
     private AuroraView aurora;
-    private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal, scoutVal;
-    private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow, scoutRow;
+    private TextView status, detail, ping, appsName, bridgeAppsName, hint, connsHead, checkVal, scoutVal, autoSub, sleepSub;
+    private LinearLayout conns, appsCard, bridgeAppsCard, addRow, firstAdd, rescueRow, checkRow, scoutRow, journalRow;
+    private android.widget.Switch autoSwitch, sleepSwitch;
+    private android.widget.PopupWindow menu;  // a connection's «⋯»
+    private int pingLook;  // the response time's chip as drawn last (drawn again only when it changes)
     private boolean checkAsked;  // the button here started the check: its result is shown here when it is done
-    private long quickAsked;  // (v32) when «🔎 Что работает здесь» was pressed: its word is told once done
+    private long quickAsked;  // (v32) when «Что работает здесь» was pressed: its word is told once done
     private String connsKey = "";
     // (v33) while the screen is open, once a minute: each server's response time and one speed that is due (Speed.auto)
     private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -78,18 +90,15 @@ public class MainActivity extends Activity implements State.Listener {
     private String captchaShown = "";  // the check page last opened by itself (closed by hand: not again)
     private final List<LinearLayout> connRows = new ArrayList<>();
     private final List<TextView> connNotes = new ArrayList<>();
-    private final List<View> connDots = new ArrayList<>();
-    private int line;  // the thin lines between a list's rows
+    private final List<FrameLayout> connWells = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        text = dark ? 0xFFF3F4F6 : 0xFF111827;
-        muted = dark ? 0xFF9CA3AF : 0xFF6B7280;
-        card = dark ? 0xE01A2029 : 0xEBFFFFFF;  // cards let the aurora shine through a little
-        accent = dark ? 0xFF34D399 : 0xFF0E9F6E;
-        line = dark ? 0x22FFFFFF : 0x14000000;
+        // a phone keeps the screen upright; a tablet turns with the hand (its landscape: two columns)
+        if (getResources().getConfiguration().smallestScreenWidthDp < 600) setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        looks();
         boolean packaged = packagedProfile();
         build();
         if (packaged) Toast.makeText(this, "Подключение уже внутри — нажмите большую кнопку", Toast.LENGTH_LONG).show();
@@ -102,7 +111,17 @@ public class MainActivity extends Activity implements State.Listener {
     public void onConfigurationChanged(Configuration c) {
         super.onConfigurationChanged(c);
         // the phone's dark theme switched while Winger is open (it keeps itself through such changes): drawn again in it
-        if (((c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) != dark) recreate();
+        if (((c.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) != dark) {
+            recreate();
+            return;
+        }
+        // turned (a tablet), resized (split screen) or another text size: laid out again for it
+        if (wide(c) != wide || c.screenWidthDp != builtWidth || c.fontScale != builtScale) {
+            connsKey = "";
+            pingLook = 0;
+            build();
+            changed();
+        }
     }
 
     @Override
@@ -121,7 +140,7 @@ public class MainActivity extends Activity implements State.Listener {
         BridgeSync.run(this, false);  // the owner's bridge, kept ready (nobody else gets one)
         ticker.removeCallbacks(tick);
         ticker.post(tick);  // every server's response time, and the speeds that are due — again each minute while open
-        Diag.upload(this, false);  // the journal to the family server (it keeps the owner's only)
+        Diag.upload(this, false);  // the journal to the family server (it keeps the owner's only), from every phone
         if (Rescue.shown(this)) new Thread(() -> BridgeCheck.sendPending(this), "check-send").start();  // a report made offline
     }
 
@@ -129,68 +148,107 @@ public class MainActivity extends Activity implements State.Listener {
     protected void onPause() {
         ticker.removeCallbacks(tick);
         State.unlisten(this);
+        if (menu != null) menu.dismiss();
         super.onPause();
     }
 
     // ---------- the screen ----------
 
-    private void build() {
-        FrameLayout frame = new FrameLayout(this);
-        aurora = new AuroraView(this, dark);
-        frame.addView(aurora, new FrameLayout.LayoutParams(-1, -1));
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(20));
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
-        // on a short screen everything still fits: it scrolls; on a tall one the spacers share the room
-        ScrollView scroller = new ScrollView(this);
-        scroller.setFillViewport(true);
-        scroller.setVerticalScrollBarEnabled(false);
-        scroller.addView(root, new FrameLayout.LayoutParams(-1, -1));
-        frame.addView(scroller, new FrameLayout.LayoutParams(-1, -1));
+    /** A tablet on its side (or any wide window): two columns. */
+    private static boolean wide(Configuration c) {
+        return c.screenWidthDp >= 720 && c.screenWidthDp > c.screenHeightDp;
+    }
 
-        // the name: the winged shield (as on the icon), «Winger» in the aurora's colours, whose VPN it is
+    /** The colours and the face, once. */
+    private void looks() {
+        text = getColor(R.color.text);
+        text2 = getColor(R.color.text2);
+        surf = getColor(R.color.surf);
+        surf2 = getColor(R.color.surf2);
+        well = getColor(R.color.well);
+        line = getColor(R.color.line);
+        lineStrong = getColor(R.color.line_strong);
+        on = getColor(R.color.on);
+        onInk = getColor(R.color.on_ink);
+        onTint = getColor(R.color.on_tint);
+        onText = getColor(R.color.on_text);
+        accent = getColor(R.color.accent);
+        accentInk = getColor(R.color.accent_ink);
+        cyan = getColor(R.color.cyan);
+        amber = getColor(R.color.amber);
+        amberInk = getColor(R.color.amber_ink);
+        amberText = getColor(R.color.amber_text);
+        bad = getColor(R.color.bad);
+        regular = font(R.font.onest_400, Typeface.DEFAULT);
+        medium = font(R.font.onest_500, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        semibold = font(R.font.onest_600, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        bold = font(R.font.onest_700, Typeface.DEFAULT_BOLD);
+    }
+
+    private Typeface font(int res, Typeface otherwise) {
+        try {
+            Typeface t = androidx.core.content.res.ResourcesCompat.getFont(this, res);
+            if (t != null) return t;
+        } catch (RuntimeException e) {
+            Log.w("AIVPN", "font: " + e);
+        }
+        return otherwise;
+    }
+
+    private void build() {
+        Configuration cfg = getResources().getConfiguration();
+        wide = wide(cfg);
+        builtWidth = cfg.screenWidthDp;
+        builtScale = cfg.fontScale;
+        if (menu != null) menu.dismiss();
+        int gutter = dp(cfg.screenWidthDp < 360 ? 16 : 20);
+        FrameLayout frame = new FrameLayout(this);
+        aurora = new AuroraView(this, dark, wide);
+        frame.addView(aurora, new FrameLayout.LayoutParams(-1, -1));
+
+        // the name: the winged shield in the text's colour, «Winger», whose VPN it is
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.addView(new LogoView(this), new LinearLayout.LayoutParams(dp(54), dp(54)));
+        head.setMinimumHeight(dp(56));
+        head.addView(new LogoView(this, text), new LinearLayout.LayoutParams(dp(47), dp(41)));
         LinearLayout names = new LinearLayout(this);
         names.setOrientation(LinearLayout.VERTICAL);
-        names.setPadding(dp(10), 0, 0, 0);
-        TextView title = label(getString(R.string.brand), 24, text, true);
+        names.setPadding(dp(12), 0, 0, 0);
+        TextView title = label(getString(R.string.brand), 21, text, semibold);
         title.setGravity(Gravity.START);
-        title.getPaint().setShader(new android.graphics.LinearGradient(0, 0, dp(110), 0,
-                new int[]{0xFF22D3EE, 0xFF6366F1, 0xFFA855F7}, null, android.graphics.Shader.TileMode.CLAMP));
-        title.setLetterSpacing(0.02f);
+        title.setLetterSpacing(-0.01f);
         names.addView(title, new LinearLayout.LayoutParams(-2, -2));
-        TextView sub = label(getString(R.string.full_name), 13, muted, false);
+        TextView sub = label(getString(R.string.full_name), 13, text2, regular);
         sub.setGravity(Gravity.START);
-        names.addView(sub, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = dp(2);
+        names.addView(sub, lp);
         head.addView(names, new LinearLayout.LayoutParams(0, -2, 1f));
-        root.addView(head, new LinearLayout.LayoutParams(-1, -2));
 
-        root.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
+        // the button and how it is
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setGravity(Gravity.CENTER_HORIZONTAL);
         power = new PowerButton(this, dark);
         power.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             toggle();
         });
-        int big = getResources().getConfiguration().screenHeightDp < 720 ? 164 : 200;  // a smaller button on a short screen
-        root.addView(power, new LinearLayout.LayoutParams(dp(big), dp(big)));
-
-        status = label("", 24, text, true);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.topMargin = dp(14);
-        root.addView(status, lp);
-        detail = label("", 14, muted, false);
-        detail.setGravity(Gravity.CENTER);
+        int big = wide ? 240 : cfg.screenHeightDp < 720 ? 164 : 200;  // a smaller button on a short screen
+        hero.addView(power, new LinearLayout.LayoutParams(dp(big), dp(big)));
+        status = label("", wide ? 34 : 28, text, bold);  // (DESIGN.md: the display size)
+        status.setLetterSpacing(-0.01f);
+        lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = dp(8);
+        hero.addView(status, lp);
+        detail = label("", 14, text2, regular);
         lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.topMargin = dp(4);
-        root.addView(detail, lp);
-
+        lp.topMargin = dp(6);
+        hero.addView(detail, lp);
         // the response time, a small chip (a tap: checked again)
-        ping = label("", 13, text, true);
-        ping.setPadding(dp(12), dp(5), dp(12), dp(5));
+        ping = label("", 14, onText, semibold);
+        ping.setPadding(dp(14), dp(6), dp(14), dp(6));
         ping.setOnClickListener(v -> {
             if (State.phase == State.Phase.ON) {
                 ping.setText("Проверяю отклик…");
@@ -198,132 +256,159 @@ public class MainActivity extends Activity implements State.Listener {
             }
         });
         lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.topMargin = dp(8);
-        root.addView(ping, lp);
-        root.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1f));
+        lp.topMargin = dp(10);
+        hero.addView(ping, lp);
 
-        // the first time: adding a connection is the one thing to do — two big buttons
+        // the first time: adding a connection is the one thing to do — two big buttons, and a picture as a quiet third way
         firstAdd = new LinearLayout(this);
         firstAdd.setOrientation(LinearLayout.VERTICAL);
         firstAdd.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        TextView scan = button("📷  Сканировать QR", true);
-        scan.setOnClickListener(v -> scan());
-        TextView paste = button("📋  Вставить ссылку", false);
-        paste.setOnClickListener(v -> paste());
-        LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, dp(54), 1f);
-        half.rightMargin = dp(6);
-        row.addView(scan, half);
-        half = new LinearLayout.LayoutParams(0, dp(54), 1f);
-        half.leftMargin = dp(6);
-        row.addView(paste, half);
-        firstAdd.addView(row, new LinearLayout.LayoutParams(-1, -2));
-        TextView fromImage = label("🖼  QR-код из картинки или скриншота", 15, muted, false);
-        fromImage.setPadding(dp(12), dp(14), dp(12), dp(4));
+        firstAdd.addView(pill(R.drawable.i_qr, "Сканировать QR-код", true, v -> scan()), new LinearLayout.LayoutParams(-1, dp(48)));
+        lp = new LinearLayout.LayoutParams(-1, dp(48));
+        lp.topMargin = dp(10);
+        firstAdd.addView(pill(R.drawable.i_paste, "Вставить ссылку", false, v -> paste()), lp);
+        LinearLayout fromImage = new LinearLayout(this);
+        fromImage.setGravity(Gravity.CENTER);
+        fromImage.setPadding(dp(14), dp(12), dp(14), dp(12));
+        fromImage.setMinimumHeight(dp(48));
+        fromImage.setBackground(press(round(0x00000000, 24, 0), 24));
+        fromImage.addView(icon(R.drawable.i_photo, text2), new LinearLayout.LayoutParams(dp(20), dp(20)));
+        TextView fromText = label("QR-код из картинки или скриншота", 15, text2, medium);
+        lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.leftMargin = dp(8);
+        fromImage.addView(fromText, lp);
         fromImage.setOnClickListener(v -> pickImage());
-        firstAdd.addView(fromImage, new LinearLayout.LayoutParams(-2, -2));
-        root.addView(firstAdd, new LinearLayout.LayoutParams(-1, -2));
+        lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = dp(6);
+        firstAdd.addView(fromImage, lp);
 
         // the connections, one list: a tap switches on through that one, a tap on the one that is on switches it off
+        LinearLayout lists = new LinearLayout(this);
+        lists.setOrientation(LinearLayout.VERTICAL);
         connsHead = section("Подключение");
-        root.addView(connsHead, sectionParams());
+        lists.addView(connsHead, sectionParams());
         conns = list();
-        root.addView(conns, new LinearLayout.LayoutParams(-1, -2));
-        hint = label("", 13, muted, false);
+        lists.addView(conns, new LinearLayout.LayoutParams(-1, -2));
+        hint = label("", 14, text2, regular);
         hint.setGravity(Gravity.START);
-        hint.setPadding(dp(8), dp(6), dp(8), 0);
-        root.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-        // (v32) before connecting: which of them carry on this network now — each one's button then says so, no numbers
+        hint.setPadding(dp(4), dp(8), dp(4), 0);
+        lists.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        // (v32) before connecting: which of them carry on this network now — each one's line then says so, no numbers
         LinearLayout scoutCard = list();
-        scoutVal = label("", 13, muted, false);
-        scoutRow = setting("🔎", "Что работает здесь", scoutVal, v -> startCheck(BridgeCheck.QUICK, true));
+        scoutVal = subLabel();
+        scoutRow = setting(R.drawable.i_search, "Что работает здесь", scoutVal, v -> startCheck(BridgeCheck.QUICK, true));
         addTo(scoutCard, scoutRow);
-        LinearLayout.LayoutParams scoutAt = new LinearLayout.LayoutParams(-1, -2);
-        scoutAt.topMargin = dp(10);
-        root.addView(scoutCard, scoutAt);
+        lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(12);
+        lists.addView(scoutCard, lp);
 
-        // the settings: which apps go through it, adding a connection, the update, the journal (and the owner's rescue)
-        root.addView(section("Настройки"), sectionParams());
+        // the settings: which apps go through it, two switches, adding a connection, the update (and the owner's own)
+        lists.addView(section("Настройки"), sectionParams());
         LinearLayout settings = list();
         // a list of its own for the server and for a bridge: the two are for different things
-        appsName = label("", 13, muted, false);
-        appsName.setSingleLine(true);
-        appsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        appsName.setMaxWidth(valueWidth());  // «Через сервер» stays on one line on a narrow phone
-        appsCard = setting("🧩", "Через сервер", appsName, v -> chooseApps(false));
+        appsName = subLabel();
+        appsCard = setting(R.drawable.i_layers, "Какие приложения", appsName, v -> chooseApps(false));
         addTo(settings, appsCard);
-        bridgeAppsName = label("", 13, muted, false);
-        bridgeAppsName.setSingleLine(true);
-        bridgeAppsName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        bridgeAppsName.setMaxWidth(valueWidth());
-        bridgeAppsCard = setting("🌉", "Через мост", bridgeAppsName, v -> chooseApps(true));
+        bridgeAppsName = subLabel();
+        bridgeAppsCard = setting(R.drawable.i_phone, "Приложения через мост", bridgeAppsName, v -> chooseApps(true));
         addTo(settings, bridgeAppsCard);
         // (v32) a bridge that carries here now, by itself, when the connection in use stops carrying
-        TextView autoName = label(Apps.autoBridge(this) ? "вкл." : "выкл.", 13, muted, false);
-        addTo(settings, setting("🔀", "Сам выбирать мост", autoName, v -> {
-            boolean on = !Apps.autoBridge(this);
-            Apps.setAutoBridge(this, on);
-            autoName.setText(on ? "вкл." : "выкл.");
-            Toast.makeText(this, on ? "Если подключение перестанет работать, Winger сам перейдёт на мост, который работает в этой сети"
-                    : "Winger останется на выбранном подключении; на мост — нажав на него в списке", Toast.LENGTH_LONG).show();
+        autoSub = subLabel();
+        autoSwitch = toggleView();
+        addTo(settings, switchRow(R.drawable.i_shuffle, "Сам выбирать мост", autoSub, autoSwitch, v -> {
+            Apps.setAutoBridge(this, !Apps.autoBridge(this));
+            paintAuto();
         }));
-        // (v37) «Не рвать во сне»: asleep the connection holds — the processor kept awake while the VPN is on and the screen
+        paintAuto();
+        // (v37) the connection holds while the screen is off: the processor kept awake while the VPN is on and the screen
         // off, and Android's battery saving off for Winger (else it cuts the network of a sleeping phone)
-        TextView sleepName = label("", 13, muted, false);
-        sleepRow = sleepName;
-        addTo(settings, setting("🌙", "Не рвать во сне", sleepName, v -> {
-            if (Apps.keepAwake(this) && !batteryFree()) {  // on, but Android may still cut it: allow it, or switch it off
-                new AlertDialog.Builder(this).setTitle("🌙 Не рвать во сне")
-                        .setMessage("Включено, но Android всё ещё может усыплять Winger. Разрешите ему работать без ограничений "
-                                + "батареи — или выключите эту настройку.")
-                        .setPositiveButton("Разрешить", (d, w) -> askBattery())
-                        .setNegativeButton("Выключить", (d, w) -> {
-                            Apps.setKeepAwake(this, false);
-                            paintSleep();
-                        })
-                        .setNeutralButton("Отмена", null).show();
-                return;
-            }
-            boolean on2 = !Apps.keepAwake(this);
-            Apps.setKeepAwake(this, on2);
-            paintSleep();
-            Toast.makeText(this, on2 ? "Соединение держится и во сне: связь не рвётся, батарея тратится чуть больше"
-                    : "Во сне соединение может засыпать: после пробуждения Winger переподключится за секунды", Toast.LENGTH_LONG).show();
-            if (on2 && !batteryFree()) askBattery();
-        }));
+        sleepSub = subLabel();
+        sleepSwitch = toggleView();
+        addTo(settings, switchRow(R.drawable.i_moon, "Работать при выключенном экране", sleepSub, sleepSwitch, v -> sleepTapped()));
         paintSleep();
-        addRow = setting("➕", "Добавить подключение", null, v -> addMenu());
+        addRow = setting(R.drawable.i_plus, "Добавить подключение", null, v -> addMenu());
         addTo(settings, addRow);
         // which Winger this is, and a check right now (otherwise it looks for a new version every few hours by itself)
-        addTo(settings, setting("🔄", "Обновление", label(BuildConfig.VERSION_NAME, 13, muted, false), v -> {
+        TextView version = subLabel();
+        sub(version, "Версия " + BuildConfig.VERSION_NAME);
+        addTo(settings, setting(R.drawable.i_refresh, "Обновления", version, v -> {
             Toast.makeText(this, "Проверяю обновление…", Toast.LENGTH_SHORT).show();
             Updater.check(this, true);
             BridgeSync.run(this, true);
             Diag.upload(this, true);
         }));
-        // when the family server is out of reach the journal cannot go to it: copied here, it goes into a chat
-        addTo(settings, setting("📋", "Скопировать журнал", null, v -> copyJournal()));
+        // the owner's only (the family server says whose login this is): the journal copied into a chat, for when the
+        // family server is out of reach (every phone still sends its journal to the server by itself)
+        journalRow = setting(R.drawable.i_copy, "Скопировать журнал", null, v -> copyJournal());
+        addTo(settings, journalRow);
         // the owner's only: the bridges checked from this phone, on its own network (the family server's Claude reads the report)
-        checkVal = label("", 13, muted, false);
-        checkRow = setting("🔬", "Проверить мосты с этого телефона", checkVal, v -> startCheck("", true));
+        checkVal = subLabel();
+        checkRow = setting(R.drawable.i_pulse, "Проверить мосты с этого телефона", checkVal, v -> startCheck("", true));
         addTo(settings, checkRow);
         // the owner's only: the family server's rescue console in the browser (shown once the server says it is the owner)
-        rescueRow = setting("🆘", "Спасение сервера: консоль в браузере", null, v -> Rescue.open(this));
+        TextView rescueSub = subLabel();
+        sub(rescueSub, "Консоль в браузере");
+        rescueRow = setting(R.drawable.i_lifebuoy, "Спасение сервера", rescueSub, v -> Rescue.open(this));
         addTo(settings, rescueRow);
-        root.addView(settings, new LinearLayout.LayoutParams(-1, -2));
+        lists.addView(settings, new LinearLayout.LayoutParams(-1, -2));
+
+        View content;
+        if (!wide) {
+            // a phone (and a tablet held upright): one column; on a tall screen the spacers share the room, on a short
+            // one it scrolls
+            LinearLayout root = new LinearLayout(this);
+            root.setOrientation(LinearLayout.VERTICAL);
+            root.setPadding(gutter, dp(10), gutter, dp(24));
+            root.addView(head, new LinearLayout.LayoutParams(-1, -2));
+            root.addView(new View(this), new LinearLayout.LayoutParams(1, dp(12), 1f));
+            root.addView(hero, new LinearLayout.LayoutParams(-1, -2));
+            root.addView(new View(this), new LinearLayout.LayoutParams(1, dp(8), 1f));
+            lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = dp(16);
+            root.addView(firstAdd, lp);
+            root.addView(lists, new LinearLayout.LayoutParams(-1, -2));
+            content = scroller(root, cfg.screenWidthDp > 600 ? dp(600) : -1);
+        } else {
+            // a tablet on its side: the name and the button on the left, the lists on the right (each scrolls by itself)
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            left.setPadding(dp(40), dp(10), dp(24), dp(24));
+            left.addView(head, new LinearLayout.LayoutParams(-1, -2));
+            left.addView(new View(this), new LinearLayout.LayoutParams(1, dp(12), 1f));
+            left.addView(hero, new LinearLayout.LayoutParams(-1, -2));
+            lp = new LinearLayout.LayoutParams(Math.min(dp(380), (getResources().getDisplayMetrics().widthPixels / 2) - dp(64)), -2);
+            lp.gravity = Gravity.CENTER_HORIZONTAL;
+            lp.topMargin = dp(24);
+            left.addView(firstAdd, lp);
+            left.addView(new View(this), new LinearLayout.LayoutParams(1, dp(12), 1f));
+            LinearLayout right = new LinearLayout(this);
+            right.setOrientation(LinearLayout.VERTICAL);
+            right.setPadding(dp(24), dp(58), dp(40), dp(24));
+            right.addView(lists, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout two = new LinearLayout(this);
+            two.setOrientation(LinearLayout.HORIZONTAL);
+            two.addView(scroller(left, -1), new LinearLayout.LayoutParams(0, -1, 1f));
+            two.addView(scroller(right, -1), new LinearLayout.LayoutParams(0, -1, 1.1f));
+            content = two;
+        }
+        frame.addView(content, new FrameLayout.LayoutParams(-1, -1));
         setContentView(frame);
-        // the screen comes in softly: each part rises into place, one after another
-        for (int i = 0; i < root.getChildCount(); i++) {
-            View v = root.getChildAt(i);
-            v.setAlpha(0f);
-            v.setTranslationY(dp(18));
-            v.animate().alpha(1f).translationY(0).setStartDelay(80L + i * 40L).setDuration(400)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        if (!shown) {  // the screen comes in once, softly (not again when it is laid out anew)
+            shown = true;
+            content.setAlpha(0f);
+            content.animate().alpha(1f).setDuration(360).setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();
         }
     }
 
-    private TextView sleepRow;
+    /** A column that scrolls when it does not fit (and fills the screen when it does: its spacers share the room). */
+    private ScrollView scroller(View column, int width) {
+        ScrollView s = new ScrollView(this);
+        s.setFillViewport(true);
+        s.setVerticalScrollBarEnabled(false);
+        s.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        s.addView(column, new FrameLayout.LayoutParams(width, -1, Gravity.CENTER_HORIZONTAL));
+        return s;
+    }
 
     /** Android does not cut Winger's network in deep sleep (its battery saving is off for it). */
     private boolean batteryFree() {
@@ -331,9 +416,39 @@ public class MainActivity extends Activity implements State.Listener {
         return Build.VERSION.SDK_INT < 23 || pm == null || pm.isIgnoringBatteryOptimizations(getPackageName());
     }
 
+    /** «Сам выбирать мост»: its switch, and what it does now, in words. */
+    private void paintAuto() {
+        boolean at = Apps.autoBridge(this);
+        autoSwitch.setChecked(at);
+        sub(autoSub, at ? "Если связь пропадёт — перейдёт на мост, который здесь работает" : "Остаётся на выбранном подключении");
+    }
+
+    /** «Работать при выключенном экране»: its switch, and whether Android still may put Winger to sleep. */
     private void paintSleep() {
-        if (sleepRow == null) return;
-        sleepRow.setText(!Apps.keepAwake(this) ? "выкл." : batteryFree() ? "вкл." : "вкл. · ⚠️ разрешите");
+        if (sleepSwitch == null) return;
+        boolean at = Apps.keepAwake(this), free = batteryFree();
+        sleepSwitch.setChecked(at);
+        sub(sleepSub, !at ? "Во сне связь может засыпать" : free ? "Связь не рвётся во сне" : "Android может усыплять — нажмите, чтобы разрешить");
+        sleepSub.setTextColor(at && !free ? amberText : text2);
+    }
+
+    private void sleepTapped() {
+        if (Apps.keepAwake(this) && !batteryFree()) {  // on, but Android may still cut it: allow it, or switch it off
+            new AlertDialog.Builder(this).setTitle("Работать при выключенном экране")
+                    .setMessage("Включено, но Android всё ещё может усыплять Winger. Разрешите ему работать без ограничений "
+                            + "батареи — или выключите эту настройку.")
+                    .setPositiveButton("Разрешить", (d, w) -> askBattery())
+                    .setNegativeButton("Выключить", (d, w) -> {
+                        Apps.setKeepAwake(this, false);
+                        paintSleep();
+                    })
+                    .setNeutralButton("Отмена", null).show();
+            return;
+        }
+        boolean at = !Apps.keepAwake(this);
+        Apps.setKeepAwake(this, at);
+        paintSleep();
+        if (at && !batteryFree()) askBattery();
     }
 
     /** Android's own question: Winger without battery saving (a VPN that must not sleep). */
@@ -352,27 +467,26 @@ public class MainActivity extends Activity implements State.Listener {
         }
     }
 
-    /** A small grey heading over a list («ПОДКЛЮЧЕНИЕ», «НАСТРОЙКИ»). */
+    /** A heading over a list («Подключение», «Настройки»). */
     private TextView section(String name) {
-        TextView h = label(name.toUpperCase(Locale.ROOT), 12, muted, true);
+        TextView h = label(name, wide ? 20 : 17, text, semibold);
         h.setGravity(Gravity.START);
-        h.setLetterSpacing(0.06f);
-        h.setPadding(dp(8), 0, dp(8), 0);
+        h.setPadding(dp(4), 0, dp(4), 0);
         return h;
     }
 
     private LinearLayout.LayoutParams sectionParams() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.topMargin = dp(18);
-        lp.bottomMargin = dp(6);
+        lp.topMargin = dp(22);
+        lp.bottomMargin = dp(10);
         return lp;
     }
 
-    /** One rounded card for a list's rows (a press's ripple stays inside its corners). */
+    /** One rounded list for rows, with a hairline edge (a press's ripple stays inside its corners). */
     private LinearLayout list() {
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.VERTICAL);
-        l.setBackground(round(card, 18, 0));
+        l.setBackground(round(surf, 20, line));
         l.setClipToOutline(true);
         return l;
     }
@@ -382,47 +496,133 @@ public class MainActivity extends Activity implements State.Listener {
         if (list.getChildCount() > 0) {
             View sep = new View(this);
             sep.setBackgroundColor(line);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, Math.max(1, dp(1) / 2));
-            lp.leftMargin = dp(16);
-            list.addView(sep, lp);
+            list.addView(sep, new LinearLayout.LayoutParams(-1, Math.max(1, dp(1))));
         }
         list.addView(row, new LinearLayout.LayoutParams(-1, -2));
     }
 
-    /** The widest a settings row's value may be: a third of the screen (its name keeps one line on a narrow phone). */
-    private int valueWidth() {
-        return Math.min(dp(160), getResources().getDisplayMetrics().widthPixels * 3 / 10);
-    }
-
-    /** A settings row: its sign, its name, what it is now (grey, on the right), and ›. */
-    private LinearLayout setting(String icon, String name, TextView value, View.OnClickListener click) {
+    /** A row's start, the same on every list and on Windows: its sign in a round well, its name, and under the name what
+     *  it is now (a second line, so nothing is cut on a narrow phone). */
+    private LinearLayout row(int icon, String name, TextView sub) {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(dp(14), dp(13), dp(12), dp(13));
-        r.setMinimumHeight(dp(52));
+        r.setPadding(dp(16), dp(10), dp(14), dp(10));
+        r.setMinimumHeight(dp(60));
         r.setBackground(press(round(0x00000000, 0, 0), 0));
-        r.addView(label(icon, 18, text, false), new LinearLayout.LayoutParams(dp(30), -2));
-        TextView n = label(name, 15, text, false);
+        r.addView(well(icon), new LinearLayout.LayoutParams(dp(38), dp(38)));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        TextView n = label(name, wide ? 17 : 16, text, medium);  // (a little larger on a tablet)
         n.setGravity(Gravity.START);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
-        lp.leftMargin = dp(6);
-        r.addView(n, lp);
-        if (value != null) {
-            lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.leftMargin = dp(8);
-            r.addView(value, lp);
+        n.setMaxLines(2);
+        col.addView(n, new LinearLayout.LayoutParams(-1, -2));
+        if (sub != null) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = dp(1);
+            col.addView(sub, lp);
         }
-        lp = new LinearLayout.LayoutParams(-2, -2);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -2, 1f);
+        cp.leftMargin = dp(14);
+        r.addView(col, cp);
+        return r;
+    }
+
+    /** A settings row that opens something: the row's start and ›. */
+    private LinearLayout setting(int icon, String name, TextView sub, View.OnClickListener click) {
+        LinearLayout r = row(icon, name, sub);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(20), dp(20));
         lp.leftMargin = dp(8);
-        r.addView(label("›", 20, muted, false), lp);
+        r.addView(icon(R.drawable.i_chev, text2), lp);
         r.setOnClickListener(click);
         return r;
     }
 
+    /** A settings row that is on or off: the row's start and a switch (the whole row switches it). */
+    private LinearLayout switchRow(int icon, String name, TextView sub, android.widget.Switch sw, View.OnClickListener click) {
+        LinearLayout r = row(icon, name, sub);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.leftMargin = dp(8);
+        r.addView(sw, lp);
+        r.setOnClickListener(click);
+        r.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override
+            public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(android.widget.Switch.class.getName());
+                info.setCheckable(true);
+                info.setChecked(sw.isChecked());
+            }
+        });
+        return r;
+    }
+
+    /** The platform's own switch in the family's colours: on — the «включено» green (darker by day, for contrast). */
+    private android.widget.Switch toggleView() {
+        android.widget.Switch s = new android.widget.Switch(this);
+        s.setClickable(false);  // the row switches it (and says so to TalkBack)
+        s.setFocusable(false);
+        s.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        s.setThumbTintList(new ColorStateList(states, new int[]{accent, dark ? text2 : 0xFFFFFFFF}));
+        s.setTrackTintList(new ColorStateList(states, new int[]{(accent & 0x00FFFFFF) | 0x80000000, lineStrong}));
+        return s;
+    }
+
+    /** A sign in its round well (the colour of the connection's state, for a connection's row). */
+    private FrameLayout well(int icon) {
+        FrameLayout w = new FrameLayout(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(well);
+        w.setBackground(g);
+        w.addView(icon(icon, cyan), new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
+        return w;
+    }
+
+    /** One of Winger's icons (24 grid, stroke 1.8: the same set as on Windows), in a colour. */
+    private ImageView icon(int res, int color) {
+        ImageView v = new ImageView(this);
+        v.setImageResource(res);
+        v.setImageTintList(ColorStateList.valueOf(color));
+        v.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return v;
+    }
+
+    /** A row's second line: grey, up to three lines; hidden while it has nothing to say. */
+    private TextView subLabel() {
+        TextView t = label("", 14, text2, regular);
+        t.setGravity(Gravity.START);
+        t.setMaxLines(3);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.setVisibility(View.GONE);
+        return t;
+    }
+
+    private static void sub(TextView v, CharSequence s) {
+        if (!s.toString().contentEquals(v.getText())) v.setText(s);
+        v.setVisibility(s.length() == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    /** A button (DESIGN.md: 16 corners, 48 tall): filled with the accent (the one thing to do), or a line one. */
+    private LinearLayout pill(int icon, String s, boolean filled, View.OnClickListener click) {
+        LinearLayout b = new LinearLayout(this);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(18), 0, dp(18), 0);
+        b.setBackground(press(round(filled ? accent : surf, 16, filled ? 0 : lineStrong), 16));
+        b.addView(icon(icon, filled ? accentInk : cyan), new LinearLayout.LayoutParams(dp(20), dp(20)));
+        TextView t = label(s, 16, filled ? accentInk : text, semibold);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.leftMargin = dp(10);
+        b.addView(t, lp);
+        b.setOnClickListener(click);
+        return b;
+    }
+
     /** «Добавить подключение»: from a QR code, a link, or a QR code in a picture. */
     private void addMenu() {
-        String[] ways = {"📷  Сканировать QR-код", "📋  Вставить ссылку", "🖼  QR-код из картинки или скриншота"};
+        String[] ways = {"Сканировать QR-код", "Вставить ссылку", "QR-код из картинки или скриншота"};
         new AlertDialog.Builder(this)
                 .setTitle("Добавить подключение")
                 .setItems(ways, (d, w) -> {
@@ -448,22 +648,24 @@ public class MainActivity extends Activity implements State.Listener {
         aurora.show(State.phase);
         conns.setVisibility(has ? View.VISIBLE : View.GONE);
         connsHead.setVisibility(has ? View.VISIBLE : View.GONE);
-        hint.setVisibility(has ? View.VISIBLE : View.GONE);
+        if (!has) hint.setVisibility(View.GONE);  // (with connections: showConns says what a tap does, when it is worth saying)
         firstAdd.setVisibility(has ? View.GONE : View.VISIBLE);
         setRow(appsCard, has);
         boolean bridges = false;
         if (has) for (Profile x : Profile.all(this)) bridges |= x.bridge;
         setRow(bridgeAppsCard, bridges);
         setRow(addRow, has);
-        setRow(rescueRow, Rescue.shown(this));
-        setRow(checkRow, Rescue.shown(this));
-        checkVal.setText(BridgeCheck.running.get() ? "идёт…" : "");
+        boolean owner = Rescue.shown(this);  // the family server said this phone's login is the owner's
+        setRow(rescueRow, owner);
+        setRow(checkRow, owner);
+        setRow(journalRow, owner);  // the owner's only (everyone's journal still goes to the server by itself)
+        sub(checkVal, BridgeCheck.running.get() ? "идёт…" : "");
         boolean canScout = false;  // two ways or more, one of them a bridge to look at (VK is not), and Winger off
         for (Profile x : Profile.all(this)) canScout |= x.bridge && !"vk".equals(x.platformOrDefault());
         setRow(scoutRow, canScout && Profile.all(this).size() > 1 && (State.phase == State.Phase.OFF || quickAsked > 0));
         java.util.regex.Matcher pm = java.util.regex.Pattern.compile("\\((\\d+ из \\d+)\\)").matcher(BridgeCheck.progress);
         String sv = quickAsked > 0 && BridgeCheck.running.get() ? (pm.find() ? pm.group(1) : "идёт…") : "";
-        if (!sv.contentEquals(scoutVal.getText())) scoutVal.setText(sv);
+        sub(scoutVal, sv);
         if (quickAsked > 0 && BridgeCheck.quickAt > quickAsked && !BridgeCheck.running.get()) {
             quickAsked = 0;
             scoutSaid();
@@ -476,25 +678,25 @@ public class MainActivity extends Activity implements State.Listener {
         }
         if (has) {
             showConns(all);
-            appsName.setText(Apps.summary(this, false));
-            bridgeAppsName.setText(Apps.summary(this, true));
+            sub(appsName, Apps.summary(this, false));
+            sub(bridgeAppsName, Apps.summary(this, true));
         }
         String st, dt;
         switch (State.phase) {
             case ON:
                 st = "Защищено";
                 dt = "Включено " + since() + " · ↓\u00a0" + rate(State.downRate) + " · ↑\u00a0" + rate(State.upRate);
-                status.setTextColor(accent);
+                status.setTextColor(onText);
                 break;
             case CONNECTING:
                 st = "Подключаюсь…";
                 dt = State.note.isEmpty() ? "Это занимает несколько секунд" : State.note;
-                status.setTextColor(0xFFD97706);
+                status.setTextColor(amberText);
                 break;
             case RETRYING:
                 st = "Переподключаюсь…";
                 dt = State.note;
-                status.setTextColor(0xFFD97706);
+                status.setTextColor(amberText);
                 break;
             default:
                 status.setTextColor(text);
@@ -508,26 +710,32 @@ public class MainActivity extends Activity implements State.Listener {
         }
         status.setText(st);
         detail.setText(dt);
-        detail.setTextColor(State.phase == State.Phase.OFF && !State.note.isEmpty() ? 0xFFDC2626 : muted);
+        detail.setTextColor(State.phase == State.Phase.OFF && !State.note.isEmpty() ? bad : text2);
         if (State.phase == State.Phase.OFF) {
             ping.setVisibility(View.INVISIBLE);
         } else {
             ping.setVisibility(View.VISIBLE);
-            int ms = State.pingMs, color;
+            int ms = State.pingMs, look;  // 1 checking, 2 good, 3 slow, 4 no answer or bad
             String t;
             if (ms < 0) {
                 t = "Отклик: проверяю…";
-                color = muted;
+                look = 1;
             } else if (ms == 0) {
                 t = "Отклик: нет ответа";
-                color = 0xFFDC2626;
+                look = 4;
             } else {
                 t = "Отклик " + ms + " мс";
-                color = ms < 150 ? 0xFF10B981 : ms < 400 ? 0xFFF59E0B : 0xFFDC2626;
+                look = ms < 150 ? 2 : ms < 400 ? 3 : 4;
             }
-            ping.setText("● " + t);
-            ping.setTextColor(color);
-            ping.setBackground(press(round((color & 0x00FFFFFF) | 0x22000000, 14, 0), 14));
+            if (!t.contentEquals(ping.getText())) ping.setText(t);
+            if (look != pingLook) {  // its colours: the «включено» green when good, amber when slow, red when bad
+                pingLook = look;
+                int fg = look == 1 ? text2 : look == 2 ? onText : look == 3 ? amberText : bad;
+                int bg = look == 1 ? well : look == 2 ? onTint : look == 3 ? (amber & 0x00FFFFFF) | (dark ? 0x29000000 : 0x59000000)
+                        : (bad & 0x00FFFFFF) | 0x24000000;
+                ping.setTextColor(fg);
+                ping.setBackground(press(round(bg, 16, 0), 16));
+            }
         }
     }
 
@@ -853,27 +1061,31 @@ public class MainActivity extends Activity implements State.Listener {
         return "telemost".equals(p.platformOrDefault()) ? "Телемост" : VpnSvc.service(p);
     }
 
-    /** The connections' rows: made again only when the list changes; their mark, line and state follow the VPN. Each row:
-     *  a mark (filled: the one in use), its sign, its name, under it one short line (what it is doing now or whether it
-     *  carries here, in words, and what it is), and ⚡ for its speed. A long press removes it. */
+    /** The connections' rows: made again only when the list changes; their well, line and state follow the VPN. Each row
+     *  (the same as on Windows): its sign in a well (the «включено» green when it is the one in use, amber while it
+     *  connects, a ring when it is the chosen one), its name, under it what it is doing now or whether it carries here, in
+     *  words, with its response time and speed; and «⋯» — its speed, or removing it. A long press removes it too. */
     private void showConns(List<Profile> all) {
         StringBuilder key = new StringBuilder();
         for (Profile p : all) key.append(p.bridge ? "b|" : "s|").append(p.name).append('\n');
         if (!key.toString().equals(connsKey)) {
             connsKey = key.toString();
+            if (menu != null) menu.dismiss();
             conns.removeAllViews();
             connRows.clear();
             connNotes.clear();
-            connDots.clear();
+            connWells.clear();
             for (int i = 0; i < all.size(); i++) {
                 Profile p = all.get(i);
                 int at = i;
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(14), dp(11), dp(4), dp(11));
-                row.setMinimumHeight(dp(60));
-                row.setBackground(press(round(0x00000000, 0, 0), 0));
+                row.setPadding(dp(16), dp(10), dp(4), dp(10));
+                row.setMinimumHeight(dp(68));
+                GradientDrawable tint = round(0x00000000, 0, 0);  // the selected tint, on the row in use
+                row.setBackground(press(tint, 0));
+                row.setTag(tint);
                 row.setOnClickListener(v -> {
                     v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                     use(at);
@@ -882,41 +1094,37 @@ public class MainActivity extends Activity implements State.Listener {
                     remove(Profile.all(this), at);
                     return true;
                 });
-                View dot = new View(this);
-                row.addView(dot, new LinearLayout.LayoutParams(dp(18), dp(18)));
-                LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(34), -2);
-                ip.leftMargin = dp(6);
-                row.addView(label(p.bridge ? "🌉" : "🌐", 20, text, false), ip);
+                FrameLayout w = well(p.bridge ? R.drawable.i_phone : R.drawable.i_server);  // a bridge: through a call
+                row.addView(w, new LinearLayout.LayoutParams(dp(40), dp(40)));
                 LinearLayout col = new LinearLayout(this);
                 col.setOrientation(LinearLayout.VERTICAL);
-                TextView name = label(p.name, 16, text, true);
+                TextView name = label(p.name, wide ? 17 : 16, text, medium);
                 name.setGravity(Gravity.START);
                 name.setSingleLine(true);
                 name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                col.addView(name, new LinearLayout.LayoutParams(-2, -2));
-                TextView note = label("", 13, muted, false);
+                col.addView(name, new LinearLayout.LayoutParams(-1, -2));
+                TextView note = label("", 14, text2, regular);
                 note.setGravity(Gravity.START);
-                note.setSingleLine(true);
+                note.setMaxLines(2);
                 note.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-2, -2);
+                LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, -2);
                 np.topMargin = dp(1);
                 col.addView(note, np);
                 LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -2, 1f);
-                cp.leftMargin = dp(4);
+                cp.leftMargin = dp(14);
                 row.addView(col, cp);
-                // its speed check: a small round button
-                TextView fast = label("⚡", 16, text, false);
-                fast.setGravity(Gravity.CENTER);
-                fast.setBackground(press(round(0x00000000, 20, 0), 20));
-                fast.setContentDescription("Проверить скорость");
-                fast.setOnClickListener(v -> speed(Profile.all(this).get(at)));
-                LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(dp(40), dp(40));
-                fp.leftMargin = dp(2);
-                row.addView(fast, fp);
+                // «⋯»: its speed, or removing it (in plain sight, not only under a long press)
+                ImageView more = icon(R.drawable.i_dots, text2);
+                more.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+                more.setPadding(dp(12), dp(12), dp(12), dp(12));
+                more.setBackground(press(round(0x00000000, 24, 0), 24));
+                more.setContentDescription("Скорость или удалить «" + p.name + "»");
+                more.setOnClickListener(v -> rowMenu(v, at));
+                row.addView(more, new LinearLayout.LayoutParams(dp(48), dp(48)));
                 addTo(conns, row);
                 connRows.add(row);
                 connNotes.add(note);
-                connDots.add(dot);
+                connWells.add(w);
             }
         }
         int cur = Math.max(0, Math.min(Profile.current(this), all.size() - 1));
@@ -925,26 +1133,25 @@ public class MainActivity extends Activity implements State.Listener {
         for (int i = 0; i < connRows.size() && i < all.size(); i++) {
             Profile p = all.get(i);
             String chip = "";
-            int chipColor = accent, ring = dark ? 0xFF3B4556 : 0xFFD1D5DB, width = 2;
+            int chipColor = onText, look = 0;  // 0 plain, 1 the chosen one (its well tinted), 2 in use (on), 3 connecting
             if (on && i == act && State.phase == State.Phase.ON) {
                 chip = State.auto ? "Включено само" : "Включено";
-                ring = accent;
-                width = 5;
+                look = 2;
             } else if (on && i == act) {
                 chip = State.phase == State.Phase.CONNECTING ? "Подключаюсь…" : "Переподключаюсь…";
-                chipColor = ring = 0xFFD97706;
-                width = 5;
+                chipColor = amberText;
+                look = 3;
             } else if (on && i == cur) {
                 chip = "Не отвечает";
-                chipColor = 0xFFD97706;
-                ring = muted;
+                chipColor = amberText;
+                look = 1;
             } else if (i == cur) {
-                ring = muted;
+                look = 1;
             }
             Boolean here = chip.isEmpty() ? Scout.carries(this, p) : null;  // (v32) what this network said lately: words, no numbers
             if (here != null) {
                 chip = here ? "Работает здесь" : "Здесь не работает";
-                chipColor = here ? 0xFF16A34A : muted;
+                chipColor = here ? onText : text2;
             }
             // its line under the name (the name is never cut for it): what it is doing now, its response time (in the colour
             // of how good it is) and its speed — live for the one in use, the others' from the last minutes (v33); when there
@@ -968,37 +1175,104 @@ public class MainActivity extends Activity implements State.Listener {
             TextView n = connNotes.get(i);
             if (!note.contentEquals(n.getText())) {
                 Log.i("AIVPN", "button «" + p.name + "»: " + note);
-                android.text.SpannableString line = new android.text.SpannableString(note);
+                android.text.SpannableString styled = new android.text.SpannableString(note);
                 if (!chip.isEmpty()) {
-                    line.setSpan(new android.text.style.ForegroundColorSpan(chipColor), 0, chip.length(), 0);
-                    line.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, chip.length(), 0);
+                    styled.setSpan(new android.text.style.ForegroundColorSpan(chipColor), 0, chip.length(), 0);
+                    styled.setSpan(new Face(semibold), 0, chip.length(), 0);
                 }
                 int at = pingText.isEmpty() ? -1 : note.indexOf(pingText);
                 if (at >= 0) {
-                    int c = ms < 150 ? 0xFF10B981 : ms < 400 ? 0xFFF59E0B : 0xFFDC2626;  // (as the response time at the top)
-                    line.setSpan(new android.text.style.ForegroundColorSpan(c), at, at + pingText.length(), 0);
-                    line.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), at, at + pingText.length(), 0);
+                    int c = ms < 150 ? onText : ms < 400 ? amberText : bad;  // (as the response time at the top)
+                    styled.setSpan(new android.text.style.ForegroundColorSpan(c), at, at + pingText.length(), 0);
+                    styled.setSpan(new Face(semibold), at, at + pingText.length(), 0);
                 }
-                n.setText(line);
+                n.setText(styled);
             }
-            View dot = connDots.get(i);
-            Object was = dot.getTag();
-            int mark = ring * 31 + width;
-            if (was == null || (Integer) was != mark) {  // drawn again only when it changes
-                dot.setTag(mark);
-                GradientDrawable g = new GradientDrawable();
-                g.setShape(GradientDrawable.OVAL);
-                g.setColor(0x00000000);
-                g.setStroke(dp(width), ring);
-                dot.setBackground(g);
+            FrameLayout w = connWells.get(i);
+            Object was = w.getTag();
+            if (was == null || (Integer) was != look) {  // drawn again only when it changes (DESIGN.md: a selected thing
+                w.setTag(look);                          // changes fill, never its border)
+                GradientDrawable g = (GradientDrawable) w.getBackground();
+                // (this.on: the colour; on here is «the VPN is on»)
+                g.setColor(look == 2 ? this.on : look == 3 ? amber : look == 1 ? onTint : well);
+                ((ImageView) w.getChildAt(0)).setImageTintList(ColorStateList.valueOf(
+                        look == 2 ? onInk : look == 3 ? amberInk : look == 1 ? onText : cyan));
+                ((GradientDrawable) connRows.get(i).getTag()).setColor(look == 2 ? onTint : 0x00000000);  // the row in use: tinted
+                n.setTextColor(look == 2 ? onText : text2);  // and its second line in the accent («Включено · 17 мс»)
+                n.setTypeface(look == 2 ? medium : regular);
             }
         }
         // what a tap does, said once under the list (and why another one is on by itself)
         String h = State.auto && State.phase == State.Phase.ON ? "Выбранное подключение не отвечает — Winger включил другое сам."
                 : on ? "Нажмите на включённое — выключить, на другое — перейти на него."
-                : all.size() > 1 ? "Нажмите на подключение — Winger включится через него. Долгое нажатие — удалить."
-                : "Удалить подключение — долгое нажатие на него.";
+                : all.size() > 1 ? "Нажмите на подключение — Winger включится через него." : "";
         if (!h.contentEquals(hint.getText())) hint.setText(h);
+        hint.setVisibility(h.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    /** «⋯» on a connection's row: a small menu by it — its speed, or removing it. */
+    private void rowMenu(View anchor, int at) {
+        if (menu != null) menu.dismiss();
+        List<Profile> all = Profile.all(this);
+        if (at >= all.size()) return;
+        Profile p = all.get(at);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(6), 0, dp(6));
+        int width = dp(236);
+        android.widget.PopupWindow pw = new android.widget.PopupWindow(box, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        box.addView(menuItem(R.drawable.i_speed, "Скорость", text, cyan, () -> {
+            pw.dismiss();
+            speed(p);
+        }));
+        box.addView(menuItem(R.drawable.i_trash, "Удалить", bad, bad, () -> {
+            pw.dismiss();
+            remove(Profile.all(this), at);
+        }));
+        pw.setBackgroundDrawable(round(surf2, 16, line));
+        pw.setElevation(dp(12));
+        pw.setOutsideTouchable(true);
+        pw.setOnDismissListener(() -> {
+            if (menu == pw) menu = null;
+        });
+        menu = pw;
+        pw.showAsDropDown(anchor, anchor.getWidth() - width - dp(4), -dp(8));
+    }
+
+    private LinearLayout menuItem(int icon, String s, int color, int iconColor, Runnable click) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(dp(18), 0, dp(18), 0);
+        r.setMinimumHeight(dp(52));
+        r.setBackground(press(round(0x00000000, 0, 0), 0));
+        r.addView(icon(icon, iconColor), new LinearLayout.LayoutParams(dp(22), dp(22)));
+        TextView t = label(s, 16, color, medium);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+        lp.leftMargin = dp(14);
+        t.setGravity(Gravity.START);
+        r.addView(t, lp);
+        r.setOnClickListener(v -> click.run());
+        return r;
+    }
+
+    /** A part of a line in another weight of the family's face (any Android: no TypefaceSpan(Typeface) needed). */
+    private static final class Face extends android.text.style.MetricAffectingSpan {
+        private final Typeface face;
+
+        Face(Typeface face) {
+            this.face = face;
+        }
+
+        @Override
+        public void updateDrawState(android.text.TextPaint p) {
+            p.setTypeface(face);
+        }
+
+        @Override
+        public void updateMeasureState(android.text.TextPaint p) {
+            p.setTypeface(face);
+        }
     }
 
     /** The row of the connection in use now (the chosen one, or the one Winger moved to by itself). */
@@ -1028,7 +1302,7 @@ public class MainActivity extends Activity implements State.Listener {
                     Toast.LENGTH_LONG).show();
             return;
         }
-        Toast.makeText(this, "⚡ Проверяю скорость «" + p.name + "»… около 10 секунд", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Проверяю скорость «" + p.name + "»… около 10 секунд", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             String r = Speed.measure(this, p);
             runOnUiThread(() -> {
@@ -1187,20 +1461,17 @@ public class MainActivity extends Activity implements State.Listener {
 
     // ---------- looks ----------
 
-    private TextView label(String s, int sp, int color, boolean bold) {
+    /** Text in the family's face (Onest), in sp: it follows the phone's own text size. */
+    private TextView label(String s, int sp, int color, Typeface face) {
         TextView t = new TextView(this);
         t.setText(s);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
         t.setTextColor(color);
         t.setGravity(Gravity.CENTER);
-        if (bold) t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        t.setTypeface(face);
+        t.setIncludeFontPadding(false);
+        t.setLineSpacing(0, 1.12f);
         return t;
-    }
-
-    private TextView button(String s, boolean filled) {
-        TextView b = label(s, 15, filled ? 0xFFFFFFFF : text, true);
-        b.setBackground(press(round(filled ? accent : card, 16, filled ? 0 : (dark ? 0xFF2A3341 : 0xFFE5E7EB)), 16));
-        return b;
     }
 
     private GradientDrawable round(int color, int radiusDp, int stroke) {
@@ -1213,7 +1484,7 @@ public class MainActivity extends Activity implements State.Listener {
 
     private RippleDrawable press(GradientDrawable bg, int radiusDp) {
         GradientDrawable mask = round(0xFFFFFFFF, radiusDp, 0);
-        return new RippleDrawable(ColorStateList.valueOf(dark ? 0x33FFFFFF : 0x22000000), bg, mask);
+        return new RippleDrawable(ColorStateList.valueOf(getColor(R.color.ripple)), bg, mask);
     }
 
     private int dp(int v) {

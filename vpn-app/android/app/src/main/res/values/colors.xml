@@ -1,7 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- B «Северное сияние», one style with the AI helper (DESIGN.md). The light screen: its «dawn haze», the same sky at
+     first light. The colour roles are the same in values-night (the night sky): «on» is the one colour of «включено /
+     защищено» everywhere (the button, the connection in use); «accent» fills buttons and switches (darker by day, for
+     contrast); line_strong is the edge of a control (3:1 on the background), line only divides. -->
 <resources>
-    <color name="bg">#F4F6FB</color>
-    <color name="bar">#F4F6FB</color>
-    <color name="accent">#1FA971</color>
+    <color name="bg">#EEF2F8</color>
+    <color name="bar">#EEF2F8</color>
+    <color name="accent">#047857</color>
     <bool name="light_bars">true</bool>
+
+    <color name="accent_ink">#FFFFFF</color>
+    <color name="surf">#FFFFFF</color>
+    <color name="surf2">#F5F7FB</color>
+    <color name="well">#E4ECF7</color>
+    <color name="line">#D7DFEB</color>
+    <color name="line_strong">#6E7C9B</color>
+    <color name="text">#0D1630</color>
+    <color name="text2">#4A5670</color>
+    <color name="on">#34D399</color>
+    <color name="on_ink">#05291C</color>
+    <color name="on_tint">#D5F3E6</color>
+    <color name="on_text">#047857</color>
+    <color name="cyan">#0B6E8A</color>
+    <color name="amber">#FFD27A</color>
+    <color name="amber_ink">#2A1E00</color>
+    <color name="amber_text">#B45309</color>
+    <color name="bad">#B42335</color>
+    <color name="ripple">#1A0D1630</color>
 </resources>

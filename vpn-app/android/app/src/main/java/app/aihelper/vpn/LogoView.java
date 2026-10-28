@@ -1,73 +1,37 @@
 package app.aihelper.vpn;
 
-import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.view.View;
-import android.view.animation.LinearInterpolator;
-import android.view.animation.OvershootInterpolator;
 
 import java.io.File;
 
 /**
- * Winger's logo at the top of its screen: the winged shield, floating gently (the same one as on its icon). No portrait
- * any more (v33, the owner: the logo everywhere) — the one an older Winger kept on the phone is removed.
+ * Winger's mark at the top of its screen: the winged shield (the same one as on its icon) in one colour, the text's, as
+ * in the AI helper (B «Северное сияние»). No portrait any more (v33, the owner: the logo everywhere) — the one an older
+ * Winger kept on the phone is removed. The full-colour shield stays on the icon and in the notification.
  */
 final class LogoView extends View {
-    private final Drawable emblem;
-    private float t;
-    private ValueAnimator anim;
+    private final Drawable mark;
 
-    LogoView(Context c) {
+    LogoView(Context c, int color) {
         super(c);
-        emblem = c.getDrawable(R.drawable.emblem);
+        mark = c.getDrawable(R.drawable.logo_mark).mutate();
+        mark.setTint(color);
         for (String old : new String[]{"avatar.png", "avatar.webp"}) {
             //noinspection ResultOfMethodCallIgnored
             new File(c.getFilesDir(), old).delete();
         }
-        setScaleX(0.4f);
-        setScaleY(0.4f);
-        setAlpha(0f);
         setContentDescription("Winger");
     }
 
     @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(700)
-                .setInterpolator(new OvershootInterpolator(2f)).start();
-        anim = ValueAnimator.ofFloat(0f, 1f).setDuration(9000);
-        anim.setRepeatCount(ValueAnimator.INFINITE);
-        anim.setInterpolator(new LinearInterpolator());
-        anim.addUpdateListener(a -> {
-            t = (float) a.getAnimatedValue();
-            invalidate();
-        });
-        anim.start();
-        if (getWindowVisibility() != VISIBLE) onWindowVisibilityChanged(getWindowVisibility());
-    }
-
-    @Override
-    protected void onWindowVisibilityChanged(int v) {
-        super.onWindowVisibilityChanged(v);
-        // not drawn while Winger is behind other apps or the screen is off: the battery is not spent on it
-        if (anim == null) return;
-        if (v == VISIBLE) anim.resume();
-        else anim.pause();
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        if (anim != null) anim.cancel();
-        super.onDetachedFromWindow();
-    }
-
-    @Override
     protected void onDraw(Canvas c) {
-        float s = Math.min(getWidth(), getHeight()), cx = getWidth() / 2f, cy = getHeight() / 2f;
-        float lift = s * 0.025f * (float) Math.sin(t * 4 * Math.PI), half = s * 0.56f;
-        emblem.setBounds(Math.round(cx - half), Math.round(cy - half + lift), Math.round(cx + half), Math.round(cy + half + lift));
-        emblem.draw(c);
+        // the mark's own proportions (68 × 60), as large as fits
+        float w = getWidth(), h = getHeight(), k = Math.min(w / 68f, h / 60f);
+        int mw = Math.round(68 * k), mh = Math.round(60 * k), x = Math.round((w - mw) / 2), y = Math.round((h - mh) / 2);
+        mark.setBounds(x, y, x + mw, y + mh);
+        mark.draw(c);
     }
 }

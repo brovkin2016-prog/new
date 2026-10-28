@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- (v37) the connection kept while the phone sleeps: Android's battery saving off for Winger (asked once), and the
-         processor kept awake while the VPN is on and the screen is off (the setting «Не рвать во сне») -->
+         processor kept awake while the VPN is on and the screen is off (the setting «Работать при выключенном экране») -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -65,11 +65,13 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="false">
 
+        <!-- (B) turns on a tablet (its landscape: the button on the left, the lists on the right); a phone keeps it upright
+             (MainActivity.onCreate) -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
+            android:screenOrientation="unspecified"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

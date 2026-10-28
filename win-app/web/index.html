@@ -4,38 +4,95 @@
 <meta charset="utf-8">
 <meta name="google" content="notranslate">  <!-- Edge and Chrome on a non-Russian Windows: no «Translate page?» over the window -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Winger</title>
 <link rel="icon" href="logo.png">
+<link rel="preload" href="fonts/onest-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 </head>
-<body>
+<body data-phase="off">
+<!-- the sky (B «Северное сияние», the same as the phone's and the AI helper's): three curtains of light, rays in the middle
+     one, stars at night; its colours follow the VPN (app.css: --a1 --a2 --a3) -->
+<svg class="sky" viewBox="0 0 1280 320" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+ <defs>
+  <linearGradient id="ag1" x2="0" y2="1"><stop offset="0" style="stop-color:var(--a1)" stop-opacity="0"/><stop offset=".4" style="stop-color:var(--a1)" stop-opacity=".8"/><stop offset="1" style="stop-color:var(--a1)" stop-opacity="0"/></linearGradient>
+  <linearGradient id="ag2" x2="0" y2="1"><stop offset="0" style="stop-color:var(--a2)" stop-opacity="0"/><stop offset=".45" style="stop-color:var(--a2)" stop-opacity=".6"/><stop offset="1" style="stop-color:var(--a2)" stop-opacity="0"/></linearGradient>
+  <linearGradient id="ag3" x2="0" y2="1"><stop offset="0" style="stop-color:var(--a3)" stop-opacity="0"/><stop offset=".5" style="stop-color:var(--a3)" stop-opacity=".55"/><stop offset="1" style="stop-color:var(--a3)" stop-opacity="0"/></linearGradient>
+  <linearGradient id="fade" x2="0" y2="1"><stop offset=".3" stop-color="#fff"/><stop offset=".95" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <filter id="ab" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="16"/></filter>
+  <filter id="ab2" x="-5%" y="-20%" width="110%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>
+  <pattern id="ray" width="37" height="320" patternUnits="userSpaceOnUse"><rect width="2" height="320" fill="#fff"/><rect x="7" width="4" height="320" fill="#fff" opacity=".5"/><rect x="17" width="1.5" height="320" fill="#fff" opacity=".8"/><rect x="26" width="5" height="320" fill="#fff" opacity=".35"/></pattern>
+  <mask id="am"><rect width="1280" height="320" fill="url(#ray)"/></mask>
+  <mask id="fm"><rect width="1280" height="320" fill="url(#fade)"/></mask>
+ </defs>
+ <g mask="url(#fm)">
+  <g class="lights" filter="url(#ab)">
+   <path d="M-40 70C260 10 420 120 700 60S1100 0 1320 50L1320 150C1080 110 880 170 700 150S240 110-40 170Z" fill="url(#ag3)"/>
+   <path d="M-40 140C180 60 360 180 600 110S1020 30 1320 110L1320 230C1060 170 860 250 600 220S180 190-40 260Z" fill="url(#ag1)"/>
+   <path d="M200 120C420 80 600 150 820 100S1100 80 1320 130L1320 200C1100 170 900 220 760 190S420 170 200 200Z" fill="url(#ag2)"/>
+  </g>
+  <g class="rays" mask="url(#am)" filter="url(#ab2)"><path d="M-40 130C180 50 360 170 600 100S1020 20 1320 100L1320 210C1060 160 860 240 600 210S180 180-40 250Z" fill="url(#ag1)"/></g>
+  <g class="stars" fill="#fff"><circle cx="90" cy="40" r="1.2"/><circle cx="310" cy="24" r="1"/><circle cx="760" cy="20" r="1"/><circle cx="980" cy="38" r="1.2"/><circle cx="1180" cy="22" r="1"/><circle cx="1240" cy="70" r="1.1"/><circle cx="40" cy="96" r="1"/></g>
+ </g>
+</svg>
+<!-- Winger's icons (24 grid, stroke 1.8: the same set as the phone's res/drawable/i_*.xml) and the winged shield -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><!--ICONS-->
+<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8 M6.4 6.6a8 8 0 1 0 11.2 0"/></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><path d="M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01"/></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 4h3.5l2 5-2.5 1.6a11 11 0 0 0 5.4 5.4L15 13.5l5 2V19a1.2 1.2 0 0 1-1.2 1.2A15.5 15.5 0 0 1 3.8 5.2 1.2 1.2 0 0 1 5 4z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z M3 13l9 5 9-5"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7 M20 4v5h-5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h11v11H9z M5 15H4V4h11v1"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z M20 20l-4-4"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-photo" viewBox="0 0 24 24"><path d="M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6 M15.5 8.5h.01"/></symbol>
+<symbol id="i-speed" viewBox="0 0 24 24"><path d="M4.8 18a8.5 8.5 0 1 1 14.4 0 M13.1 12.4l2.9-3.4 M13.5 13.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16 M9.5 7V4.5h5V7 M6 7l1 13h10l1-13 M10 11v5.5 M14 11v5.5"/></symbol>
+<symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 4h4v4 M4 20L20 4 M20 16v4h-4 M15 15l5 5 M4 4l5 5"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+<symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+<symbol id="i-lifebuoy" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M5.6 5.6l3.6 3.6 M14.8 14.8l3.6 3.6 M18.4 5.6l-3.6 3.6 M9.2 14.8l-3.6 3.6"/></symbol>
+<symbol id="i-qr" viewBox="0 0 24 24"><path d="M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h2.5 M20 14v2.5 M14 17.5V20h2.5 M20 20h.01 M7 7h.01 M17 7h.01 M7 17h.01"/></symbol>
+<symbol id="i-paste" viewBox="0 0 24 24"><path d="M9 3.5h6v3H9z M9 5H6v15.5h12V5h-3"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z M8.8 12l2.3 2.3 4.2-4.6"/></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><path d="M6.9 12a1.9 1.9 0 1 1-3.8 0 1.9 1.9 0 0 1 3.8 0z M13.9 12a1.9 1.9 0 1 1-3.8 0 1.9 1.9 0 0 1 3.8 0z M20.9 12a1.9 1.9 0 1 1-3.8 0 1.9 1.9 0 0 1 3.8 0z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="logo" viewBox="20 24 68 60"><path fill="currentColor" stroke="none" fill-rule="evenodd" d="M24.96,49.92L25.05,50.1L24.9,50.24L22.45,50.14L22.14,50.41L22.08,50.75L22.38,51.14L25.48,52.45L25.38,52.72L23.57,52.91L23.33,53.15L23.29,53.56L23.64,53.91L26.29,54.71L26.23,54.98L25.03,55.31L24.81,55.84L25.18,56.27L27.47,56.73L27.46,56.97L26.84,57.25L26.64,57.52L26.64,57.86L26.91,58.17L30.93,58.52L31.21,59.06L31.58,59.21L38.38,59.21L39.49,59.11L40.58,58.76L40.74,58.82L41.11,61.87L41.85,65.2L42.96,68.39L44.44,71.43L46.28,74.31L48.49,77.04L51.06,79.63L54,82.06L56.94,79.63L59.51,77.04L61.72,74.31L63.56,71.43L65.04,68.39L66.15,65.2L66.77,62.55L67.28,58.81L68.52,59.11L69.62,59.21L76.5,59.21L76.84,59L77.07,58.52L81.09,58.18L81.36,57.86L81.36,57.52L81.16,57.25L80.54,56.97L80.54,56.72L82.81,56.27L83.09,56.08L83.19,55.75L83.04,55.37L81.77,54.98L81.69,54.74L84.43,53.88L84.67,53.64L84.72,53.31L84.36,52.88L82.64,52.72L82.51,52.47L85.63,51.14L85.92,50.66L85.82,50.34L85.47,50.12L83.12,50.24L82.96,50L86.47,48.04L86.7,47.6L86.54,47.21L86.16,47.05L83.18,47.63L82.99,47.41L86.79,44.71L87,44.18L86.78,43.83L86.38,43.73L82.8,44.95L82.63,44.9L82.59,44.74L86.62,41.14L86.78,40.67L86.56,40.31L86.07,40.23L81.99,42.27L81.76,42.15L85.9,37.45L85.94,36.88L85.54,36.59L85.13,36.68L80.75,39.67L80.49,39.58L84.56,33.73L84.59,33.31L84.32,32.99L83.75,33.03L79.07,37.22L78.8,37.14L82.57,30.14L82.61,29.73L82.34,29.41L82,29.36L81.7,29.51L76.99,34.98L76.71,34.94L80.01,26.65L79.88,26.1L79.4,25.94L79.05,26.17L75.86,30.93L71.76,37.72L69.94,41.14L67.48,46.89L67.24,46.8L67.22,46.21L54,40.3L40.78,46.21L40.77,46.78L40.56,46.9L38.06,41.14L35.27,36.04L30.03,27.74L28.9,26.1L28.43,25.94L28.07,26.17L27.99,26.65L31.29,34.94L31.01,34.98L26.3,29.51L26,29.36L25.66,29.41L25.39,29.73L25.43,30.14L29.2,37.14L28.93,37.22L24.25,33.03L23.68,32.99L23.41,33.31L23.44,33.73L27.51,39.58L27.25,39.67L22.87,36.68L22.46,36.59L22.03,36.95L22.1,37.45L26.24,42.15L26.01,42.27L21.93,40.23L21.51,40.27L21.22,40.67L21.38,41.14L25.42,44.77L25.2,44.95L21.7,43.75L21.22,43.83L21,44.19L21.15,44.66L25.01,47.46L24.82,47.63L21.76,47.06L21.36,47.35L21.33,47.77L21.59,48.08Z M53.77 58.24 47.37 68.72H45.86L44.26 56.02Q44.18 55.3 43.84 55.03Q43.49 54.75 43.21 54.73L43.31 54.33Q43.9 54.35 44.84 54.37Q45.78 54.39 46.7 54.39Q47.61 54.39 48.36 54.37Q49.11 54.35 49.61 54.33L49.51 54.73Q48.9 54.77 48.67 55.08Q48.44 55.38 48.5 56.43L49.43 65.01L48.54 65.97L53.67 57.7ZM61.68 56.97Q62.16 56.13 62.1 55.66Q62.04 55.2 61.57 54.99Q61.09 54.79 60.31 54.73L60.41 54.33Q60.61 54.35 61.15 54.36Q61.68 54.37 62.3 54.38Q62.91 54.39 63.27 54.39Q63.7 54.39 64.08 54.37Q64.47 54.35 64.79 54.33L64.69 54.73Q64.2 54.87 63.79 55.1Q63.38 55.32 62.95 55.78Q62.53 56.25 62.02 57.13L55.42 68.72H53.91L52.31 56.02Q52.23 55.3 51.96 55.03Q51.69 54.75 51.47 54.73L51.57 54.33Q52.11 54.35 53 54.37Q53.89 54.39 54.76 54.39Q55.85 54.39 56.77 54.37Q57.68 54.35 58.27 54.33L58.17 54.73Q57.2 54.77 56.83 55.08Q56.45 55.38 56.55 56.43L57.48 65.01L56.55 65.91Z"/></symbol>
+<!--/ICONS--></svg>
 <main id="app">
-  <header>
-    <img src="logo.png" alt="" class="logo">
+  <header class="top">
+    <svg class="mark" aria-hidden="true"><use href="#logo"/></svg>
     <div><h1>Winger</h1><small id="sub">VPN от Бровкина Алексея</small></div>
   </header>
   <section class="hero">
-    <button id="power" class="power" aria-label="Включить или выключить VPN"><svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3v8"/><path d="M6.6 6.6a7.6 7.6 0 1 0 10.8 0"/></svg></button>
+    <button id="power" class="power" aria-label="Включить или выключить VPN"><svg class="i" aria-hidden="true"><use href="#i-power"/></svg></button>
     <div id="state" class="state">Выключено</div>
-    <div class="facts"><span id="note" class="note"></span><button id="ping" class="ping" hidden></button></div>
+    <div class="facts"><span id="note" class="note"></span></div>
+    <button id="ping" class="ping" hidden></button>
   </section>
-  <button id="add" class="btn wide" hidden>📋 Вставить ссылку</button>
+  <button id="add" class="btn wide" hidden><svg class="i" aria-hidden="true"><use href="#i-paste"/></svg>Вставить ссылку</button>
   <h2 class="sec" id="connsHead" hidden>Подключение</h2>
   <div id="conns" class="list"></div>
   <div id="hint" class="hint"></div>
-  <div id="prep" class="hint prep" hidden>🌉 Мосты для этого ноутбука готовятся на сервере — у него будут свои, не телефона. Появятся сами через несколько минут.</div>
+  <div id="prep" class="hint prep" hidden>Мосты для этого ноутбука готовятся на сервере — у него будут свои, не телефона. Появятся сами через несколько минут.</div>
   <h2 class="sec">Настройки</h2>
   <div class="list" id="settings">
-    <button class="item" id="appsRow" hidden><span class="ic">🧩</span><span class="grow">Через сервер</span><span class="val" id="appsVal"></span><span class="chev">›</span></button>
-    <button class="item" id="bridgeAppsRow" hidden><span class="ic">🌉</span><span class="grow">Через мост</span><span class="val" id="bridgeAppsVal"></span><span class="chev">›</span></button>
-    <button class="item" id="addRow"><span class="ic">➕</span><span class="grow">Добавить подключение</span><span class="chev">›</span></button>
-    <button class="item" id="ver"><span class="ic">🔄</span><span class="grow">Проверить обновление</span><span class="val" id="verName">Winger</span><span class="chev">›</span></button>
-    <button class="item" id="journal"><span class="ic">📋</span><span class="grow">Скопировать журнал и проверку связи</span><span class="chev">›</span></button>
-    <button class="item" id="rescue" hidden><span class="ic">🆘</span><span class="grow">Спасение сервера: консоль в браузере</span><span class="chev">›</span></button>
+    <button class="item" id="appsRow" hidden><span class="well"><svg class="i"><use href="#i-layers"/></svg></span><span class="t"><b>Какие приложения</b><small id="appsVal"></small></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button class="item" id="bridgeAppsRow" hidden><span class="well"><svg class="i"><use href="#i-phone"/></svg></span><span class="t"><b>Приложения через мост</b><small id="bridgeAppsVal"></small></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button class="item" id="addRow"><span class="well"><svg class="i"><use href="#i-plus"/></svg></span><span class="t"><b>Добавить подключение</b></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button class="item" id="ver"><span class="well"><svg class="i"><use href="#i-refresh"/></svg></span><span class="t"><b>Обновления</b><small id="verName">Winger</small></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button class="item" id="journal" hidden><span class="well"><svg class="i"><use href="#i-copy"/></svg></span><span class="t"><b>Скопировать журнал</b><small>И проверку связи — чтобы вставить в чат</small></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button class="item" id="rescue" hidden><span class="well"><svg class="i"><use href="#i-lifebuoy"/></svg></span><span class="t"><b>Спасение сервера</b><small>Консоль в браузере</small></span><svg class="i chev"><use href="#i-chev"/></svg></button>
   </div>
 </main>
+<!-- a connection's «⋯»: its speed, or removing it -->
+<div id="menu" class="menu" role="menu" hidden>
+  <button role="menuitem" data-act="speed"><svg class="i" aria-hidden="true"><use href="#i-speed"/></svg>Скорость</button>
+  <button role="menuitem" data-act="remove" class="danger"><svg class="i" aria-hidden="true"><use href="#i-trash"/></svg>Удалить</button>
+</div>
 <div id="sheet" class="sheet-bg" hidden><div class="sheet" role="dialog"><div id="sheet-body"></div></div></div>
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>
