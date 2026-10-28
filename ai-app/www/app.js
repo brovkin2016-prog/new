@@ -557,19 +557,21 @@
     document.body.append(t);
     setTimeout(() => t.remove(), ms || Math.min(7000, 1800 + String(text || "").length * 45));
   }
-  function sheet(title, build) {
+  function sheet(title, build, dismissed) {  // (v40) dismissed: called when it is closed with no choice (×, outside, Back)
     const bg = el("div", { class: "sheet-bg" });
     const close = () => bg.remove();
+    const dismiss = () => { if (!bg.isConnected) return; close(); if (dismissed) dismissed(); };
+    if (dismissed) bg.close = dismiss;  // the phone's Back button (__aiBack) closes it this way too
     const box = el("div", { class: "sheet" }, el("div", { class: "sheet-head" }, title ? el("h2", { text: title }) : el("span", { style: "flex:1" }),
-      el("button", { class: "sheet-x", "aria-label": "Закрыть", onclick: close }, icon("x"))));
-    bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
+      el("button", { class: "sheet-x", "aria-label": "Закрыть", onclick: dismiss }, icon("x"))));
+    bg.addEventListener("click", (e) => { if (e.target === bg) dismiss(); });
     build(box, close);
     bg.append(box);
     document.body.append(bg);
     return close;
   }
   // a list to choose from: [icon, words, action] items; a plain string is a section's name
-  function menu(title, items) {
+  function menu(title, items, dismissed) {
     sheet(title, (box, close) => {
       const list = el("div", { class: "list" });
       for (const it of items) {
@@ -579,7 +581,7 @@
           it[0] instanceof Node ? el("span", { class: "ic" }, it[0]) : well("ic", it[0]), el("span", { text: it[1] })));
       }
       box.append(list);
-    });
+    }, dismissed);
   }
   // a row of a tool: «🪄 Убрать фон» — the icon in its well and the words (the words last: fitTools() measures them);
   // name: an icon chosen by the caller rather than by the sign
@@ -960,6 +962,8 @@
       wrap.append(el("div", { class: "acts" },
         act("⬇️ Сохранить", () => { saveBlob(file, m.name || "result"); toast("Сохранено"); }),
         act("📤 Поделиться", () => shareBlob(file, m.name || "result")),
+        // (v40, the review) a picture with its text («✍️ Переписать аккуратно»: the sheet and the clean text) — the text to copy
+        m.text && (m.copy || m.op === "neat") ? act("📋 Копировать", () => copyText(plain(m.text))) : null,
         thread === "photo" && m.result ? act("✏️ Изменить ещё", () => S.views.photo.set(m.result)) : null));
     } else if (m.role === "ai" && m.text && !m.err) {
       // «Короче» and «Подробнее» are about the last answer: only under it, and not while the next one is being written.
@@ -1109,6 +1113,7 @@
         if (mine && end.user) { mine.ctx = end.user; DB.put(mine); }
         if (end.remind) end.text = (end.text || "") + remindSet(end.remind);
         out = await api2.add({ role: "ai", text: end.text || end.caption, label: end.label, note: !!end.note,
+          copy: !!(end.text && (end.image || end.pdf)),  // (v40, the review) its own text with a picture: «📋 Копировать» under it
           audio: end.audio ? blobOf(end.audio, "audio/ogg") : null, name: end.name, op: end.op,
           result: end.image ? blobOf(end.image, end.mime) : null, video: end.video ? blobOf(end.video, end.mime) : null,
           // a photo brought to life shows that photo until it is played
@@ -1752,7 +1757,8 @@
       const f = await pickFile("image/*", false);
       if (!f) return;
       photo = f;
-      runOp("animate");
+      // (v40, the review) the length not chosen (×, outside, Back): no photo left chosen unseen — cleared, redrawn as set() does
+      runOp("animate", () => { if (photo === f) { photo = null; sync(); th.redraw(); } });
     }
     async function page(camera) {  // one more page for the PDF: straight to «Скан»
       if (S.busy.photo) { toast(BUSY); return; }
@@ -1777,9 +1783,9 @@
       if (out && out.op === "scan" && out.result) { S.scan.push(out.result); th.redraw(); }
       sync();
     }
-    function runOp(op) {
+    function runOp(op, dismissed) {
       if (op === "animate") menu("Длина ролика", [["⏱️", "5 секунд — быстрее", () => go("/api/animate", { seconds: 5 }, label(op) + " · 5 с")],
-        ["🎞️", "10 секунд", () => go("/api/animate", { seconds: 10 }, label(op) + " · 10 с")]]);  // (v36) up to 10 s
+        ["🎞️", "10 секунд", () => go("/api/animate", { seconds: 10 }, label(op) + " · 10 с")]], dismissed);  // (v36) up to 10 s
       else go("/api/photo", { op }, label(op));
     }
     function send() {
