@@ -266,11 +266,11 @@
 
   // ---------- the player: a figure built from pixel tubes, so it can run, stretch and swing smoothly ----------
   const OUT = "#070B18";
-  const FIG = 0.92; // the whole figure's size
+  const FIG = 0.98; // the whole figure's size
   const BASE = { hy: 16.4, sx: 0, sy: 0, rhx: 3.8, rhy: 19.0, lhx: -1.0, lhy: 20.4, ra: 8, rl: 0.95, lfx: -3.6, lfy: 0, rfx: 3.6, rfy: 0, hdx: 0, hdy: 0, two: 0 };
   const POSE = (o) => Object.assign({}, BASE, o);
   const POSES = {
-    ready: POSE({}),
+    ready: POSE({ rhx: 7.6, rhy: 17.0, ra: 6, rl: 0.95, lhx: -6.2, lhy: 17.4 }),
     wind: POSE({ hy: 15.2, sx: 1.6, sy: 0.3, rhx: 10.6, rhy: 24.2, ra: 58, rl: 0.55, lhx: -3.2, lhy: 24.0, lfx: -3.2, lfy: 1.4, rfx: 5.4, rfy: 0, hdx: 0.8 }),
     hit: POSE({ hy: 14.6, sx: -0.6, sy: -0.2, rhx: 7.2, rhy: 18.2, ra: -64, rl: 1, lhx: -4.8, lhy: 23.2, lfx: -4.6, lfy: 2.4, rfx: 5.6, rfy: -0.4, hdx: -0.4 }),
     follow: POSE({ hy: 15.6, sx: -2, sy: 0.6, rhx: -5.4, rhy: 29.6, ra: 26, rl: 0.8, lhx: -8.8, lhy: 25.6, lfx: -4.0, lfy: 0, rfx: 3.4, rfy: 1.4, hdx: -1.1 }),
@@ -292,7 +292,7 @@
 
   function limb(g, pts, r, fill, U) {
     g.save();
-    art.tube(g, pts, { r: Math.max(1.5, Math.round(r * U * 2) / 2), outline: OUT, fill, shade: tone(fill, 0.72), light: tone(fill, 1.3) });
+    art.tube(g, pts, { r: Math.max(1, Math.round(r * U * 2) / 2), outline: OUT, fill, shade: tone(fill, 0.72), light: tone(fill, 1.3) });
     g.restore();
   }
   // two-bone leg or arm: returns [root, joint, end]
@@ -354,10 +354,10 @@
     // legs, back one first
     const legs = [[hipL, fL, -1], [hipR, fR, 1]].sort((a, b) => b[1][1] - a[1][1]);
     for (const [hip, foot, side] of legs) {
-      const chain = ik(hip, foot, [side, 0.35], 8.2, 8.6);
-      limb(g, pa([chain[0], chain[1]]), 2.4, skin, U);
-      limb(g, pa([chain[1], chain[2]]), 2.1, skin, U);
-      limb(g, pa([[chain[2][0], chain[2][1] + 3.6], chain[2]]), 2.35, L.sock, U);
+      const chain = ik(hip, foot, 8.2, 8.6, [side, 0.35]);
+      limb(g, pa([chain[0], chain[1]]), 2.0, skin, U);
+      limb(g, pa([chain[1], chain[2]]), 1.75, skin, U);
+      limb(g, pa([[chain[2][0], chain[2][1] + 3.6], chain[2]]), 1.95, L.sock, U);
       const f = pt(foot[0] + side * 0.5, foot[1] + 0.2);
       art.ellipse(g, f.x, f.y, Math.round(3.2 * U + 1), Math.max(2, Math.round(1.9 * U + 0.5)), OUT);
       art.ellipse(g, f.x, f.y, Math.round(3.2 * U), Math.max(1, Math.round(1.7 * U - 0.3)), L.shoe);
@@ -378,12 +378,12 @@
       }
       g.fillStyle = L.trim; g.fillRect(Math.round(top.x - 4 * U), Math.round(bot.y), Math.max(1, Math.round(8 * U)), 1);
     } else {
-      for (const [hip, , side] of legs) limb(g, pa([[hip[0] + side * 0.1, hy + 0.9], [hip[0] + side * 0.5, hy - 4.4]]), 3.0, L.shorts, U);
+      for (const [hip, , side] of legs) limb(g, pa([[hip[0] + side * 0.1, hy + 0.9], [hip[0] + side * 0.5, hy - 4.2]]), 2.4, L.shorts, U);
     }
     // torso: tapered from the shoulders to the waist
     const shY = hy + 11.7 + P.sy, shX = P.sx;
-    limb(g, pa([[shX, shY - 0.2], [shX * 0.5, hy + 2.6], [0, hy + 0.4]]), 4.4, L.shirt, U);
-    limb(g, pa([[shX - 3.6, shY - 0.4], [shX + 3.6, shY - 0.4]]), 2.7, L.shirt, U);
+    limb(g, pa([[shX, shY - 0.4], [shX * 0.5, hy + 2.6], [0, hy + 0.4]]), 3.3, L.shirt, U);
+    limb(g, pa([[shX - 3.4, shY - 0.6], [shX + 3.4, shY - 0.6]]), 2.1, L.shirt, U);
     // a stripe of trim down the back or across the chest
     const tl = pt(shX - 3.4, shY - 3), tr = pt(shX + 3.4, shY - 3);
     g.fillStyle = L.trim;
@@ -393,14 +393,14 @@
       g.fillRect(Math.round(Math.min(tl.x, tr.x)), Math.round(tl.y), Math.max(2, Math.round(Math.abs(tr.x - tl.x))), 1);
     }
     // arms
-    const sR = [shX + 5.2, shY - 0.6], sLf = [shX - 5.2, shY - 0.6];
+    const sR = [shX + 5.4, shY - 0.7], sLf = [shX - 5.4, shY - 0.7];
     const handR = [P.rhx, P.rhy], handL = [P.lhx, P.lhy];
     const armR = ik(sR, handR, 5.7, 6.1, [0.8, -1]), armL = ik(sLf, handL, 5.7, 6.1, [-0.8, -1]);
     const drawArm = (arm, side) => {
-      limb(g, pa([arm[1], arm[2]]), 1.9, skin, U);
-      limb(g, pa([arm[0], arm[1]]), 2.4, L.shirt, U);
+      limb(g, pa([arm[1], arm[2]]), 1.35, skin, U);
+      limb(g, pa([arm[0], arm[1]]), 1.7, L.shirt, U);
       const hd = pt(arm[2][0], arm[2][1]);
-      art.disc(g, hd.x, hd.y, Math.max(1.5, 1.45 * U), skin);
+      art.disc(g, hd.x, hd.y, Math.max(1, 1.2 * U), skin);
     };
     const racketNow = () => { const hd = pt(handR[0], handR[1]); drawRacket(g, hd.x, hd.y, P.ra, P.rl, U, S, L.racket); };
     if (view > 0) {
@@ -417,7 +417,7 @@
       // neck
       art.disc(g, c.x, c.y + 4.3 * U, Math.max(1.5, 1.9 * U), OUT);
       art.disc(g, c.x, c.y + 4.3 * U, Math.max(1, 1.5 * U), tone(skin, 0.85));
-      const R = 4.5 * U;
+      const R = 4.4 * U;
       art.disc(g, c.x, c.y, R + 1, OUT);
       if (view > 0) {
         art.disc(g, c.x, c.y, R, hair);
@@ -442,7 +442,6 @@
         art.disc(g, c.x, c.y, R, skin);
         art.disc(g, c.x - 0.5, c.y - 0.5, R - 1, tone(skin, 1.06));
         // hair over the top and the sides
-        const hc = L.cap || hair;
         g.fillStyle = hair;
         for (let j = -Math.round(R); j <= Math.round(R * 0.15); j++) {
           const w = Math.sqrt(Math.max(0, R * R - j * j));
@@ -480,7 +479,6 @@
           limb(g, [{ x: c.x + R * 0.95, y: c.y - R * 0.2 }, { x: c.x + R * 1.15 + sw * 0.6, y: c.y + R * 0.9 }], 1.5, hair, U);
         }
       }
-      void hc;
     }
   }
   let COURT = null, STANDS = null, STANDS2 = null, MASTS = null, NET = null, CHAIR = null;
@@ -497,6 +495,17 @@
         start() {},
         update(dt) { S.t += dt; },
         draw(g) {
+          if (window.__sheet) {
+            g.fillStyle = "#0F5078"; g.fillRect(0, 0, W, H);
+            const names = Object.keys(POSES);
+            names.forEach((n, i) => {
+              const x = 24 + (i % 6) * 60, y = 70 + Math.floor(i / 6) * 70;
+              const v = window.__sv || 1;
+              drawFigure(g, v > 0 ? LOOKS.me : LOOKS[window.__sheet === 1 ? "grisha" : window.__sheet], v, x, y, v > 0 ? 1 : 0.62, POSES[n], {});
+              WG.text(g, n, x, y + 4, { align: "center", color: "#fff" });
+            });
+            return;
+          }
           g.fillStyle = "#04070F"; g.fillRect(0, 0, W, H);
           art.sky(g, 0, 0, 384, 40, S.t, { seed: 7, top: "#04070F", bottom: "#142449", curtain: 0.5, amount: 1 });
           g.drawImage(COURT, -OFFX, 0);
