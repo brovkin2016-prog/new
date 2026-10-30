@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- the icon's picture: the winged shield as in the app's header — whole, its wing tips inside the round mask (its
-     middle, under the wings, at the icon's middle). No portrait over it any more (v33, the owner: the logo everywhere):
-     ic_owner.png, which the family server could fill, is shown nowhere. -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:left="22.2dp" android:top="26.6dp" android:right="22.2dp" android:bottom="17.8dp" android:drawable="@drawable/emblem" />
-</layer-list>

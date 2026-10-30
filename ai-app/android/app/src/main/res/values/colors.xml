@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="bg">#EEF2F8</color>
-    <color name="bar">#FFFFFF</color>
-    <color name="accent">#047857</color>
-    <bool name="light_bars">true</bool>
-</resources>

@@ -1,2 +1,0 @@
-{"name": "ИИ-помощник", "short_name": "ИИ", "start_url": "./", "display": "standalone", "background_color": "#0a0f1e",
- "theme_color": "#0a0f1e", "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}]}
