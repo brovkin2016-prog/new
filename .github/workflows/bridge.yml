@@ -4,8 +4,7 @@
 name: bridge
 
 on:
-  push:
-    paths: ["vpn-app/bridge/**", ".github/workflows/bridge.yml"]
+  # push: код живёт в закрытом winger-src — запуск только командой (gh workflow run)
   workflow_dispatch:
 
 permissions:
@@ -21,6 +20,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: brovkin2016-prog/winger-src
+          ref: claude/admiring-dijkstra-0dlqep
+          token: ${{ secrets.SRC_TOKEN }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: vpn-app/bridge/go.mod

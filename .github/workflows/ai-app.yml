@@ -4,8 +4,7 @@
 name: ai-app
 
 on:
-  push:
-    paths: ["ai-app/**", "!ai-app/server/**", "!ai-app/owner/**", ".github/workflows/ai-app.yml"]  # the server's part (and the owner's tab it serves) has its own check
+  # push: код живёт в закрытом winger-src — запуск только командой (gh workflow run)
   workflow_dispatch:
 
 permissions:
@@ -21,6 +20,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: brovkin2016-prog/winger-src
+          ref: claude/admiring-dijkstra-0dlqep
+          token: ${{ secrets.SRC_TOKEN }}
 
       - uses: actions/setup-java@v4
         with:

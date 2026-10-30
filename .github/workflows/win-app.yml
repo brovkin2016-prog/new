@@ -5,8 +5,7 @@
 name: win-app
 
 on:
-  push:
-    paths: ["win-app/**", "vpn-app/bridge/**", ".github/workflows/win-app.yml"]
+  # push: код живёт в закрытом winger-src — запуск только командой (gh workflow run)
   workflow_dispatch:
 
 permissions:
@@ -26,6 +25,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: brovkin2016-prog/winger-src
+          ref: claude/admiring-dijkstra-0dlqep
+          token: ${{ secrets.SRC_TOKEN }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: win-app/go.mod
@@ -78,6 +81,10 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: brovkin2016-prog/winger-src
+          ref: claude/admiring-dijkstra-0dlqep
+          token: ${{ secrets.SRC_TOKEN }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: win-app/go.mod
