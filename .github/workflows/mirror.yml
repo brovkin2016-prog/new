@@ -1,0 +1,29 @@
+# Ежедневное зеркало закрытого winger-src (все ветки, полная история) в закрытый проект GitLab.
+# Секреты в этом репо: SRC_TOKEN (чтение winger-src), GITLAB_TOKEN (запись в проект GitLab),
+# GITLAB_REPO (путь проекта, например user/winger-src). Без них — пропуск без ошибки.
+name: mirror
+on:
+  schedule:
+    - cron: "17 1 * * *"   # 04:17 МСК
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror winger-src to GitLab
+        env:
+          SRC_TOKEN: ${{ secrets.SRC_TOKEN }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_REPO: ${{ secrets.GITLAB_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITLAB_TOKEN:-}" ] || [ -z "${GITLAB_REPO:-}" ]; then
+            echo "::notice::GITLAB_TOKEN/GITLAB_REPO не заданы — зеркало пропущено"; exit 0; fi
+          git clone -q --bare "https://x-access-token:${SRC_TOKEN}@github.com/brovkin2016-prog/winger-src.git" src.git
+          cd src.git
+          git push -q "https://oauth2:${GITLAB_TOKEN}@gitlab.com/${GITLAB_REPO}.git" 'refs/heads/*:refs/heads/*'
+          echo "Ветки: $(git for-each-ref refs/heads | wc -l), коммит рабочей: $(git rev-parse --short claude/admiring-dijkstra-0dlqep)"
