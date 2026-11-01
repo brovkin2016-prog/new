@@ -1,0 +1,159 @@
+# Builds the Winger Games Android app, tests it on an emulator against a local hysteria server (HTTP/3 over UDP,
+# then TLS on TCP 8443 with UDP blocked): the personal build's games key signs in by itself, the catalog shows, a game
+# starts, the app updates itself. Publishes the unsigned APK as a release: the family server puts each person's key
+# into it (games-app/tools/apk_profile.py) and signs it with its own key.
+name: games-app
+
+on:
+  # push: код живёт в закрытом winger-src — запуск только командой (gh workflow run)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: games-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: brovkin2016-prog/winger-src
+          ref: claude/admiring-dijkstra-0dlqep
+          token: ${{ secrets.SRC_TOKEN }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Versions
+        id: v
+        run: |
+          echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          CRONET=$(curl -fsSL https://dl.google.com/android/maven2/org/chromium/net/cronet-embedded/maven-metadata.xml \
+                   | sed -n 's:.*<release>\(.*\)</release>.*:\1:p' | head -1)
+          echo "cronet=${CRONET:-119.6045.31}" >> "$GITHUB_OUTPUT"
+          echo "Cronet ${CRONET:-119.6045.31}"
+
+      - name: Games into the APK
+        run: |
+          W=games-app/android/app/src/main/assets/www
+          rm -rf "$W" && mkdir -p "$W"
+          # the shipped files only, flat as on the server: not games/dev, not the notes
+          find games -maxdepth 1 -type f ! -name '*.md' -exec cp {} "$W/" \;
+          python3 ai-app/ci/version.py "$W"
+
+      - name: Release APK (unsigned)
+        working-directory: games-app/android
+        run: |
+          gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
+          python3 ../../vpn-app/tools/elf_16k.py app/build/outputs/apk/release/app-release-unsigned.apk
+          # no sign-in inside the build everyone gets: only the server's personal copies carry one
+          if unzip -l app/build/outputs/apk/release/app-release-unsigned.apk | grep -q winger-games-profile; then
+            echo "::error::the common build carries a sign-in"; exit 1
+          fi
+
+      - name: Test server (stand-in family server behind a real hysteria)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p /tmp/t && cd /tmp/t
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 -subj '/CN=WG Test CA' -keyout ca.key -out ca.pem
+          openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj '/CN=vpn.test.local' -keyout key.pem -out req.csr
+          printf 'subjectAltName=DNS:vpn.test.local\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n' > ext
+          openssl x509 -req -in req.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 2 -extfile ext -out cert.pem
+          cat cert.pem ca.pem > chain.pem
+          mkdir -p "$GITHUB_WORKSPACE/games-app/android/app/src/debug/res/raw"
+          cp ca.pem "$GITHUB_WORKSPACE/games-app/android/app/src/debug/res/raw/test_ca.pem"
+          gh release download --repo apernet/hysteria --pattern hysteria-linux-amd64 --output hysteria && chmod +x hysteria
+          ./hysteria version | grep -i '^version'
+          cat > hy.yaml <<'EOT'
+          listen: :443
+          tls:
+            cert: /tmp/t/chain.pem
+            key: /tmp/t/key.pem
+          auth:
+            type: password
+            password: not-the-app
+          masquerade:
+            type: proxy
+            proxy:
+              url: http://127.0.0.1:18790/
+              rewriteHost: false
+            listenHTTPS: :8443
+          EOT
+          nohup python3 "$GITHUB_WORKSPACE/games-app/ci/stub_server.py" 18790 "$GITHUB_WORKSPACE/games-app/android/app/src/main/assets/www" > stub.log 2>&1 &
+          sudo nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
+          sleep 3
+          curl -sk --resolve vpn.test.local:8443:127.0.0.1 https://vpn.test.local:8443/app/games/version.json && echo
+
+      - name: Debug APK for the emulator
+        working-directory: games-app/android
+        run: |
+          # first the next version (code + 1): the test updates the app over itself with it, as a real update does
+          T=(-Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestProfile=vpn.test.local/test-games-key-0123456789)
+          gradle --no-daemon assembleDebug -PversionCode=$(( ${{ steps.v.outputs.code }} + 1 )) -PcronetVersion=${{ steps.v.outputs.cronet }} "${T[@]}"
+          cp app/build/outputs/apk/debug/app-debug.apk /tmp/next-debug.apk
+          gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }} "${T[@]}"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Emulator test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK: ${{ github.workspace }}/games-app/android/app/build/outputs/apk/debug/app-debug.apk
+          NEXT_APK: /tmp/next-debug.apk
+          OUT: /tmp/out
+          CA: /tmp/t/ca.pem
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -writable-system
+          script: bash games-app/ci/emulator_test.sh
+
+      - name: Publish
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          trap 'echo "::error::Publish: $BASH_COMMAND failed"' ERR
+          CODE=${{ steps.v.outputs.code }}
+          APK=games-app/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          [ -f "$APK" ] || { echo "::error::Publish: no release APK at $APK"; exit 1; }
+          mkdir -p /tmp/rel && cp "$APK" /tmp/rel/games-app-$CODE-unsigned.apk
+          SHA=$(sha256sum /tmp/rel/games-app-$CODE-unsigned.apk | cut -d' ' -f1)
+          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "cronet": "%s", "commit": "%s"}\n' \
+            "$CODE" "$CODE" "$SHA" "${{ steps.v.outputs.cronet }}" "$GITHUB_SHA" > /tmp/rel/games-app-$CODE.json
+          cp /tmp/out/*.png /tmp/out/*.log /tmp/rel/ 2>/dev/null || true
+          cp /tmp/t/hy.log /tmp/rel/hysteria.log 2>/dev/null || true
+          cp /tmp/t/stub.log /tmp/rel/stub.log 2>/dev/null || true
+          find /tmp/rel -type f -size 0 -delete  # an empty file cannot be a release asset
+          STATE="${{ job.status }}"
+          ls -la /tmp/rel
+          # gh's own words go into the run's summary: the job's log cannot be read from outside
+          for try in 1 2; do
+            if R=$(gh release create "games-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+                 --title "Winger Games 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server puts each person's key in and signs it." 2>&1); then
+              echo "$R"; exit 0
+            fi
+            echo "::warning::Publish, try $try: $(echo "$R" | tail -4 | tr '\n' ' ')"
+            gh release delete "games-app-$CODE" --yes --cleanup-tag 2>/dev/null || true
+            sleep 30
+          done
+          echo "::error::Publish: the release was not created (gh's words above)"; exit 1
