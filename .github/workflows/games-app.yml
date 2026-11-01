@@ -50,6 +50,8 @@ jobs:
           rm -rf "$W" && mkdir -p "$W"
           # the shipped files only, flat as on the server: not games/dev, not the notes
           find games -maxdepth 1 -type f ! -name '*.md' -exec cp {} "$W/" \;
+          # what the page names «../»: the helper's fonts and skies (at the page's own root inside the app)
+          cp ai-app/www/fonts.css ai-app/www/aurora-dawn.svg ai-app/www/aurora-night.svg "$W/"
           python3 ai-app/ci/version.py "$W"
 
       - name: Release APK (unsigned)
@@ -148,12 +150,12 @@ jobs:
           ls -la /tmp/rel
           # gh's own words go into the run's summary: the job's log cannot be read from outside
           for try in 1 2; do
-            if R=$(gh release create "games-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+            if R=$(gh release create "games-app-$CODE" --repo "$GITHUB_REPOSITORY" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
                  --title "Winger Games 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server puts each person's key in and signs it." 2>&1); then
               echo "$R"; exit 0
             fi
             echo "::warning::Publish, try $try: $(echo "$R" | tail -4 | tr '\n' ' ')"
-            gh release delete "games-app-$CODE" --yes --cleanup-tag 2>/dev/null || true
+            gh release delete "games-app-$CODE" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
             sleep 30
           done
           echo "::error::Publish: the release was not created (gh's words above)"; exit 1
