@@ -49,10 +49,11 @@ jobs:
           W=games-app/android/app/src/main/assets/www
           rm -rf "$W" && mkdir -p "$W"
           # the shipped files only, flat as on the server: not games/dev, not the notes
-          find games -maxdepth 1 -type f ! -name '*.md' -exec cp {} "$W/" \;
-          # what the page names «../»: the helper's fonts and skies (at the page's own root inside the app)
-          cp ai-app/www/fonts.css ai-app/www/aurora-dawn.svg ai-app/www/aurora-night.svg "$W/"
+          find games -maxdepth 1 -type f ! -name '*.md' ! -name '*.py' -exec cp {} "$W/" \;
+          # the list and hash as the server's /app/games/version.json (the installer's): the same games, no download
           python3 ai-app/ci/version.py "$W"
+          # what the page names «../»: the helper's fonts and skies (at the page's own root inside the app; not listed)
+          cp ai-app/www/fonts.css ai-app/www/aurora-dawn.svg ai-app/www/aurora-night.svg "$W/"
 
       - name: Release APK (unsigned)
         working-directory: games-app/android
