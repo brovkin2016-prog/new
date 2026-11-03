@@ -1,6 +1,6 @@
 {
- "version": 1043,
- "sha256": "fcf00065a8ffd8c4fb9a409afe9758e416456ef3b46a69510cb29c78e6b9a635",
+ "version": 1044,
+ "sha256": "c4ebc3e823aff7aa030adcaa865309aaa7af3896ee74d965b5ee255391df4ed5",
  "for": "6dfb9a0ef4efaefe",
- "notes": "DeepSeek вместо Claude: чаты, агент сервера, Дозор, спасательная консоль"
+ "notes": "Видео 10 с: лицо с фото (LivePortrait источником)"
 }
