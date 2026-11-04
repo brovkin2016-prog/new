@@ -67,6 +67,26 @@ jobs:
           grep -q -- "--- PASS: TestGenericProxyLikeThePage" /tmp/captcha-test.log
           ls -l "$J"/*/librelay.so
 
+      # our own tunnel in a public call (olcRTC): the client the family server also runs, here as a program of its own,
+      # like Hysteria and the relay. On 64-bit phones it is Android's own build (its network code must not touch
+      # netlink: Android 11 forbids it); the other ABIs take the plain Linux one, as the relay does
+      - name: olcRTC client
+        working-directory: vpn-app/olcrtc
+        run: |
+          set -e
+          J=../android/app/src/main/jniLibs
+          mkdir -p "$J/arm64-v8a" "$J/armeabi-v7a" "$J/x86_64"
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -tags badlinkname -trimpath \
+            -ldflags="-checklinkname=0 -s -w" -o "$J/arm64-v8a/libolcrtc.so" .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -tags badlinkname -trimpath \
+            -ldflags="-checklinkname=0 -s -w" -o "$J/armeabi-v7a/libolcrtc.so" .
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags badlinkname -trimpath \
+            -ldflags="-checklinkname=0 -s -w" -o "$J/x86_64/libolcrtc.so" .
+          # the settings the app writes for one tunnel (the room and the key, then the defaults)
+          go test -tags badlinkname -ldflags=-checklinkname=0 ./... | tee /tmp/olcrtc-test.log
+          grep -q '^ok' /tmp/olcrtc-test.log
+          ls -l "$J"/*/libolcrtc.so
+
       - name: Version
         id: v
         run: echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
