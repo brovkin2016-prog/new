@@ -1,7 +1,7 @@
 # Builds the Winger Games Android app, tests it on an emulator against a local hysteria server (HTTP/3 over UDP,
-# then TLS on TCP 8443 with UDP blocked): the personal build's games key signs in by itself, the catalog shows, a game
-# starts, the app updates itself. Publishes the unsigned APK as a release: the family server puts each person's key
-# into it (games-app/tools/apk_profile.py) and signs it with its own key.
+# then TLS on TCP 8443 with UDP blocked): the page signs in with a name and a PIN, the catalog shows, a game
+# starts, the app updates itself. Publishes the unsigned APK as a release: it is signed with the family's own key
+# and handed out from the games server, which also serves its updates.
 name: games-app
 
 on:
@@ -60,7 +60,7 @@ jobs:
         run: |
           gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
           python3 ../../vpn-app/tools/elf_16k.py app/build/outputs/apk/release/app-release-unsigned.apk
-          # no sign-in inside the build everyone gets: only the server's personal copies carry one
+          # the build carries no sign-in and no address of its own beyond the games server it starts with
           if unzip -l app/build/outputs/apk/release/app-release-unsigned.apk | grep -q winger-games-profile; then
             echo "::error::the common build carries a sign-in"; exit 1
           fi
@@ -104,7 +104,7 @@ jobs:
         working-directory: games-app/android
         run: |
           # first the next version (code + 1): the test updates the app over itself with it, as a real update does
-          T=(-Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestProfile=vpn.test.local/test-games-key-0123456789)
+          T=(-Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PserverHost=vpn.test.local)
           gradle --no-daemon assembleDebug -PversionCode=$(( ${{ steps.v.outputs.code }} + 1 )) -PcronetVersion=${{ steps.v.outputs.cronet }} "${T[@]}"
           cp app/build/outputs/apk/debug/app-debug.apk /tmp/next-debug.apk
           gradle --no-daemon assembleDebug -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }} "${T[@]}"
@@ -152,7 +152,7 @@ jobs:
           # gh's own words go into the run's summary: the job's log cannot be read from outside
           for try in 1 2; do
             if R=$(gh release create "games-app-$CODE" --repo "$GITHUB_REPOSITORY" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
-                 --title "Winger Games 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). The server puts each person's key in and signs it." 2>&1); then
+                 --title "Winger Games 1.0.$CODE" --notes "Unsigned build $CODE (tests: $STATE). Sign it with the family's key and hand it out from the games server." 2>&1); then
               echo "$R"; exit 0
             fi
             echo "::warning::Publish, try $try: $(echo "$R" | tail -4 | tr '\n' ' ')"
