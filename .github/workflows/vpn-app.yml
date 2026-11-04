@@ -222,11 +222,12 @@ jobs:
           find /tmp/rel -type f -size 0 -delete  # an empty file cannot be a release asset
           STATE="${{ job.status }}"
           NOTES="Unsigned build $CODE (tests: $STATE). The server signs it with its own key."
-          if gh release view "vpn-app-$CODE" >/dev/null 2>&1; then
+          if gh release view "vpn-app-$CODE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # a re-run of the same build (say, after a call service's page did not load once): its files and result replace
-            gh release upload "vpn-app-$CODE" /tmp/rel/* --clobber
-            gh release edit "vpn-app-$CODE" --notes "$NOTES"
+            gh release upload "vpn-app-$CODE" /tmp/rel/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "vpn-app-$CODE" --notes "$NOTES" --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "vpn-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
+            # the checkout is the closed repository's: without --repo gh would publish there
+            gh release create "vpn-app-$CODE" /tmp/rel/* --prerelease --target "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" \
               --title "Winger VPN 1.0.$CODE" --notes "$NOTES"
           fi
