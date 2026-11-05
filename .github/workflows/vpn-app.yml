@@ -82,7 +82,8 @@ jobs:
           NDK="${ANDROID_NDK_HOME:-$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)}"
           CC64="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
           test -x "$CC64"
-          CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$CC64" CGO_LDFLAGS="-landroid" \
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$CC64" \
+            CGO_LDFLAGS="-landroid -Wl,-z,max-page-size=16384" \
             go build -tags badlinkname -trimpath -ldflags="-checklinkname=0 -s -w" -o "$J/arm64-v8a/libolcrtc.so" .
           test "$(strings "$J/arm64-v8a/libolcrtc.so" | grep -c getifaddrs)" -gt 0
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -tags badlinkname -trimpath \
