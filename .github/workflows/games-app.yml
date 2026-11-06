@@ -50,6 +50,8 @@ jobs:
           rm -rf "$W" && mkdir -p "$W"
           # the shipped files only, flat as on the server: not games/dev, not the notes
           find games -maxdepth 1 -type f ! -name '*.md' ! -name '*.py' -exec cp {} "$W/" \;
+          # glTF-персонажи и модели: подпапка целиком (версия и хеш ниже считают и вложенные файлы)
+          if [ -d games/models ]; then cp -r games/models "$W/models"; fi
           # готовые игры: папка целиком — сами игры, обложки, общий клиент рейтинга (иначе раздел без картинок
           # и игры не запускаются, пока не докачаются экраны)
           if [ -d games/guests ]; then cp -r games/guests "$W/guests"; fi
