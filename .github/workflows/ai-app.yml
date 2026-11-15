@@ -56,7 +56,7 @@ jobs:
           gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
           # phones with 16 KB memory pages (a later Android may refuse code that is not aligned to them)
           for f in winger server study; do
-            python3 ../../vpn-app/tools/elf_16k.py "app/build/outputs/apk/release/app-$f-release-unsigned.apk"
+            python3 ../../vpn-app/tools/elf_16k.py "app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk"
           done
 
       - name: Test server (stand-in assistant behind a real hysteria)
@@ -135,7 +135,7 @@ jobs:
           mkdir -p /tmp/rel
           for pair in winger:ai-app server:winger-server study:winger-study; do
             f=${pair%%:*}; n=${pair##*:}
-            APK=ai-app/android/app/build/outputs/apk/release/app-$f-release-unsigned.apk
+            APK=ai-app/android/app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk
             [ -f "$APK" ] || { echo "::error::Publish: no release APK at $APK"; exit 1; }
             cp "$APK" /tmp/rel/$n-$CODE-unsigned.apk
             SHA=$(sha256sum /tmp/rel/$n-$CODE-unsigned.apk | cut -d' ' -f1)
