@@ -81,7 +81,7 @@ jobs:
         run: |
           gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
           # phones with 16 KB memory pages (a later Android may refuse code that is not aligned to them)
-          for f in winger server study; do
+          for f in winger server study photo; do
             python3 ../../vpn-app/tools/elf_16k.py "app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk"
           done
 
@@ -175,7 +175,7 @@ jobs:
           trap 'echo "::error::Publish: $BASH_COMMAND failed"' ERR
           CODE=${{ steps.v.outputs.code }}
           mkdir -p /tmp/rel
-          for pair in winger:ai-app server:winger-server study:winger-study; do
+          for pair in winger:ai-app server:winger-server study:winger-study photo:winger-photo; do
             f=${pair%%:*}; n=${pair##*:}
             APK=ai-app/android/app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk
             [ -f "$APK" ] || { echo "::error::Publish: no release APK at $APK"; exit 1; }
