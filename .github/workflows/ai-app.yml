@@ -14,10 +14,19 @@ concurrency:
   group: ai-app-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # the VPN inside Winger: the same pinned Hysteria client and hev-socks5-tunnel as vpn-app.yml
+  HY_VERSION: app/v2.13.0
+  HY_SHA_ARM64: 13d5b85cd45e11cf02847dc2b6229d6f9a20b3cb87a00b9356cf244e3bd8db84
+  HY_SHA_ARMV7: 41a4c3f1f03fac5da47af33902f34dce66a3b491a59c0879a057b5899037e604
+  HY_SHA_AMD64: 093c3f7b2d8cb255bd62148e2662d9054e1bc6fb69ae57ece4665016dfcd1a03
+  HEV_TAG: "2.18.0"
+  HEV_COMMIT: d9dca26c7ad0e494492244f0309e80ee583e739e
+
 jobs:
   build-test-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,6 +51,23 @@ jobs:
                    | sed -n 's:.*<release>\(.*\)</release>.*:\1:p' | head -1)
           echo "cronet=${CRONET:-119.6045.31}" >> "$GITHUB_OUTPUT"
           echo "Cronet ${CRONET:-119.6045.31}"
+
+      - name: Hysteria client and the tunnel (pinned, checked)
+        run: |
+          set -e
+          J=ai-app/android/app/src/main/jniLibs
+          get() {  # abi, release file, sha256
+            mkdir -p "$J/$1"
+            curl -fsSL -o "$J/$1/libhysteria.so" "https://github.com/apernet/hysteria/releases/download/$HY_VERSION/$2"
+            echo "$3  $J/$1/libhysteria.so" | sha256sum -c -
+          }
+          get arm64-v8a hysteria-android-arm64 "$HY_SHA_ARM64"
+          get armeabi-v7a hysteria-android-armv7 "$HY_SHA_ARMV7"
+          get x86_64 hysteria-android-amd64 "$HY_SHA_AMD64"
+          # the tunnel's native part, built by the app (app/build.gradle: externalNativeBuild ndkBuild hev/Android.mk)
+          git clone -q --depth 1 --branch "$HEV_TAG" --recurse-submodules --shallow-submodules \
+            https://github.com/heiher/hev-socks5-tunnel ai-app/android/app/hev
+          test "$(git -C ai-app/android/app/hev rev-parse HEAD)" = "$HEV_COMMIT"
 
       - name: Screens into the APK
         run: |
@@ -91,18 +117,34 @@ jobs:
           EOT
           nohup python3 "$GITHUB_WORKSPACE/ai-app/ci/stub_server.py" 18790 "$GITHUB_WORKSPACE/ai-app/android/app/src/main/assets/www" > stub.log 2>&1 &
           sudo nohup ./hysteria server -c hy.yaml > hy.log 2>&1 &
+          # the VPN inside Winger (its own Hysteria 2 client): a login of its own on another port, and its journal in
+          # debug — the emulator check reads in it whether the phone's traffic really went through the tunnel
+          cat > hy-vpn.yaml <<'EOT'
+          listen: :4443
+          tls:
+            cert: /tmp/t/chain.pem
+            key: /tmp/t/key.pem
+          auth:
+            type: userpass
+            userpass:
+              family: "test-pass-123"
+          EOT
+          HYSTERIA_LOG_LEVEL=debug nohup ./hysteria server -c hy-vpn.yaml > hy-vpn.log 2>&1 &
           sleep 3
+          grep -q "server up and running" hy-vpn.log
           curl -sk --resolve vpn.test.local:8443:127.0.0.1 https://vpn.test.local:8443/app/version.json && echo
 
       - name: Debug APK for the emulator
         working-directory: ai-app/android
         run: |
+          # the profile the debug build is given for its VPN test hook (no payment in the test): the hysteria server above
+          VPN_LINK="-PtestVpnLink=hysteria2://family:test-pass-123@10.0.2.2:4443/?sni=vpn.test.local&insecure=1"
           # first the next version (code + 1): the test updates the app over itself with it, as a real update does
           gradle --no-daemon assembleWingerDebug -PversionCode=$(( ${{ steps.v.outputs.code }} + 1 )) -PcronetVersion=${{ steps.v.outputs.cronet }} \
-            -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE
+            -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE "$VPN_LINK"
           cp app/build/outputs/apk/winger/debug/app-winger-debug.apk /tmp/next-debug.apk
           gradle --no-daemon assembleWingerDebug -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }} \
-            -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE
+            -Pabis=x86_64 "-PtestHostRules=MAP vpn.test.local 10.0.2.2" -PtestLogin=vpn.test.local/TEST-CODE "$VPN_LINK"
 
       - name: Enable KVM
         run: |
@@ -144,6 +186,7 @@ jobs:
           done
           cp /tmp/out/*.png /tmp/out/*.log /tmp/rel/ 2>/dev/null || true
           cp /tmp/t/hy.log /tmp/rel/hysteria.log 2>/dev/null || true
+          cp /tmp/t/hy-vpn.log /tmp/rel/hysteria-vpn.log 2>/dev/null || true
           cp /tmp/t/stub.log /tmp/rel/stub.log 2>/dev/null || true
           find /tmp/rel -type f -size 0 -delete  # an empty file cannot be a release asset
           STATE="${{ job.status }}"
