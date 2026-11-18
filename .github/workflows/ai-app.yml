@@ -194,7 +194,7 @@ jobs:
           # gh's own words go into the run's summary: the job's log cannot be read from outside
           for try in 1 2; do
             if R=$(gh release create "ai-app-$CODE" --repo "$GITHUB_REPOSITORY" /tmp/rel/* --prerelease --target "$GITHUB_SHA" \
-                 --title "Winger 1.0.$CODE (три приложения)" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key." 2>&1); then
+                 --title "Winger 1.0.$CODE (все сборки)" --notes "Unsigned build $CODE (tests: $STATE). The server signs it with its own key." 2>&1); then
               echo "$R"; exit 0
             fi
             echo "::warning::Publish, try $try: $(echo "$R" | tail -4 | tr '\n' ' ')"
