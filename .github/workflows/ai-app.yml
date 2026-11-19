@@ -85,14 +85,6 @@ jobs:
             python3 ../../vpn-app/tools/elf_16k.py "app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk"
           done
 
-      - name: AAB for Google Play (Winger Photo, unsigned)
-        working-directory: ai-app/android
-        run: |
-          # Winger Photo для Google Play (19.11): те же фото-экраны из photo-app/assets, но без своего обновления
-          # и без разрешений на установку — правила Play; пакет app.winger.photo, в Play уходит AAB
-          gradle --no-daemon bundlePhotoplayRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
-          ls -l app/build/outputs/bundle/photoplayRelease/
-
       - name: Test server (stand-in assistant behind a real hysteria)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -192,13 +184,6 @@ jobs:
             printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "cronet": "%s", "commit": "%s"}\n' \
               "$CODE" "$CODE" "$SHA" "${{ steps.v.outputs.cronet }}" "$GITHUB_SHA" > /tmp/rel/$n-$CODE.json
           done
-          # Winger Photo для Google Play: тоже AAB (19.11)
-          AAB=ai-app/android/app/build/outputs/bundle/photoplayRelease/app-photoplay-release.aab
-          [ -f "$AAB" ] || { echo "::error::Publish: no AAB at $AAB"; exit 1; }
-          cp "$AAB" /tmp/rel/winger-photo-play-$CODE-unsigned.aab
-          SHA=$(sha256sum /tmp/rel/winger-photo-play-$CODE-unsigned.aab | cut -d' ' -f1)
-          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "commit": "%s"}\n' \
-            "$CODE" "$CODE" "$SHA" "$GITHUB_SHA" > /tmp/rel/winger-photo-play-$CODE.json
           cp /tmp/out/*.png /tmp/out/*.log /tmp/rel/ 2>/dev/null || true
           cp /tmp/t/hy.log /tmp/rel/hysteria.log 2>/dev/null || true
           cp /tmp/t/hy-vpn.log /tmp/rel/hysteria-vpn.log 2>/dev/null || true
