@@ -81,9 +81,17 @@ jobs:
         run: |
           gradle --no-daemon assembleRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
           # phones with 16 KB memory pages (a later Android may refuse code that is not aligned to them)
-          for f in winger server study photo store; do
+          for f in winger server study photo store studyplay; do
             python3 ../../vpn-app/tools/elf_16k.py "app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk"
           done
+
+      - name: AAB for Google Play (Winger School, unsigned)
+        working-directory: ai-app/android
+        run: |
+          # Winger School для Google Play: тот же код, но без своего обновления и без разрешений на установку;
+          # игра/приложение в Play загружается как AAB, подписывает его сервер своим ключом (upload key)
+          gradle --no-daemon bundleStudyplayRelease -PversionCode=${{ steps.v.outputs.code }} -PcronetVersion=${{ steps.v.outputs.cronet }}
+          ls -l app/build/outputs/bundle/studyplayRelease/
 
       - name: Test server (stand-in assistant behind a real hysteria)
         env:
@@ -184,6 +192,13 @@ jobs:
             printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "cronet": "%s", "commit": "%s"}\n' \
               "$CODE" "$CODE" "$SHA" "${{ steps.v.outputs.cronet }}" "$GITHUB_SHA" > /tmp/rel/$n-$CODE.json
           done
+          # Winger School для Google Play: AAB (его подпишет сервер ключом загрузки, в Play уходит подписанный)
+          AAB=ai-app/android/app/build/outputs/bundle/studyplayRelease/app-studyplay-release.aab
+          [ -f "$AAB" ] || { echo "::error::Publish: no AAB at $AAB"; exit 1; }
+          cp "$AAB" /tmp/rel/winger-school-play-$CODE-unsigned.aab
+          SHA=$(sha256sum /tmp/rel/winger-school-play-$CODE-unsigned.aab | cut -d' ' -f1)
+          printf '{"code": %s, "name": "1.0.%s", "sha256": "%s", "commit": "%s"}\n' \
+            "$CODE" "$CODE" "$SHA" "$GITHUB_SHA" > /tmp/rel/winger-school-play-$CODE.json
           cp /tmp/out/*.png /tmp/out/*.log /tmp/rel/ 2>/dev/null || true
           cp /tmp/t/hy.log /tmp/rel/hysteria.log 2>/dev/null || true
           cp /tmp/t/hy-vpn.log /tmp/rel/hysteria-vpn.log 2>/dev/null || true
