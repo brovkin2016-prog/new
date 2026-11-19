@@ -175,7 +175,7 @@ jobs:
           trap 'echo "::error::Publish: $BASH_COMMAND failed"' ERR
           CODE=${{ steps.v.outputs.code }}
           mkdir -p /tmp/rel
-          for pair in winger:ai-app server:winger-server study:winger-study photo:winger-photo store:winger-store vpn:winger-vpnai; do
+          for pair in winger:ai-app server:winger-server study:winger-study photo:winger-photo store:winger-store vpn:winger-vpn; do
             f=${pair%%:*}; n=${pair##*:}
             APK=ai-app/android/app/build/outputs/apk/$f/release/app-$f-release-unsigned.apk
             [ -f "$APK" ] || { echo "::error::Publish: no release APK at $APK"; exit 1; }
