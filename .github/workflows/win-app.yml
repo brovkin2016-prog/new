@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  HY_VERSION: app/v2.13.0
+  HY_VERSION: app/v2.14.0
   TAGS: with_gvisor,with_quic,badlinkname,tfogo_checklinkname0
 
 jobs:

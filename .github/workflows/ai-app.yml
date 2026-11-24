@@ -16,7 +16,7 @@ concurrency:
 
 env:
   # the VPN inside Winger: the same pinned Hysteria client and hev-socks5-tunnel as vpn-app.yml
-  HY_VERSION: app/v2.13.0
+  HY_VERSION: app/v2.14.0
   HY_SHA_ARM64: 13d5b85cd45e11cf02847dc2b6229d6f9a20b3cb87a00b9356cf244e3bd8db84
   HY_SHA_ARMV7: 41a4c3f1f03fac5da47af33902f34dce66a3b491a59c0879a057b5899037e604
   HY_SHA_AMD64: 093c3f7b2d8cb255bd62148e2662d9054e1bc6fb69ae57ece4665016dfcd1a03
